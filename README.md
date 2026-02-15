@@ -1,0 +1,2 @@
+# NeoMAGI
+agent harness project
