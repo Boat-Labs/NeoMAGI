@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+
+from src.agent.agent import AgentLoop
+from src.agent.model_client import OpenAICompatModelClient
+from src.config.settings import get_settings
+from src.gateway.protocol import (
+    RPCError,
+    RPCErrorData,
+    RPCStreamChunk,
+    StreamChunkData,
+    parse_rpc_request,
+)
+from src.session.manager import SessionManager
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Application lifespan: initialize shared state on startup."""
+    settings = get_settings()
+
+    session_manager = SessionManager()
+    model_client = OpenAICompatModelClient(
+        api_key=settings.openai.api_key,
+        base_url=settings.openai.base_url,
+    )
+    agent_loop = AgentLoop(
+        model_client=model_client,
+        session_manager=session_manager,
+        workspace_dir=settings.workspace_dir,
+        model=settings.openai.model,
+    )
+
+    app.state.agent_loop = agent_loop
+    logger.info("NeoMAGI Gateway started on %s:%d", settings.gateway.host, settings.gateway.port)
+
+    yield
+
+
+app = FastAPI(title="NeoMAGI Gateway", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket) -> None:
+    await websocket.accept()
+    logger.info("WebSocket client connected")
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            await _handle_rpc_message(websocket, raw)
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected")
+
+
+async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
+    """Parse RPC request, invoke agent, stream response chunks back."""
+    request_id = "unknown"
+    try:
+        request = parse_rpc_request(raw)
+        request_id = request.id
+
+        if request.method != "chat.send":
+            error = RPCError(
+                id=request_id,
+                error=RPCErrorData(
+                    code="METHOD_NOT_FOUND",
+                    message=f"Unknown method: {request.method}",
+                ),
+            )
+            await websocket.send_text(error.model_dump_json())
+            return
+
+        agent_loop: AgentLoop = websocket.app.state.agent_loop
+
+        async for chunk_text in agent_loop.handle_message(
+            session_id=request.params.session_id,
+            content=request.params.content,
+        ):
+            chunk = RPCStreamChunk(
+                id=request_id,
+                data=StreamChunkData(content=chunk_text, done=False),
+            )
+            await websocket.send_text(chunk.model_dump_json())
+
+        # Send final done chunk
+        done_chunk = RPCStreamChunk(
+            id=request_id,
+            data=StreamChunkData(content="", done=True),
+        )
+        await websocket.send_text(done_chunk.model_dump_json())
+
+    except Exception:
+        logger.exception("Error handling RPC message")
+        error = RPCError(
+            id=request_id,
+            error=RPCErrorData(code="INTERNAL_ERROR", message="An internal error occurred"),
+        )
+        await websocket.send_text(error.model_dump_json())

@@ -208,3 +208,6 @@ __marimo__/
 
 .claude/worktree
 dev_prompts/
+
+# Workspace (user-specific agent files)
+workspace/
