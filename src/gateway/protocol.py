@@ -59,10 +59,14 @@ class RPCError(BaseModel):
     error: RPCErrorData
 
 
+class RPCHistoryResponseData(BaseModel):
+    messages: list[dict[str, Any]]
+
+
 class RPCHistoryResponse(BaseModel):
-    type: Literal["history"] = "history"
+    type: Literal["response"] = "response"
     id: str
-    data: list[dict[str, Any]]
+    data: RPCHistoryResponseData
 
 
 def parse_rpc_request(raw: str) -> RPCRequest:

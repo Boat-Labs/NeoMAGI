@@ -17,6 +17,7 @@ from src.gateway.protocol import (
     RPCError,
     RPCErrorData,
     RPCHistoryResponse,
+    RPCHistoryResponseData,
     RPCStreamChunk,
     RPCToolCall,
     StreamChunkData,
@@ -188,5 +189,5 @@ async def _handle_chat_history(
     session_manager: SessionManager = websocket.app.state.session_manager
 
     history = await session_manager.get_history_from_db(parsed.session_id)
-    response = RPCHistoryResponse(id=request_id, data=history)
+    response = RPCHistoryResponse(id=request_id, data=RPCHistoryResponseData(messages=history))
     await websocket.send_text(response.model_dump_json())
