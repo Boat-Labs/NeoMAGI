@@ -1,5 +1,6 @@
 import { useEffect } from "react"
 import { useChatStore } from "@/stores/chat"
+import { Toaster } from "@/components/ui/sonner"
 import { ConnectionStatus } from "./ConnectionStatus"
 import { MessageList } from "./MessageList"
 import { MessageInput } from "./MessageInput"
@@ -23,6 +24,7 @@ export function ChatPage() {
       <ConnectionStatus />
       <MessageList />
       <MessageInput />
+      <Toaster position="top-right" richColors closeButton />
     </div>
   )
 }

@@ -1,11 +1,15 @@
 import { create } from "zustand"
 import { devtools } from "zustand/middleware"
+import { toast } from "sonner"
 import { WebSocketClient } from "@/lib/websocket"
 import type {
   ConnectionStatus,
   ServerMessage,
   ChatSendParams,
 } from "@/types/rpc"
+
+// Error codes considered non-recoverable (persistent toast)
+const FATAL_ERROR_CODES = new Set(["INTERNAL_ERROR", "LLM_ERROR"])
 
 export interface ToolCall {
   callId: string
@@ -176,6 +180,11 @@ export const useChatStore = create<ChatState>()(
                 false,
                 "streamError"
               )
+              // Toast notification
+              const isFatal = FATAL_ERROR_CODES.has(message.error.code)
+              toast.error(message.error.message, {
+                duration: isFatal ? Infinity : 5000,
+              })
               break
             }
             case "tool_call": {
@@ -205,7 +214,17 @@ export const useChatStore = create<ChatState>()(
         },
 
         _setConnectionStatus: (status: ConnectionStatus) => {
+          const prev = useChatStore.getState().connectionStatus
           set({ connectionStatus: status }, false, "connectionStatus")
+
+          // Toast on connection state transitions
+          if (prev === "connected" && status === "reconnecting") {
+            toast.warning("Connection lost, reconnecting...")
+          } else if (status === "disconnected" && prev === "reconnecting") {
+            toast.error("Failed to reconnect. Please refresh the page.", {
+              duration: Infinity,
+            })
+          }
         },
       }
     },
