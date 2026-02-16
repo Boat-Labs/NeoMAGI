@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Workspace context files loaded every turn (priority order)
-WORKSPACE_CONTEXT_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "IDENTITY.md"]
+WORKSPACE_CONTEXT_FILES = ["AGENTS.md", "USER.md", "SOUL.md", "IDENTITY.md"]
 # Conditional files
 MAIN_SESSION_ONLY = ["MEMORY.md"]
 
