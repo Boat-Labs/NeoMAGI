@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import structlog
+
 if TYPE_CHECKING:
     from src.tools.registry import ToolRegistry
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 # Workspace context files loaded every turn (priority order)
 WORKSPACE_CONTEXT_FILES = ["AGENTS.md", "USER.md", "SOUL.md", "IDENTITY.md"]
@@ -69,13 +70,13 @@ class PromptBuilder:
                 for tool in tools:
                     lines.append(f"- **{tool.name}**: {tool.description}")
                 parts.append("\n".join(lines))
-                logger.debug("Injected %d tools into tooling layer", len(tools))
+                logger.debug("tooling_layer_injected", tool_count=len(tools))
 
         # TOOLS.md content (moved from workspace context layer)
         tools_md = self._read_workspace_file("TOOLS.md")
         if tools_md:
             parts.append(tools_md)
-            logger.info("Injecting TOOLS.md into tooling layer")
+            logger.info("prompt_file_injected", file="TOOLS.md", layer="tooling")
 
         return "\n\n".join(parts) if parts else ""
 
@@ -95,7 +96,7 @@ class PromptBuilder:
             content = self._read_workspace_file(filename)
             if content:
                 parts.append(content)
-                logger.info("Injecting %s into workspace context layer", filename)
+                logger.info("prompt_file_injected", file=filename, layer="workspace")
 
         # MEMORY.md only for main session
         if session_id == "main":
@@ -103,7 +104,7 @@ class PromptBuilder:
                 content = self._read_workspace_file(filename)
                 if content:
                     parts.append(content)
-                    logger.info("Injecting %s into workspace context layer", filename)
+                    logger.info("prompt_file_injected", file=filename, layer="workspace")
 
         if not parts:
             return ""
@@ -122,12 +123,12 @@ class PromptBuilder:
         """Read a file from workspace. Returns empty string if not found."""
         filepath = self._workspace_dir / filename
         if not filepath.is_file():
-            logger.debug("Workspace file not found, skipping: %s", filepath)
+            logger.debug("workspace_file_skipped", path=str(filepath))
             return ""
         try:
             content = filepath.read_text(encoding="utf-8").strip()
-            logger.debug("Loaded workspace file: %s (%d chars)", filepath, len(content))
+            logger.debug("workspace_file_loaded", path=str(filepath), chars=len(content))
             return content
         except OSError:
-            logger.exception("Failed to read workspace file: %s", filepath)
+            logger.exception("workspace_file_read_error", path=str(filepath))
             return ""

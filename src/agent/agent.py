@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
+
+import structlog
 
 from src.agent.events import AgentEvent, TextChunk, ToolCallInfo
 from src.agent.model_client import ModelClient
@@ -12,7 +13,7 @@ from src.agent.prompt_builder import PromptBuilder
 from src.session.manager import SessionManager
 from src.tools.registry import ToolRegistry
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 MAX_TOOL_ITERATIONS = 10
 
@@ -112,9 +113,10 @@ class AgentLoop:
                     )
 
                 logger.info(
-                    "Tool call iteration %d: %d tools called",
-                    iteration + 1,
-                    len(response.tool_calls),
+                    "tool_call_iteration",
+                    iteration=iteration + 1,
+                    tools_called=len(response.tool_calls),
+                    session_id=session_id,
                 )
                 continue
 
@@ -123,17 +125,11 @@ class AgentLoop:
             if text:
                 yield TextChunk(content=text)
             self._session_manager.append_message(session_id, "assistant", text)
-            logger.info(
-                "Completed response for session %s: %d chars", session_id, len(text)
-            )
+            logger.info("response_complete", session_id=session_id, chars=len(text))
             return
 
         # Safety: if we hit max iterations, yield what we have
-        logger.warning(
-            "Hit max tool iterations (%d) for session %s",
-            MAX_TOOL_ITERATIONS,
-            session_id,
-        )
+        logger.warning("max_tool_iterations", max=MAX_TOOL_ITERATIONS, session_id=session_id)
         yield TextChunk(
             content="I've reached the maximum number of tool calls. Please try again."
         )
@@ -145,7 +141,7 @@ class AgentLoop:
 
         tool = self._tool_registry.get(tool_name)
         if not tool:
-            logger.warning("Unknown tool requested: %s", tool_name)
+            logger.warning("unknown_tool", tool_name=tool_name)
             return {"error_code": "UNKNOWN_TOOL", "message": f"Unknown tool: {tool_name}"}
 
         try:
@@ -155,8 +151,8 @@ class AgentLoop:
 
         try:
             result = await tool.execute(arguments)
-            logger.info("Tool %s executed successfully", tool_name)
+            logger.info("tool_executed", tool_name=tool_name)
             return result
         except Exception:
-            logger.exception("Tool %s execution failed", tool_name)
+            logger.exception("tool_execution_failed", tool_name=tool_name)
             return {"error_code": "EXECUTION_ERROR", "message": f"Tool {tool_name} failed"}

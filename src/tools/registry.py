@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import logging
+import structlog
 
 from src.tools.base import BaseTool
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class ToolRegistry:
@@ -18,7 +18,7 @@ class ToolRegistry:
         if tool.name in self._tools:
             raise ValueError(f"Tool already registered: {tool.name}")
         self._tools[tool.name] = tool
-        logger.info("Registered tool: %s", tool.name)
+        logger.info("tool_registered", tool_name=tool.name)
 
     def get(self, name: str) -> BaseTool | None:
         """Get a tool by name. Returns None if not found."""

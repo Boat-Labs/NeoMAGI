@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import logging
 from pathlib import Path
+
+import structlog
 
 from src.tools.base import BaseTool
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class ReadFileTool(BaseTool):
@@ -53,7 +54,7 @@ class ReadFileTool(BaseTool):
 
         # Check that resolved path is still within workspace (prevents ".." and symlink escape)
         if not str(target).startswith(str(self._workspace_dir)):
-            logger.warning("Path escape attempt blocked: %s → %s", raw_path, target)
+            logger.warning("path_escape_blocked", raw_path=raw_path, resolved=str(target))
             return {
                 "error_code": "ACCESS_DENIED",
                 "message": "Path escapes workspace boundary.",
@@ -73,7 +74,7 @@ class ReadFileTool(BaseTool):
                 "size": len(content),
             }
         except OSError as e:
-            logger.exception("Failed to read file: %s", target)
+            logger.exception("file_read_error", path=str(target))
             return {
                 "error_code": "READ_ERROR",
                 "message": f"Failed to read file: {e}",

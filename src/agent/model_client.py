@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Any
 
+import structlog
 from openai import NOT_GIVEN, AsyncOpenAI
 from openai.types.chat import ChatCompletionMessage
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class ModelClient(ABC):
@@ -53,13 +53,13 @@ class OpenAICompatModelClient(ModelClient):
 
     async def chat(self, messages: list[dict[str, Any]], model: str) -> str:
         """Send messages and return the complete response content."""
-        logger.debug("chat request: model=%s, messages=%d", model, len(messages))
+        logger.debug("chat_request", model=model, message_count=len(messages))
         response = await self._client.chat.completions.create(
             model=model,
             messages=messages,
         )
         content = response.choices[0].message.content or ""
-        logger.debug("chat response: %d chars", len(content))
+        logger.debug("chat_response", chars=len(content))
         return content
 
     async def chat_stream(
@@ -70,7 +70,7 @@ class OpenAICompatModelClient(ModelClient):
         tools: list[dict] | None = None,
     ) -> AsyncIterator[str]:
         """Send messages and yield response content chunks."""
-        logger.debug("chat_stream request: model=%s, messages=%d", model, len(messages))
+        logger.debug("chat_stream_request", model=model, message_count=len(messages))
         stream = await self._client.chat.completions.create(
             model=model,
             messages=messages,
@@ -91,10 +91,10 @@ class OpenAICompatModelClient(ModelClient):
     ) -> ChatCompletionMessage:
         """Non-streaming call returning full message with potential tool_calls."""
         logger.debug(
-            "chat_completion request: model=%s, messages=%d, tools=%d",
-            model,
-            len(messages),
-            len(tools) if tools else 0,
+            "chat_completion_request",
+            model=model,
+            message_count=len(messages),
+            tool_count=len(tools) if tools else 0,
         )
         response = await self._client.chat.completions.create(
             model=model,
@@ -103,8 +103,8 @@ class OpenAICompatModelClient(ModelClient):
         )
         message = response.choices[0].message
         logger.debug(
-            "chat_completion response: content=%s, tool_calls=%d",
-            bool(message.content),
-            len(message.tool_calls) if message.tool_calls else 0,
+            "chat_completion_response",
+            has_content=bool(message.content),
+            tool_calls=len(message.tool_calls) if message.tool_calls else 0,
         )
         return message

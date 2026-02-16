@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,20 +20,19 @@ from src.gateway.protocol import (
     ToolCallData,
     parse_rpc_request,
 )
+from src.infra.logging import setup_logging
 from src.session.manager import SessionManager
 from src.tools.builtins import register_builtins
 from src.tools.registry import ToolRegistry
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: initialize shared state on startup."""
+    setup_logging(json_output=False)
+
     settings = get_settings()
 
     session_manager = SessionManager()
@@ -54,7 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     app.state.agent_loop = agent_loop
-    logger.info("NeoMAGI Gateway started on %s:%d", settings.gateway.host, settings.gateway.port)
+    logger.info("gateway_started", host=settings.gateway.host, port=settings.gateway.port)
 
     yield
 
@@ -77,13 +76,13 @@ async def health() -> dict[str, str]:
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     await websocket.accept()
-    logger.info("WebSocket client connected")
+    logger.info("ws_connected")
     try:
         while True:
             raw = await websocket.receive_text()
             await _handle_rpc_message(websocket, raw)
     except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected")
+        logger.info("ws_disconnected")
 
 
 async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
@@ -135,7 +134,7 @@ async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
         await websocket.send_text(done_chunk.model_dump_json())
 
     except Exception:
-        logger.exception("Error handling RPC message")
+        logger.exception("rpc_error", request_id=request_id)
         error = RPCError(
             id=request_id,
             error=RPCErrorData(code="INTERNAL_ERROR", message="An internal error occurred"),

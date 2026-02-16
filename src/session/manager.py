@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-logger = logging.getLogger(__name__)
+import structlog
+
+logger = structlog.get_logger()
 
 
 @dataclass
@@ -34,7 +35,7 @@ class SessionManager:
     def get_or_create(self, session_id: str) -> Session:
         """Get existing session or create a new one."""
         if session_id not in self._sessions:
-            logger.info("Creating new session: %s", session_id)
+            logger.info("session_created", session_id=session_id)
             self._sessions[session_id] = Session(id=session_id)
         return self._sessions[session_id]
 
@@ -57,7 +58,7 @@ class SessionManager:
         )
         session.messages.append(msg)
         session.updated_at = msg.timestamp
-        logger.debug("Appended %s message to session %s", role, session_id)
+        logger.debug("message_appended", role=role, session_id=session_id)
         return msg
 
     def get_history(self, session_id: str) -> list[dict[str, Any]]:
