@@ -8,16 +8,21 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.agent.agent import AgentLoop
+from src.agent.events import TextChunk, ToolCallInfo
 from src.agent.model_client import OpenAICompatModelClient
 from src.config.settings import get_settings
 from src.gateway.protocol import (
     RPCError,
     RPCErrorData,
     RPCStreamChunk,
+    RPCToolCall,
     StreamChunkData,
+    ToolCallData,
     parse_rpc_request,
 )
 from src.session.manager import SessionManager
+from src.tools.builtins import register_builtins
+from src.tools.registry import ToolRegistry
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,11 +41,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         api_key=settings.openai.api_key,
         base_url=settings.openai.base_url,
     )
+
+    tool_registry = ToolRegistry()
+    register_builtins(tool_registry, settings.workspace_dir)
+
     agent_loop = AgentLoop(
         model_client=model_client,
         session_manager=session_manager,
         workspace_dir=settings.workspace_dir,
         model=settings.openai.model,
+        tool_registry=tool_registry,
     )
 
     app.state.agent_loop = agent_loop
@@ -77,7 +87,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
 
 async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
-    """Parse RPC request, invoke agent, stream response chunks back."""
+    """Parse RPC request, invoke agent, stream response events back."""
     request_id = "unknown"
     try:
         request = parse_rpc_request(raw)
@@ -96,15 +106,26 @@ async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
 
         agent_loop: AgentLoop = websocket.app.state.agent_loop
 
-        async for chunk_text in agent_loop.handle_message(
+        async for event in agent_loop.handle_message(
             session_id=request.params.session_id,
             content=request.params.content,
         ):
-            chunk = RPCStreamChunk(
-                id=request_id,
-                data=StreamChunkData(content=chunk_text, done=False),
-            )
-            await websocket.send_text(chunk.model_dump_json())
+            if isinstance(event, TextChunk):
+                chunk = RPCStreamChunk(
+                    id=request_id,
+                    data=StreamChunkData(content=event.content, done=False),
+                )
+                await websocket.send_text(chunk.model_dump_json())
+            elif isinstance(event, ToolCallInfo):
+                tool_msg = RPCToolCall(
+                    id=request_id,
+                    data=ToolCallData(
+                        tool_name=event.tool_name,
+                        arguments=event.arguments,
+                        call_id=event.call_id,
+                    ),
+                )
+                await websocket.send_text(tool_msg.model_dump_json())
 
         # Send final done chunk
         done_chunk = RPCStreamChunk(
