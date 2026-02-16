@@ -1,14 +1,17 @@
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { useChatStore } from "@/stores/chat"
 import { MessageBubble } from "./MessageBubble"
 import { useAutoScroll } from "@/hooks/useAutoScroll"
 
 export function MessageList() {
   const messages = useChatStore((state) => state.messages)
-  const bottomRef = useAutoScroll(messages)
+  const { containerRef, bottomRef, handleScroll } = useAutoScroll(messages)
 
   return (
-    <ScrollArea className="flex-1">
+    <div
+      ref={containerRef}
+      onScroll={handleScroll}
+      className="flex-1 overflow-y-auto"
+    >
       <div className="space-y-4 p-4">
         {messages.length === 0 ? (
           <div className="flex h-full items-center justify-center pt-32 text-muted-foreground">
@@ -21,6 +24,6 @@ export function MessageList() {
         )}
         <div ref={bottomRef} />
       </div>
-    </ScrollArea>
+    </div>
   )
 }
