@@ -1,5 +1,6 @@
 import { useEffect } from "react"
 import { useChatStore } from "@/stores/chat"
+import { Toaster } from "@/components/ui/sonner"
 import { ConnectionStatus } from "./ConnectionStatus"
 import { MessageList } from "./MessageList"
 import { MessageInput } from "./MessageInput"
@@ -17,12 +18,13 @@ export function ChatPage() {
 
   return (
     <div className="mx-auto flex h-screen max-w-3xl flex-col border-x bg-background">
-      <header className="flex items-center justify-between border-b px-4 py-3">
+      <header className="border-b px-4 py-3">
         <h1 className="text-lg font-semibold">NeoMAGI</h1>
-        <ConnectionStatus />
       </header>
+      <ConnectionStatus />
       <MessageList />
       <MessageInput />
+      <Toaster position="top-right" richColors closeButton />
     </div>
   )
 }

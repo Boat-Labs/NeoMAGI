@@ -1,11 +1,16 @@
 import { create } from "zustand"
 import { devtools } from "zustand/middleware"
+import { toast } from "sonner"
 import { WebSocketClient } from "@/lib/websocket"
 import type {
   ConnectionStatus,
   ServerMessage,
   ChatSendParams,
+  HistoryMessage,
 } from "@/types/rpc"
+
+// Error codes considered non-recoverable (persistent toast)
+const FATAL_ERROR_CODES = new Set(["INTERNAL_ERROR", "LLM_ERROR"])
 
 export interface ToolCall {
   callId: string
@@ -32,6 +37,7 @@ interface ChatState {
   connect: (url: string) => void
   disconnect: () => void
   sendMessage: (content: string) => void
+  loadHistory: () => void
 
   // Internal — called by WebSocket callbacks
   _handleServerMessage: (message: ServerMessage) => void
@@ -42,6 +48,7 @@ export const useChatStore = create<ChatState>()(
   devtools(
     (set, _get) => {
       let wsClient: WebSocketClient | null = null
+      let pendingHistoryId: string | null = null
 
       return {
         messages: [],
@@ -62,6 +69,10 @@ export const useChatStore = create<ChatState>()(
               const store = useChatStore.getState()
               store._setConnectionStatus(status)
             },
+            onConnected: () => {
+              const store = useChatStore.getState()
+              store.loadHistory()
+            },
           })
           wsClient.connect()
         },
@@ -69,6 +80,18 @@ export const useChatStore = create<ChatState>()(
         disconnect: () => {
           wsClient?.close()
           wsClient = null
+        },
+
+        loadHistory: () => {
+          if (!wsClient?.isConnected) return
+          const requestId = crypto.randomUUID()
+          pendingHistoryId = requestId
+          wsClient.send({
+            type: "request",
+            id: requestId,
+            method: "chat.history",
+            params: { session_id: "main" },
+          })
         },
 
         sendMessage: (content: string) => {
@@ -176,6 +199,11 @@ export const useChatStore = create<ChatState>()(
                 false,
                 "streamError"
               )
+              // Toast notification
+              const isFatal = FATAL_ERROR_CODES.has(message.error.code)
+              toast.error(message.error.message, {
+                duration: isFatal ? Infinity : 5000,
+              })
               break
             }
             case "tool_call": {
@@ -201,11 +229,56 @@ export const useChatStore = create<ChatState>()(
               )
               break
             }
+            case "response": {
+              // Handle history response
+              if (message.id !== pendingHistoryId) break
+              pendingHistoryId = null
+
+              const historyMessages: ChatMessage[] = message.data.messages.map(
+                (hm: HistoryMessage) => ({
+                  id: crypto.randomUUID(),
+                  role: hm.role,
+                  content: hm.content,
+                  timestamp: hm.timestamp
+                    ? new Date(hm.timestamp).getTime()
+                    : Date.now(),
+                  status: "complete" as const,
+                })
+              )
+
+              set(
+                (state) => {
+                  // Deduplicate: skip history messages that match existing by role+content
+                  const existingKeys = new Set(
+                    state.messages.map((m) => `${m.role}:${m.content}`)
+                  )
+                  const newMessages = historyMessages.filter(
+                    (m) => !existingKeys.has(`${m.role}:${m.content}`)
+                  )
+                  if (newMessages.length === 0) return state
+                  // Prepend history before current messages
+                  return { messages: [...newMessages, ...state.messages] }
+                },
+                false,
+                "loadHistory"
+              )
+              break
+            }
           }
         },
 
         _setConnectionStatus: (status: ConnectionStatus) => {
+          const prev = useChatStore.getState().connectionStatus
           set({ connectionStatus: status }, false, "connectionStatus")
+
+          // Toast on connection state transitions
+          if (prev === "connected" && status === "reconnecting") {
+            toast.warning("Connection lost, reconnecting...")
+          } else if (status === "disconnected" && prev === "reconnecting") {
+            toast.error("Failed to reconnect. Please refresh the page.", {
+              duration: Infinity,
+            })
+          }
         },
       }
     },
