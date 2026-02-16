@@ -6,10 +6,13 @@ Or via justfile: just init-workspace
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+import structlog
+
+from src.infra.logging import setup_logging
+
+logger = structlog.get_logger()
 
 WORKSPACE_DIR = Path("workspace")
 MEMORY_DIR = WORKSPACE_DIR / "memory"
@@ -71,17 +74,17 @@ def init_workspace() -> None:
     """Create workspace directory and template files. Idempotent: existing files not overwritten."""
     WORKSPACE_DIR.mkdir(exist_ok=True)
     MEMORY_DIR.mkdir(exist_ok=True)
-    logger.info("Ensured workspace directories: %s, %s", WORKSPACE_DIR, MEMORY_DIR)
+    logger.info("workspace_dirs_ensured", workspace=str(WORKSPACE_DIR), memory=str(MEMORY_DIR))
 
     for filename, content in TEMPLATES.items():
         filepath = WORKSPACE_DIR / filename
         if filepath.exists():
-            logger.info("Skipping existing file: %s", filepath)
+            logger.info("workspace_file_skipped", file=str(filepath))
         else:
             filepath.write_text(content, encoding="utf-8")
-            logger.info("Created template: %s", filepath)
+            logger.info("workspace_template_created", file=str(filepath))
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+    setup_logging(json_output=False)
     init_workspace()

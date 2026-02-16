@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 import uuid
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -11,11 +12,17 @@ class ChatSendParams(BaseModel):
     session_id: str = "main"
 
 
+class ChatHistoryParams(BaseModel):
+    session_id: str = "main"
+
+
 class RPCRequest(BaseModel):
+    """Generic RPC request. method determines which params to expect."""
+
     type: Literal["request"] = "request"
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    method: Literal["chat.send"] = "chat.send"
-    params: ChatSendParams
+    method: str
+    params: dict[str, Any] = Field(default_factory=dict)
 
 
 class StreamChunkData(BaseModel):
@@ -52,6 +59,17 @@ class RPCError(BaseModel):
     error: RPCErrorData
 
 
+class RPCHistoryResponseData(BaseModel):
+    messages: list[dict[str, Any]]
+
+
+class RPCHistoryResponse(BaseModel):
+    type: Literal["response"] = "response"
+    id: str
+    data: RPCHistoryResponseData
+
+
 def parse_rpc_request(raw: str) -> RPCRequest:
     """Parse a raw JSON string into an RPCRequest. Raises ValidationError on invalid input."""
-    return RPCRequest.model_validate_json(raw)
+    data = json.loads(raw)
+    return RPCRequest.model_validate(data)
