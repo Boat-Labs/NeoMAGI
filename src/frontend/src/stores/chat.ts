@@ -7,6 +7,13 @@ import type {
   ChatSendParams,
 } from "@/types/rpc"
 
+export interface ToolCall {
+  callId: string
+  toolName: string
+  arguments: Record<string, unknown>
+  status: "running" | "complete"
+}
+
 export interface ChatMessage {
   id: string
   role: "user" | "assistant"
@@ -14,6 +21,7 @@ export interface ChatMessage {
   timestamp: number
   status: "sending" | "streaming" | "complete" | "error"
   error?: string
+  toolCalls?: ToolCall[]
 }
 
 interface ChatState {
@@ -113,7 +121,14 @@ export const useChatStore = create<ChatState>()(
                     isStreaming: false,
                     messages: state.messages.map((m) =>
                       m.id === message.id
-                        ? { ...m, status: "complete" as const }
+                        ? {
+                            ...m,
+                            status: "complete" as const,
+                            toolCalls: m.toolCalls?.map((tc) => ({
+                              ...tc,
+                              status: "complete" as const,
+                            })),
+                          }
                         : m
                     ),
                   }),
@@ -125,7 +140,16 @@ export const useChatStore = create<ChatState>()(
                   (state) => ({
                     messages: state.messages.map((m) =>
                       m.id === message.id
-                        ? { ...m, content: m.content + message.data.content }
+                        ? {
+                            ...m,
+                            content: m.content + message.data.content,
+                            // Mark running tool calls as complete when new text arrives
+                            toolCalls: m.toolCalls?.map((tc) =>
+                              tc.status === "running"
+                                ? { ...tc, status: "complete" as const }
+                                : tc
+                            ),
+                          }
                         : m
                     ),
                   }),
@@ -155,8 +179,26 @@ export const useChatStore = create<ChatState>()(
               break
             }
             case "tool_call": {
-              // M1.2 scope — log and ignore
-              console.log("[Chat] tool_call received (not implemented):", message)
+              const newToolCall: ToolCall = {
+                callId: message.data.call_id,
+                toolName: message.data.tool_name,
+                arguments: message.data.arguments,
+                status: "running",
+              }
+              set(
+                (state) => ({
+                  messages: state.messages.map((m) =>
+                    m.id === message.id
+                      ? {
+                          ...m,
+                          toolCalls: [...(m.toolCalls ?? []), newToolCall],
+                        }
+                      : m
+                  ),
+                }),
+                false,
+                "toolCall"
+              )
               break
             }
           }
