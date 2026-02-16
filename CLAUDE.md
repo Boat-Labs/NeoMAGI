@@ -55,12 +55,12 @@ neomagi/
 | Package manager | uv | `pyproject.toml` 管理依赖 |
 | Command runner | just | 统一开发命令入口 |
 | Gateway | FastAPI + WebSocket | uvicorn 运行 |
-| LLM SDK | `openai` + `google-genai` | OpenAI 为默认运行路径，Gemini 用于迁移验证 |
+| LLM SDK | `openai` | 统一模型调用入口；OpenAI 默认，Gemini/Ollama 走 OpenAI-compatible 接口 |
 | Telegram | `python-telegram-bot` | async 版 |
 | Database | PostgreSQL 16 + `pgvector` + ParadeDB `pg_search` | 已有实例运行在 A6000 服务器 |
 | Full-text search | ParadeDB `pg_search` (BM25) | 支持 ICU + Jieba 组合分词策略 |
 | Vector search | pgvector | 替代 OpenClaw 的 sqlite-vec |
-| Config | TOML + Pydantic v2 | 替代 OpenClaw 的 JSON5 + Zod |
+| Config | `pydantic-settings` + `.env` | 启动期统一校验，失败即 fail fast |
 | Embedding | 本地模型 via Ollama (优先) → OpenAI fallback |
 | Container | Podman (不是 Docker) | |
 | Testing | pytest + pytest-asyncio | |
@@ -68,6 +68,7 @@ neomagi/
 
 **重要：不要使用 SQLite。本项目所有持久化都走 PostgreSQL 16。**
 **重要：数据库连接信息读取本地 `.env`，模板维护在 `.env_template`。**
+**重要：运行时配置优先级为 环境变量 > `.env` > 默认值；`config/neomagi.toml` 仅用于非敏感默认配置。**
 **重要：容器相关命令一律使用 podman，不是 docker。**
 
 ## 编码规范

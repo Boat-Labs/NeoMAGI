@@ -20,7 +20,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 数据库连接信息读取本地 `.env`，共享模板使用 `.env_template`（不提交真实凭据）。
 - Python 包管理器使用 `uv`。
 - 命令入口统一使用 `just`。
-- 模型路线：OpenAI 为默认运行路径，Gemini 用于迁移验证。
+- 模型路线：v1 统一使用 `openai` SDK；OpenAI 为默认运行路径，Gemini/Ollama 通过 OpenAI-compatible 接口接入，Anthropic 不纳入 v1 主兼容范围。
 - 渠道路线：WebChat first，Telegram second。
 
 ## Build Order (MVP)
@@ -30,7 +30,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 4. Memory（先 BM25，再 Hybrid Search）
 5. Tool Registry（exec/read/write/edit/memory_search）
 6. One Channel Adapter（先单平台打通）
-7. Config（JSON5 + schema 验证 + 热加载）
+7. Config（`pydantic-settings` + `.env` / `.env_template`）
 
 ## Memory Rules
 - 记忆基于文件，不依赖模型参数记忆。
