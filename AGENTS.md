@@ -16,7 +16,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 没有实质性取舍时，不新增决策文件，避免噪音。
 
 ## Baseline Decisions (Must Follow)
-- 数据库统一使用 PostgreSQL（`pgvector`），不使用 SQLite。
+- 数据库统一使用 PostgreSQL 16（`pgvector` + ParadeDB `pg_search`），不使用 SQLite。
 - 数据库连接信息读取本地 `.env`，共享模板使用 `.env_template`（不提交真实凭据）。
 - Python 包管理器使用 `uv`。
 - 命令入口统一使用 `just`。

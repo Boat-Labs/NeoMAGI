@@ -10,6 +10,14 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0004 | Use uv as Python package manager | accepted | 2026-02-16 | `decisions/0004-use-uv-as-python-package-manager.md` |
 | 0005 | Use just as command runner | accepted | 2026-02-16 | `decisions/0005-use-just-as-command-runner.md` |
 | 0006 | Use PostgreSQL (pgvector) instead of SQLite | accepted | 2026-02-16 | `decisions/0006-use-postgresql-pgvector-instead-of-sqlite.md` |
+| 0007 | Frontend baseline: React + TypeScript + Vite | accepted | 2026-02-16 | `decisions/0007-frontend-baseline-react-typescript-vite.md` |
+| 0008 | Frontend UI system: Tailwind + shadcn/ui | accepted | 2026-02-16 | `decisions/0008-frontend-ui-system-tailwind-shadcn.md` |
+| 0009 | Frontend state management: zustand | accepted | 2026-02-16 | `decisions/0009-frontend-state-management-zustand.md` |
+| 0010 | Realtime transport: native WebSocket API | accepted | 2026-02-16 | `decisions/0010-realtime-transport-native-websocket-api.md` |
+| 0011 | Frontend package manager: pnpm (with just entrypoints) | accepted | 2026-02-16 | `decisions/0011-frontend-package-manager-pnpm-with-just-entrypoints.md` |
+| 0012 | Backend framework: FastAPI + Uvicorn | accepted | 2026-02-16 | `decisions/0012-backend-framework-fastapi-uvicorn.md` |
+| 0013 | Backend configuration: pydantic-settings | accepted | 2026-02-16 | `decisions/0013-backend-configuration-pydantic-settings.md` |
+| 0014 | ParadeDB tokenization strategy: ICU primary + Jieba fallback | accepted | 2026-02-16 | `decisions/0014-paradedb-tokenization-icu-primary-jieba-fallback.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。

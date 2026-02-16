@@ -57,8 +57,8 @@ neomagi/
 | Gateway | FastAPI + WebSocket | uvicorn 运行 |
 | LLM SDK | `openai` + `google-genai` | OpenAI 为默认运行路径，Gemini 用于迁移验证 |
 | Telegram | `python-telegram-bot` | async 版 |
-| Database | PostgreSQL 16 + pgvector | 已有实例运行在 A6000 服务器 |
-| Full-text search | PostgreSQL `pg_trgm` + `tsvector` | 替代 OpenClaw 的 SQLite FTS5 |
+| Database | PostgreSQL 16 + `pgvector` + ParadeDB `pg_search` | 已有实例运行在 A6000 服务器 |
+| Full-text search | ParadeDB `pg_search` (BM25) | 支持 ICU + Jieba 组合分词策略 |
 | Vector search | pgvector | 替代 OpenClaw 的 sqlite-vec |
 | Config | TOML + Pydantic v2 | 替代 OpenClaw 的 JSON5 + Zod |
 | Embedding | 本地模型 via Ollama (优先) → OpenAI fallback |
@@ -66,7 +66,7 @@ neomagi/
 | Testing | pytest + pytest-asyncio | |
 | Linting | ruff | |
 
-**重要：不要使用 SQLite。本项目所有持久化都走 PostgreSQL。**
+**重要：不要使用 SQLite。本项目所有持久化都走 PostgreSQL 16。**
 **重要：数据库连接信息读取本地 `.env`，模板维护在 `.env_template`。**
 **重要：容器相关命令一律使用 podman，不是 docker。**
 
@@ -100,14 +100,14 @@ neomagi/
 - Commit message 格式：`<type>(<scope>): <description>`
   - type: feat, fix, refactor, docs, test, chore
   - scope: gateway, agent, memory, session, tools, channel, config
-  - 例: `feat(memory): implement BM25 search with pg_trgm`
+  - 例: `feat(memory): implement BM25 search with pg_search`
 - 一个 commit 做一件事，不要混合不相关的变更
 
 ## 核心设计决策
 
 ### 与 OpenClaw 的关键差异
 1. **Python 而非 TypeScript** — 所有架构概念从 OpenClaw 借鉴，但实现完全重写
-2. **PostgreSQL 而非 SQLite** — memory index、session transcript、config state 全部存 PG
+2. **PostgreSQL 16 + 扩展而非 SQLite** — memory index、session transcript、config state 全部存 PG，检索扩展使用 `pgvector` + ParadeDB `pg_search`
 3. **TOML + Pydantic 而非 JSON5 + Zod** — Python 生态的声明式配置验证
 4. **Podman 而非 Docker** — sandbox 执行环境使用 podman
 
@@ -123,8 +123,8 @@ neomagi/
 
 ### Memory 实现路径（渐进式）
 - **v0.1**: File-based only — MEMORY.md + daily notes 直接注入 context，无搜索
-- **v0.2**: BM25 search — PostgreSQL tsvector/pg_trgm 全文检索
-- **v0.3**: Hybrid search — 加入 pgvector 做 vector search，weighted score fusion
+- **v0.2**: BM25 search — ParadeDB `pg_search` 全文检索（ICU 主召回 + Jieba 补充）
+- **v0.3**: Hybrid search — `pg_search` + `pgvector` 融合排序（weighted score fusion）
 
 ### Session 策略
 - DM 消息 → 合并到 `main` session

@@ -4,12 +4,12 @@
 - Date: 2026-02-16
 
 ## 选了什么
-- 项目数据库统一使用 PostgreSQL（含 `pgvector` 扩展）。
+- 项目数据库统一使用 PostgreSQL 16（含 `pgvector` 与 ParadeDB `pg_search` 扩展）。
 - 明确不使用 SQLite 作为持久化数据库方案。
 
 ## 为什么
 - PostgreSQL 更适合承载会话、记忆检索和后续扩展的统一数据面。
-- `pgvector` 能直接支撑向量检索能力，避免早期数据层分裂。
+- `pgvector` 能直接支撑向量检索能力，ParadeDB `pg_search` 能承接 BM25 全文检索需求，避免早期数据层分裂。
 - 与当前项目文档方向一致，可降低后续迁移与重构成本。
 
 ## 放弃了什么
@@ -27,4 +27,4 @@
   - `DATABASE_PASSWORD`
   - `DATABASE_NAME`
   - `DATABASE_SCHEMA`
-- 后续涉及数据库的文档与实现默认按 PostgreSQL（pgvector）路线推进。
+- 后续涉及数据库的文档与实现默认按 PostgreSQL 16（`pgvector` + ParadeDB `pg_search`）路线推进。
