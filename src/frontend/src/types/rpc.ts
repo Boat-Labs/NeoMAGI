@@ -46,6 +46,20 @@ export interface ToolCallMessage {
   }
 }
 
-export type ServerMessage = StreamChunkMessage | ErrorMessage | ToolCallMessage
+export interface HistoryMessage {
+  role: "user" | "assistant"
+  content: string
+  timestamp?: string
+}
+
+export interface ResponseMessage {
+  type: "response"
+  id: RequestId
+  data: {
+    messages: HistoryMessage[]
+  }
+}
+
+export type ServerMessage = StreamChunkMessage | ErrorMessage | ToolCallMessage | ResponseMessage
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting"

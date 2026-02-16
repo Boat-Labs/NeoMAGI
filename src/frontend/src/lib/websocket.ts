@@ -4,20 +4,25 @@ export interface WebSocketClientOptions {
   url: string
   onMessage: (message: ServerMessage) => void
   onStatusChange: (status: ConnectionStatus) => void
+  onConnected?: () => void
   reconnect?: boolean
-  reconnectIntervalMs?: number
+  baseReconnectMs?: number
+  maxReconnectMs?: number
   maxReconnectAttempts?: number
 }
 
 const DEFAULTS = {
   reconnect: true,
-  reconnectIntervalMs: 3000,
-  maxReconnectAttempts: 10,
+  baseReconnectMs: 1000,
+  maxReconnectMs: 16000,
+  maxReconnectAttempts: Infinity,
 } as const
 
 export class WebSocketClient {
   private ws: WebSocket | null = null
-  private options: Required<WebSocketClientOptions>
+  private options: Required<Omit<WebSocketClientOptions, "onConnected">> & {
+    onConnected?: () => void
+  }
   private reconnectAttempts = 0
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private intentionalClose = false
@@ -46,6 +51,7 @@ export class WebSocketClient {
       console.log("[WS] Connected to", this.options.url)
       this.reconnectAttempts = 0
       this.options.onStatusChange("connected")
+      this.options.onConnected?.()
     }
 
     this.ws.onmessage = (event: MessageEvent) => {
@@ -53,7 +59,12 @@ export class WebSocketClient {
         const data: unknown = JSON.parse(event.data as string)
         if (typeof data === "object" && data !== null && "type" in data) {
           const msg = data as ServerMessage
-          if (msg.type === "stream_chunk" || msg.type === "error" || msg.type === "tool_call") {
+          if (
+            msg.type === "stream_chunk" ||
+            msg.type === "error" ||
+            msg.type === "tool_call" ||
+            msg.type === "response"
+          ) {
             this.options.onMessage(msg)
             return
           }
@@ -75,7 +86,6 @@ export class WebSocketClient {
 
     this.ws.onerror = (event: Event) => {
       console.error("[WS] Error:", event)
-      // onclose will fire after onerror, so reconnect logic is handled there
     }
   }
 
@@ -118,13 +128,22 @@ export class WebSocketClient {
 
     this.reconnectAttempts++
     this.options.onStatusChange("reconnecting")
+
+    // Exponential backoff with jitter: base * 2^(n-1) + random jitter
+    const exponentialDelay = Math.min(
+      this.options.baseReconnectMs * Math.pow(2, this.reconnectAttempts - 1),
+      this.options.maxReconnectMs
+    )
+    const jitter = Math.random() * 500
+    const delay = Math.round(exponentialDelay + jitter)
+
     console.log(
-      `[WS] Reconnecting (${this.reconnectAttempts}/${this.options.maxReconnectAttempts}) in ${this.options.reconnectIntervalMs}ms`
+      `[WS] Reconnecting (attempt ${this.reconnectAttempts}) in ${delay}ms`
     )
 
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       this.connect()
-    }, this.options.reconnectIntervalMs)
+    }, delay)
   }
 }
