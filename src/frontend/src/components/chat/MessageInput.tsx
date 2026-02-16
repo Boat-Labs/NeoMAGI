@@ -1,9 +1,13 @@
-import { useState, useCallback, type KeyboardEvent } from "react"
+import { useState, useCallback, useRef, useEffect, type KeyboardEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { useChatStore } from "@/stores/chat"
 
+const MAX_ROWS = 6
+const LINE_HEIGHT = 24 // px approximate
+
 export function MessageInput() {
   const [input, setInput] = useState("")
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sendMessage = useChatStore((state) => state.sendMessage)
   const isStreaming = useChatStore((state) => state.isStreaming)
   const connectionStatus = useChatStore((state) => state.connectionStatus)
@@ -11,11 +15,23 @@ export function MessageInput() {
   const isDisabled = isStreaming || connectionStatus !== "connected"
   const canSend = !isDisabled && input.trim().length > 0
 
+  const resizeTextarea = useCallback(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = "auto"
+    el.style.height = `${Math.min(el.scrollHeight, MAX_ROWS * LINE_HEIGHT)}px`
+  }, [])
+
   const handleSend = useCallback(() => {
     const trimmed = input.trim()
     if (!trimmed || isDisabled) return
     sendMessage(trimmed)
     setInput("")
+    // Reset textarea height after send
+    const el = textareaRef.current
+    if (el) {
+      el.style.height = "auto"
+    }
   }, [input, isDisabled, sendMessage])
 
   const handleKeyDown = useCallback(
@@ -28,9 +44,22 @@ export function MessageInput() {
     [handleSend]
   )
 
+  // Auto-resize on input change
+  useEffect(() => {
+    resizeTextarea()
+  }, [input, resizeTextarea])
+
+  // Auto-focus when streaming ends or connection established
+  useEffect(() => {
+    if (!isDisabled) {
+      textareaRef.current?.focus()
+    }
+  }, [isDisabled])
+
   return (
     <div className="flex items-end gap-2 border-t p-4">
       <textarea
+        ref={textareaRef}
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
