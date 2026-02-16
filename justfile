@@ -1,5 +1,7 @@
 # NeoMAGI development commands
 
+frontend_dir := "src/frontend"
+
 # Run linter checks
 lint:
     uv run ruff check src/
@@ -16,3 +18,27 @@ dev:
 # Initialize workspace with template files (idempotent)
 init-workspace:
     uv run python -m src.infra.init_workspace
+
+# Start frontend dev server
+dev-frontend:
+    cd {{frontend_dir}} && pnpm dev
+
+# Build frontend for production
+build-frontend:
+    cd {{frontend_dir}} && pnpm build
+
+# Type-check frontend (no emit)
+check-frontend:
+    cd {{frontend_dir}} && pnpm tsc -b --noEmit
+
+# Install frontend dependencies
+install-frontend:
+    cd {{frontend_dir}} && pnpm install
+
+# Add a shadcn/ui component (usage: just add-component button)
+add-component name:
+    cd {{frontend_dir}} && pnpm dlx shadcn@latest add {{name}}
+
+# Preview production build
+preview-frontend:
+    cd {{frontend_dir}} && pnpm preview

@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -211,3 +211,7 @@ dev_prompts/
 
 # Workspace (user-specific agent files)
 workspace/
+
+# Frontend
+node_modules/
+*.local
