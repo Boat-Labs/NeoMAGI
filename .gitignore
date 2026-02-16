@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -208,3 +208,7 @@ __marimo__/
 
 .claude/worktree
 dev_prompts/
+
+# Frontend
+node_modules/
+*.local
