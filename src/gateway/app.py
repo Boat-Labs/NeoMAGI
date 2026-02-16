@@ -20,6 +20,7 @@ from src.gateway.protocol import (
     ToolCallData,
     parse_rpc_request,
 )
+from src.infra.errors import NeoMAGIError
 from src.infra.logging import setup_logging
 from src.session.manager import SessionManager
 from src.tools.builtins import register_builtins
@@ -133,8 +134,15 @@ async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
         )
         await websocket.send_text(done_chunk.model_dump_json())
 
+    except NeoMAGIError as e:
+        logger.warning("request_error", code=e.code, error=str(e), request_id=request_id)
+        error = RPCError(
+            id=request_id,
+            error=RPCErrorData(code=e.code, message=str(e)),
+        )
+        await websocket.send_text(error.model_dump_json())
     except Exception:
-        logger.exception("rpc_error", request_id=request_id)
+        logger.exception("unhandled_error", request_id=request_id)
         error = RPCError(
             id=request_id,
             error=RPCErrorData(code="INTERNAL_ERROR", message="An internal error occurred"),
