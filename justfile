@@ -13,6 +13,6 @@ format:
 dev:
     uv run uvicorn src.gateway.app:app --reload --host 0.0.0.0 --port 19789
 
-# Initialize workspace with template files
+# Initialize workspace with template files (idempotent)
 init-workspace:
-    @echo "TODO: implement workspace initialization"
+    uv run python -m src.infra.init_workspace
