@@ -19,7 +19,7 @@ neomagi/
 ├── pyproject.toml            # 依赖管理 (uv)
 ├── .env                      # 环境变量和API Key
 ├── .env_template             # 环境变量模板（不含真实凭据）
-├── decisions/                # 决策追踪（只读参考，不要修改）
+├── decisions/                # 决策追踪（ADR-lite，关键变更需更新）
 ├── design_docs/              # 设计文档（只读参考，不要修改）
 │   ├── architecture.md       # 整体架构
 │   ├── memory.md             # 记忆系统设计
@@ -53,6 +53,7 @@ neomagi/
 |---|---|---|
 | Language | Python 3.12+ | 全面使用 async/await |
 | Package manager | uv | `pyproject.toml` 管理依赖 |
+| Frontend package manager | pnpm | WebChat 前端依赖管理 |
 | Command runner | just | 统一开发命令入口 |
 | Gateway | FastAPI + WebSocket | uvicorn 运行 |
 | LLM SDK | `openai` | 统一模型调用入口；OpenAI 默认，Gemini/Ollama 走 OpenAI-compatible 接口 |
@@ -103,6 +104,10 @@ neomagi/
   - scope: gateway, agent, memory, session, tools, channel, config
   - 例: `feat(memory): implement BM25 search with pg_search`
 - 一个 commit 做一件事，不要混合不相关的变更
+- Agent Teams 必须使用 git worktree 隔离并行开发
+- 每个 teammate 在独立 worktree 中工作，禁止多人共享同一 working directory
+- PM 负责在 spawn 前创建 worktree，在阶段完成后合并和清理
+- 分支命名：feat/<role>-<milestone>-<owner-or-task>（如 feat/backend-m1.1-agent-loop, feat/frontend-m1.1-webchat-ui）
 
 ## 核心设计决策
 

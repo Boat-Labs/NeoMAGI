@@ -19,6 +19,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 数据库统一使用 PostgreSQL 16（`pgvector` + ParadeDB `pg_search`），不使用 SQLite。
 - 数据库连接信息读取本地 `.env`，共享模板使用 `.env_template`（不提交真实凭据）。
 - Python 包管理器使用 `uv`。
+- Frontend 包管理器使用 `pnpm`。
 - 命令入口统一使用 `just`。
 - 模型路线：v1 统一使用 `openai` SDK；OpenAI 为默认运行路径，Gemini/Ollama 通过 OpenAI-compatible 接口接入，Anthropic 不纳入 v1 主兼容范围。
 - 渠道路线：WebChat first，Telegram second。
@@ -64,3 +65,14 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 回复简洁、技术导向、可复制执行。
 - 明确假设和限制；不确定时先查证再回答。
 - 优先中文，保留必要英文技术术语。
+
+### Git
+- Commit message 格式：`<type>(<scope>): <description>`
+  - type: feat, fix, refactor, docs, test, chore
+  - scope: gateway, agent, memory, session, tools, channel, config
+  - 例: `feat(memory): implement BM25 search with pg_search`
+- 一个 commit 做一件事，不要混合不相关的变更
+- Agent Teams 必须使用 git worktree 隔离并行开发
+- 每个 teammate 在独立 worktree 中工作，禁止多人共享同一 working directory
+- PM 负责在 spawn 前创建 worktree，在阶段完成后合并和清理
+- 分支命名：feat/<role>-<milestone>-<owner-or-task>（如 feat/backend-m1.1-agent-loop, feat/frontend-m1.1-webchat-ui）
