@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from src.constants import DB_SCHEMA
 
 # Load .env once at module import — all BaseSettings subclasses will see the env vars
 load_dotenv()
@@ -20,7 +22,18 @@ class DatabaseSettings(BaseSettings):
     user: str = "postgres"
     password: str = ""
     name: str = "neomagi"
-    schema_: str = Field("public", validation_alias="DATABASE_SCHEMA")
+    schema_: str = Field(DB_SCHEMA, validation_alias="DATABASE_SCHEMA")
+
+    @field_validator("schema_")
+    @classmethod
+    def _validate_schema(cls, v: str) -> str:
+        if v != DB_SCHEMA:
+            msg = (
+                f"DATABASE_SCHEMA must be '{DB_SCHEMA}' "
+                f"(got '{v}'). See ADR 0017."
+            )
+            raise ValueError(msg)
+        return v
 
 
 class OpenAISettings(BaseSettings):
@@ -40,6 +53,10 @@ class GatewaySettings(BaseSettings):
 
     host: str = "0.0.0.0"
     port: int = 19789
+    session_claim_ttl_seconds: int = Field(
+        300, gt=0, le=3600,
+        validation_alias="GATEWAY_SESSION_CLAIM_TTL_SECONDS",
+    )
 
 
 class Settings(BaseSettings):

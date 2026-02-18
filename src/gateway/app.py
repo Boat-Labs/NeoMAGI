@@ -41,16 +41,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     settings = get_settings()
 
-    # Database setup (optional — falls back to in-memory if unavailable)
-    db_session_factory = None
-    engine = None
-    try:
-        engine = await create_db_engine(settings.database)
-        await ensure_schema(engine, settings.database.schema_)
-        db_session_factory = make_session_factory(engine)
-        logger.info("db_connected")
-    except Exception:
-        logger.warning("db_unavailable", msg="Running in memory-only mode")
+    # [Decision 0020] DB is mandatory; startup fails if DB/schema unavailable.
+    engine = await create_db_engine(settings.database)
+    await ensure_schema(engine, settings.database.schema_)
+    db_session_factory = make_session_factory(engine)
+    logger.info("db_connected")
 
     session_manager = SessionManager(db_session_factory=db_session_factory)
     model_client = OpenAICompatModelClient(
@@ -76,9 +71,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     # Cleanup
-    if engine is not None:
-        await engine.dispose()
-        logger.info("db_engine_disposed")
+    await engine.dispose()
+    logger.info("db_engine_disposed")
 
 
 app = FastAPI(title="NeoMAGI Gateway", version="0.1.0", lifespan=lifespan)
@@ -148,37 +142,70 @@ async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
 async def _handle_chat_send(
     websocket: WebSocket, request_id: str, params: dict
 ) -> None:
-    """Handle chat.send: invoke agent loop and stream events."""
+    """Handle chat.send: claim session, invoke agent loop, stream events, release."""
     parsed = ChatSendParams.model_validate(params)
-    agent_loop: AgentLoop = websocket.app.state.agent_loop
+    session_manager: SessionManager = websocket.app.state.session_manager
+    settings = get_settings()
 
-    async for event in agent_loop.handle_message(
-        session_id=parsed.session_id,
-        content=parsed.content,
-    ):
-        if isinstance(event, TextChunk):
-            chunk = RPCStreamChunk(
-                id=request_id,
-                data=StreamChunkData(content=event.content, done=False),
-            )
-            await websocket.send_text(chunk.model_dump_json())
-        elif isinstance(event, ToolCallInfo):
-            tool_msg = RPCToolCall(
-                id=request_id,
-                data=ToolCallData(
-                    tool_name=event.tool_name,
-                    arguments=event.arguments,
-                    call_id=event.call_id,
-                ),
-            )
-            await websocket.send_text(tool_msg.model_dump_json())
-
-    # Send final done chunk
-    done_chunk = RPCStreamChunk(
-        id=request_id,
-        data=StreamChunkData(content="", done=True),
+    # [Decision 0021] Session-level serialization: try-claim before processing
+    lock_token = await session_manager.try_claim_session(
+        parsed.session_id,
+        ttl_seconds=settings.gateway.session_claim_ttl_seconds,
     )
-    await websocket.send_text(done_chunk.model_dump_json())
+    if lock_token is None:
+        error = RPCError(
+            id=request_id,
+            error=RPCErrorData(
+                code="SESSION_BUSY",
+                message="Session is being processed by another request. Please try again.",
+            ),
+        )
+        await websocket.send_text(error.model_dump_json())
+        return
+
+    try:
+        # [Decision 0021] Force-reload session from DB before building prompt.
+        # Ensures cross-worker handoff has complete history, not stale local cache.
+        await session_manager.load_session_from_db(parsed.session_id, force=True)
+
+        agent_loop: AgentLoop = websocket.app.state.agent_loop
+        async for event in agent_loop.handle_message(
+            session_id=parsed.session_id,
+            content=parsed.content,
+        ):
+            if isinstance(event, TextChunk):
+                chunk = RPCStreamChunk(
+                    id=request_id,
+                    data=StreamChunkData(content=event.content, done=False),
+                )
+                await websocket.send_text(chunk.model_dump_json())
+            elif isinstance(event, ToolCallInfo):
+                tool_msg = RPCToolCall(
+                    id=request_id,
+                    data=ToolCallData(
+                        tool_name=event.tool_name,
+                        arguments=event.arguments,
+                        call_id=event.call_id,
+                    ),
+                )
+                await websocket.send_text(tool_msg.model_dump_json())
+
+        done_chunk = RPCStreamChunk(
+            id=request_id,
+            data=StreamChunkData(content="", done=True),
+        )
+        await websocket.send_text(done_chunk.model_dump_json())
+    finally:
+        try:
+            await session_manager.release_session(parsed.session_id, lock_token)
+        except Exception:
+            # [Decision 0022] release is best-effort; TTL recovers stale locks.
+            # Do NOT re-raise — avoid sending INTERNAL_ERROR after done=true.
+            logger.exception(
+                "session_release_failed",
+                session_id=parsed.session_id,
+                msg="Lock will be recovered by TTL expiry",
+            )
 
 
 async def _handle_chat_history(
@@ -188,6 +215,7 @@ async def _handle_chat_history(
     parsed = ChatHistoryParams.model_validate(params)
     session_manager: SessionManager = websocket.app.state.session_manager
 
-    history = await session_manager.get_history_from_db(parsed.session_id)
+    # [Decision 0019] chat.history only returns display-safe messages (user/assistant).
+    history = await session_manager.get_history_for_display(parsed.session_id)
     response = RPCHistoryResponse(id=request_id, data=RPCHistoryResponseData(messages=history))
     await websocket.send_text(response.model_dump_json())

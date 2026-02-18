@@ -42,6 +42,13 @@ class ReadFileTool(BaseTool):
     async def execute(self, arguments: dict) -> dict:
         raw_path = arguments.get("path", "")
 
+        # Reject non-string or empty path
+        if not isinstance(raw_path, str) or not raw_path:
+            return {
+                "error_code": "INVALID_ARGS",
+                "message": "path must be a non-empty string.",
+            }
+
         # Reject absolute paths
         if raw_path.startswith("/"):
             return {
@@ -53,7 +60,7 @@ class ReadFileTool(BaseTool):
         target = (self._workspace_dir / raw_path).resolve()
 
         # Check that resolved path is still within workspace (prevents ".." and symlink escape)
-        if not str(target).startswith(str(self._workspace_dir)):
+        if not target.is_relative_to(self._workspace_dir):
             logger.warning("path_escape_blocked", raw_path=raw_path, resolved=str(target))
             return {
                 "error_code": "ACCESS_DENIED",

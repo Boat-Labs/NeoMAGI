@@ -57,6 +57,13 @@ class ModelClient(ABC):
         ...
 
 
+def _first_choice(response, *, context: str = ""):
+    """Extract first choice from response, raising LLMError if empty."""
+    if not response.choices:
+        raise LLMError(f"Empty choices from provider ({context})")
+    return response.choices[0]
+
+
 class OpenAICompatModelClient(ModelClient):
     """Model client using the OpenAI SDK.
 
@@ -119,7 +126,7 @@ class OpenAICompatModelClient(ModelClient):
             lambda: self._client.chat.completions.create(model=model, messages=messages),
             context="chat",
         )
-        content = response.choices[0].message.content or ""
+        content = _first_choice(response, context="chat").message.content or ""
         logger.debug("chat_response", chars=len(content))
         return content
 
@@ -142,6 +149,8 @@ class OpenAICompatModelClient(ModelClient):
             context="chat_stream",
         )
         async for chunk in stream:
+            if not chunk.choices:
+                continue
             delta = chunk.choices[0].delta
             if delta.content:
                 yield delta.content
@@ -168,7 +177,7 @@ class OpenAICompatModelClient(ModelClient):
             ),
             context="chat_completion",
         )
-        message = response.choices[0].message
+        message = _first_choice(response, context="chat_completion").message
         logger.debug(
             "chat_completion_response",
             has_content=bool(message.content),

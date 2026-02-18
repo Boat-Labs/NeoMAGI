@@ -207,7 +207,7 @@ marimo/_lsp/
 __marimo__/
 
 .claude/worktree
-dev_prompts/
+dev_docs/prompts/
 
 # Workspace (user-specific agent files)
 workspace/
@@ -215,3 +215,5 @@ workspace/
 # Frontend
 node_modules/
 *.local
+
+
