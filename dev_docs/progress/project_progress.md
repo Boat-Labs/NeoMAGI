@@ -62,3 +62,19 @@
 - Evidence: commit 1e48eed (F1) + 5360c80 (F5) + 3078a69 (F6a-1) + 00b0bfb (F6a-2), 43 tests passed, ruff clean, dev_docs/plans/m1.2_audit-fixes_2026-02-18.md
 - Next: M1.3 评审
 - Risk: F4 流式回退为已知体验回退，已排入 M1.4 跟踪
+
+## 2026-02-18 (local) | M1.3
+- Status: in_progress
+- Done: M1.3 评审修复实现完成，2 轮 review 通过，PR 已推送
+- Detail:
+  - R1(P1): DB-level atomic seq allocation (`INSERT ON CONFLICT RETURNING`)；persist-first-then-memory 模式防 ghost messages；session lease lock (UUID lock_token + configurable TTL)；SESSION_BUSY RPC 错误；force reload for cross-worker handoff
+  - R2(P1): 移除 `allow_memory_fallback` escape hatch，DB 为硬依赖 (Decision 0020)
+  - R5(P2): 前端全量替换替代 dedup merge；`isHistoryLoading` 状态 + 3 路清理；`sendMessage` 返回 boolean 控制输入框
+  - R6(P3): 21 个新测试 — persistence(5) + serialization(9) + history contract(3) + config validation(4)
+  - Review round 1 fixes: chat.history 强制 DB reload (P1)；迁移加约束前去重 (P1)；AsyncMock 协程警告消除 (P3)
+  - Review round 2 fixes: ruff lint 全绿 (E501/I001/F401/F841)
+- Evidence: branch `feat/session-m1.3-review-fixes` (6 commits: d4f090e..1734f0d), 64 tests passed, 0 warnings, ruff clean, pnpm build 通过
+- Plan: dev_docs/plans/m1.3_review-fixes_2026-02-18.md
+- Decisions: ADR 0019 (chat.history semantics) + 0020 (DB hard dep) + 0021 (multi-worker ordering) + 0022 (soft session serialization)
+- Next: PR merge → M1.3 验收 → M1.4
+- Risk: P2 follow-up 待 M1.4 前置完成 — conftest.py PG fixture + 3 条集成测试 (claim/release, seq 原子分配, force reload) + CI PostgreSQL job
