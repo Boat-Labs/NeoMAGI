@@ -113,13 +113,21 @@ async def _integration_cleanup(request):
     Uses request.getfixturevalue() for lazy resolution — non-integration
     tests never trigger the db_session_factory → db_engine → _pg_container
     fixture chain.
+
+    Sync integration tests (e.g. WebSocket tests using TestClient) manage
+    their own cleanup via app lifespan, so we skip if the fixture can't
+    be resolved from within a sync context.
     """
     yield
 
     if not any(m.name == "integration" for m in request.node.iter_markers()):
         return
 
-    factory = request.getfixturevalue("db_session_factory")
+    try:
+        factory = request.getfixturevalue("db_session_factory")
+    except Exception:
+        return  # sync tests manage their own cleanup
+
     async with factory() as db_session:
         await db_session.execute(
             text(f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions CASCADE")
