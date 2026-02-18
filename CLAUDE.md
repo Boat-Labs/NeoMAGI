@@ -172,14 +172,14 @@ neomagi/
 
 ## Plan 持久化
 
-- `docs/plans/` 仅保存用户已审批版本，不保存未审批草稿。
+- `dev_docs/plans/` 仅保存用户已审批版本，不保存未审批草稿。
 - 命名：`{milestone}_{目标简述}_{YYYY-MM-DD}.md`。
 - 计划变更并再次获批时，新增 `_v2`、`_v3` 后缀文件，不覆盖历史版本。
 - 这是项目的持久记忆，后续 PM 重启时首先读取最新 plan。
 
 ## Agent 工作日志
 
-- 每个 agent 在完成当前 milestone 所有任务后，将技能调用汇总写入 `docs/logs/{milestone}_{YYYY-MM-DD}/{role}.md`。
+- 每个 agent 在完成当前 milestone 所有任务后，将技能调用汇总写入 `dev_docs/logs/{milestone}_{YYYY-MM-DD}/{role}.md`。
 - 必须包含：技能/工具名称、调用次数、典型场景、效果评估。
 - 可选包含：关键决策、遇到的问题、对后续阶段的建议。
 - PM 负责在阶段结束时检查所有 agent 都已提交日志。
