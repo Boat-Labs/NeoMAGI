@@ -100,6 +100,14 @@ export const useChatStore = create<ChatState>()(
             method: "chat.history",
             params: { session_id: "main" },
           })
+
+          // Timeout guard: prevent indefinite pending state
+          setTimeout(() => {
+            if (pendingHistoryId === requestId) {
+              clearHistoryGuard()
+              toast.warning("History loading timed out. You can continue chatting.")
+            }
+          }, 10_000)
         },
 
         sendMessage: (content: string): boolean => {

@@ -129,6 +129,43 @@ describe("chat store guard recovery", () => {
     expect(useChatStore.getState().connectionStatus).toBe("reconnecting")
   })
 
+  it("clears history guard on timeout", () => {
+    vi.useFakeTimers()
+    try {
+      connectStore()
+      expect(useChatStore.getState().isHistoryLoading).toBe(true)
+
+      // Advance time past the 10s timeout
+      vi.advanceTimersByTime(10_000)
+
+      expect(useChatStore.getState().isHistoryLoading).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("timeout does not clear guard if already resolved", () => {
+    vi.useFakeTimers()
+    try {
+      connectStore()
+      const requestId = getLastHistoryRequestId()
+
+      // Resolve the history before timeout fires
+      useChatStore.getState()._handleServerMessage({
+        type: "response",
+        id: requestId,
+        data: { messages: [] },
+      })
+      expect(useChatStore.getState().isHistoryLoading).toBe(false)
+
+      // Advance time — timeout fires but should be no-op
+      vi.advanceTimersByTime(10_000)
+      expect(useChatStore.getState().isHistoryLoading).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("sendMessage blocked during history loading", () => {
     connectStore()
     expect(useChatStore.getState().isHistoryLoading).toBe(true)
