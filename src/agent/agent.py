@@ -18,7 +18,7 @@ logger = structlog.get_logger()
 MAX_TOOL_ITERATIONS = 10
 
 
-def _safe_parse_args(raw: str) -> tuple[dict, str | None]:
+def _safe_parse_args(raw: str | None) -> tuple[dict, str | None]:
     """Parse JSON tool call arguments. Returns (dict, error_message | None).
 
     Enforces dict type to match protocol.ToolCallData.arguments.
@@ -114,7 +114,7 @@ class AgentLoop:
                             "tool_call_args_parse_failed",
                             tool_name=tc.function.name,
                             error=parse_err,
-                            raw_args=tc.function.arguments[:200],
+                            raw_args=str(tc.function.arguments)[:200],
                         )
                     yield ToolCallInfo(
                         tool_name=tc.function.name,
