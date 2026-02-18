@@ -33,10 +33,11 @@ interface ChatState {
   messages: ChatMessage[]
   connectionStatus: ConnectionStatus
   isStreaming: boolean
+  isHistoryLoading: boolean
 
   connect: (url: string) => void
   disconnect: () => void
-  sendMessage: (content: string) => void
+  sendMessage: (content: string) => boolean
   loadHistory: () => void
 
   // Internal — called by WebSocket callbacks
@@ -50,10 +51,16 @@ export const useChatStore = create<ChatState>()(
       let wsClient: WebSocketClient | null = null
       let pendingHistoryId: string | null = null
 
+      function clearHistoryGuard() {
+        pendingHistoryId = null
+        set({ isHistoryLoading: false }, false, "historyLoaded")
+      }
+
       return {
         messages: [],
         connectionStatus: "disconnected" as ConnectionStatus,
         isStreaming: false,
+        isHistoryLoading: false,
 
         connect: (url: string) => {
           if (wsClient?.isConnected) return
@@ -86,6 +93,7 @@ export const useChatStore = create<ChatState>()(
           if (!wsClient?.isConnected) return
           const requestId = crypto.randomUUID()
           pendingHistoryId = requestId
+          set({ isHistoryLoading: true }, false, "historyLoading")
           wsClient.send({
             type: "request",
             id: requestId,
@@ -94,8 +102,9 @@ export const useChatStore = create<ChatState>()(
           })
         },
 
-        sendMessage: (content: string) => {
-          if (!wsClient?.isConnected) return
+        sendMessage: (content: string): boolean => {
+          if (!wsClient?.isConnected) return false
+          if (pendingHistoryId !== null) return false
 
           const requestId = crypto.randomUUID()
 
@@ -133,6 +142,7 @@ export const useChatStore = create<ChatState>()(
               session_id: "main",
             } satisfies ChatSendParams,
           })
+          return true
         },
 
         _handleServerMessage: (message: ServerMessage) => {
@@ -183,6 +193,9 @@ export const useChatStore = create<ChatState>()(
               break
             }
             case "error": {
+              if (message.id === pendingHistoryId) {
+                clearHistoryGuard()
+              }
               set(
                 (state) => ({
                   isStreaming: false,
@@ -232,7 +245,7 @@ export const useChatStore = create<ChatState>()(
             case "response": {
               // Handle history response
               if (message.id !== pendingHistoryId) break
-              pendingHistoryId = null
+              clearHistoryGuard()
 
               const historyMessages: ChatMessage[] = message.data.messages.map(
                 (hm: HistoryMessage) => ({
@@ -246,19 +259,9 @@ export const useChatStore = create<ChatState>()(
                 })
               )
 
+              // [Decision 0021] Full replacement — no dedup merge
               set(
-                (state) => {
-                  // Deduplicate: skip history messages that match existing by role+content
-                  const existingKeys = new Set(
-                    state.messages.map((m) => `${m.role}:${m.content}`)
-                  )
-                  const newMessages = historyMessages.filter(
-                    (m) => !existingKeys.has(`${m.role}:${m.content}`)
-                  )
-                  if (newMessages.length === 0) return state
-                  // Prepend history before current messages
-                  return { messages: [...newMessages, ...state.messages] }
-                },
+                { messages: historyMessages, isStreaming: false },
                 false,
                 "loadHistory"
               )
@@ -268,6 +271,11 @@ export const useChatStore = create<ChatState>()(
         },
 
         _setConnectionStatus: (status: ConnectionStatus) => {
+          if (status === "reconnecting" || status === "disconnected") {
+            if (pendingHistoryId !== null) {
+              clearHistoryGuard()
+            }
+          }
           const prev = useChatStore.getState().connectionStatus
           set({ connectionStatus: status }, false, "connectionStatus")
 

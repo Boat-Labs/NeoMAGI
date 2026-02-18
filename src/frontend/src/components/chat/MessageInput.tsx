@@ -11,8 +11,9 @@ export function MessageInput() {
   const sendMessage = useChatStore((state) => state.sendMessage)
   const isStreaming = useChatStore((state) => state.isStreaming)
   const connectionStatus = useChatStore((state) => state.connectionStatus)
+  const isHistoryLoading = useChatStore((state) => state.isHistoryLoading)
 
-  const isDisabled = isStreaming || connectionStatus !== "connected"
+  const isDisabled = isStreaming || connectionStatus !== "connected" || isHistoryLoading
   const canSend = !isDisabled && input.trim().length > 0
 
   const resizeTextarea = useCallback(() => {
@@ -25,12 +26,11 @@ export function MessageInput() {
   const handleSend = useCallback(() => {
     const trimmed = input.trim()
     if (!trimmed || isDisabled) return
-    sendMessage(trimmed)
-    setInput("")
-    // Reset textarea height after send
-    const el = textareaRef.current
-    if (el) {
-      el.style.height = "auto"
+    const sent = sendMessage(trimmed)
+    if (sent) {
+      setInput("")
+      const el = textareaRef.current
+      if (el) el.style.height = "auto"
     }
   }, [input, isDisabled, sendMessage])
 
@@ -63,7 +63,13 @@ export function MessageInput() {
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={isDisabled ? "Waiting for connection..." : "Type a message..."}
+        placeholder={
+          connectionStatus !== "connected"
+            ? "Connecting..."
+            : isHistoryLoading
+              ? "Loading history..."
+              : "Type a message..."
+        }
         rows={1}
         disabled={isDisabled}
         className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
