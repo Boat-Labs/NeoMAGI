@@ -66,22 +66,37 @@
 - 失败场景有清晰恢复路径。
 - 核心任务在重复执行时表现稳定、结果一致性可接受。
 
-### M1.4：审计修复收尾（对应 P1）[v2 新增]
+### M1.4：审计修复收尾 + 测试基础设施（对应 P1）[v2 新增, v3 扩展]
 **目标**
-- 修复 M1.2 审计延期项，恢复流式输出体验，补齐集成测试覆盖。
+- 修复 M1.2/M1.3 审计延期项，恢复流式输出体验，补齐集成测试与 CI 基础设施。
 
 **来源**
 - M1.2 审计计划 (`dev_docs/plans/m1.2_audit-fixes_2026-02-18.md`) 中延期的 F4 + F6b。
+- M1.3 评审修复 (`dev_docs/plans/m1.3_review-fixes_2026-02-18.md`) 中延期的测试基础设施与可靠性增强。
 
 **范围**
 | 编号 | 内容 | owner | due |
 |------|------|-------|-----|
 | F4 | token 级流式输出恢复：agent loop 流式聚合 tool_calls delta，final answer 逐 token 流式 | backend | 2026-03-04 |
 | F6b | 集成测试补齐：tool loop 前端状态流转测试 + WebSocket 集成测试 | backend | 2026-03-04 |
+| T1 | PG 集成测试基础设施：conftest.py 容器化 PG fixture + 至少 3 条真实 DB 集成测试（claim/release、seq 原子分配、force reload） | backend | 2026-03-04 |
+| T2 | CI 落地：GitHub Actions workflow + PostgreSQL service container，执行 migration + 全量测试 | backend | 2026-03-04 |
+| T3 | 前端 vitest 基础设施：守卫恢复测试自动化（替代当前手动验收） | frontend | 2026-03-04 |
+| R1 | history 请求超时兜底：防止 pending 状态无限挂起 | backend | 2026-03-04 |
+| R2 | 锁 fencing 或 heartbeat 续租：`_persist_message` 加 token 校验或后台续租，增强串行化语义 | backend | 2026-03-04 |
+
+**可选延后项（M1.4+，按需纳入）**
+| 内容 | 说明 |
+|------|------|
+| 稳定 message_id 贯穿前后端 | 增量同步基础，需 client_message_id + server_message_id |
+| SESSION_BUSY 前端自动重试 | 当前仅 toast 提示，用户手动重发 |
 
 **验收标准**
 - final answer 恢复逐 token 流式输出，首字延迟回到 M1.1 水平。
 - tool loop + 前端状态流转有端到端测试覆盖。
+- PG 集成测试覆盖 claim/release、seq 原子分配、force reload 三条核心路径。
+- CI workflow green：migration + pytest + ruff 在 GitHub Actions 上通过。
+- 前端守卫恢复测试在 vitest 中自动化执行。
 - 全量测试通过，ruff clean。
 
 ---
@@ -171,3 +186,4 @@
 |------|------|------|----------|
 | v1 | 2026-02-16 | 初始版本 | — |
 | v2 | 2026-02-18 | 新增 M1.4（审计修复收尾：F4 流式恢复 + F6b 集成测试） | ADR 0018, `dev_docs/plans/m1.2_audit-fixes_2026-02-18.md` |
+| v3 | 2026-02-18 | 扩展 M1.4 范围：纳入 M1.3 延期项（PG 集成测试、CI、vitest、history 超时、锁 fencing） | M1.3 review findings, `dev_docs/plans/m1.3_review-fixes_2026-02-18.md` |
