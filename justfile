@@ -42,3 +42,19 @@ add-component name:
 # Preview production build
 preview-frontend:
     cd {{frontend_dir}} && pnpm preview
+
+# Run all tests
+test:
+    uv run pytest tests/ -v
+
+# Run integration tests only (requires PostgreSQL or testcontainers)
+test-integration:
+    uv run pytest tests/ -v -m integration
+
+# Run unit tests only (no DB required)
+test-unit:
+    uv run pytest tests/ -v -m "not integration"
+
+# Run frontend tests
+test-frontend:
+    cd {{frontend_dir}} && pnpm test -- --run
