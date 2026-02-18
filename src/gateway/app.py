@@ -41,6 +41,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     settings = get_settings()
 
+    # [Decision 0020] DB is the default runtime dependency; startup should fail fast on DB/schema issues.
+    # Temporary escape hatch: memory fallback is only enabled when DATABASE_ALLOW_MEMORY_FALLBACK=true.
+    # TODO(decision-0020): remove fallback branch after transition.
     # Database setup (optional — falls back to in-memory if allowed)
     db_session_factory = None
     engine = None
@@ -198,6 +201,7 @@ async def _handle_chat_history(
     parsed = ChatHistoryParams.model_validate(params)
     session_manager: SessionManager = websocket.app.state.session_manager
 
+    # [Decision 0019] chat.history only returns display-safe messages (user/assistant).
     history = await session_manager.get_history_for_display(parsed.session_id)
     response = RPCHistoryResponse(id=request_id, data=RPCHistoryResponseData(messages=history))
     await websocket.send_text(response.model_dump_json())

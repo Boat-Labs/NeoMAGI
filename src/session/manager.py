@@ -150,6 +150,7 @@ class SessionManager:
 
     async def get_history_for_display(self, session_id: str) -> list[dict[str, Any]]:
         """Get filtered history for chat UI. Only user + assistant with content."""
+        # [Decision 0019] chat.history is a UI history API, not an internal context export API.
         await self.load_session_from_db(session_id)
         session = self._sessions.get(session_id)
         if session is None:
@@ -211,6 +212,7 @@ def _messages_to_history_format(messages: list[Message]) -> list[dict[str, Any]]
     Only includes user + assistant messages with non-empty content.
     Strips tool_calls/tool_call_id to avoid leaking internal state.
     """
+    # [Decision 0019] Keep display schema minimal and stable: user/assistant + content (+ timestamp).
     result: list[dict[str, Any]] = []
     for m in messages:
         if m.role not in ("user", "assistant"):

@@ -22,6 +22,8 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0016 | Model SDK strategy: OpenAI SDK unified interface for v1 | accepted | 2026-02-16 | `decisions/0016-model-sdk-strategy-openai-sdk-unified-v1.md` |
 | 0017 | Database schema default: neomagi (DB_SCHEMA) | accepted | 2026-02-17 | `decisions/0017-database-schema-default-neomagi.md` |
 | 0018 | Roadmap versioning with progress tracking | accepted | 2026-02-18 | `decisions/0018-roadmap-versioning-with-progress-tracking.md` |
+| 0019 | chat.history display semantics boundary | accepted | 2026-02-18 | `decisions/0019-chat-history-display-semantics-boundary.md` |
+| 0020 | Database hard dependency with fail-fast startup | accepted | 2026-02-18 | `decisions/0020-database-hard-dependency-fail-fast.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。
