@@ -23,9 +23,6 @@ class DatabaseSettings(BaseSettings):
     password: str = ""
     name: str = "neomagi"
     schema_: str = Field(DB_SCHEMA, validation_alias="DATABASE_SCHEMA")
-    allow_memory_fallback: bool = Field(
-        False, validation_alias="DATABASE_ALLOW_MEMORY_FALLBACK"
-    )
 
     @field_validator("schema_")
     @classmethod
@@ -56,6 +53,10 @@ class GatewaySettings(BaseSettings):
 
     host: str = "0.0.0.0"
     port: int = 19789
+    session_claim_ttl_seconds: int = Field(
+        300, gt=0, le=3600,
+        validation_alias="GATEWAY_SESSION_CLAIM_TTL_SECONDS",
+    )
 
 
 class Settings(BaseSettings):

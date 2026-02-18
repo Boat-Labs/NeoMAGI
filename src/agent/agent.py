@@ -62,7 +62,7 @@ class AgentLoop:
         producing a final text response.
         """
         # 1. Append user message
-        self._session_manager.append_message(session_id, "user", content)
+        await self._session_manager.append_message(session_id, "user", content)
 
         # 2. Build system prompt
         system_prompt = self._prompt_builder.build(session_id)
@@ -99,7 +99,7 @@ class AgentLoop:
                     }
                     for tc in response.tool_calls
                 ]
-                self._session_manager.append_message(
+                await self._session_manager.append_message(
                     session_id,
                     "assistant",
                     response.content or "",
@@ -127,7 +127,7 @@ class AgentLoop:
                     )
 
                     # Store tool result
-                    self._session_manager.append_message(
+                    await self._session_manager.append_message(
                         session_id,
                         "tool",
                         json.dumps(result),
@@ -146,7 +146,7 @@ class AgentLoop:
             text = response.content or ""
             if text:
                 yield TextChunk(content=text)
-            self._session_manager.append_message(session_id, "assistant", text)
+            await self._session_manager.append_message(session_id, "assistant", text)
             logger.info("response_complete", session_id=session_id, chars=len(text))
             return
 
