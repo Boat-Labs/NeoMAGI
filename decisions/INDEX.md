@@ -24,6 +24,8 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0018 | Roadmap versioning with progress tracking | accepted | 2026-02-18 | `decisions/0018-roadmap-versioning-with-progress-tracking.md` |
 | 0019 | chat.history display semantics boundary | accepted | 2026-02-18 | `decisions/0019-chat-history-display-semantics-boundary.md` |
 | 0020 | Database hard dependency with fail-fast startup | accepted | 2026-02-18 | `decisions/0020-database-hard-dependency-fail-fast.md` |
+| 0021 | Multi-worker session ordering and no-silent-drop persistence semantics | accepted | 2026-02-18 | `decisions/0021-multi-worker-session-ordering-and-no-silent-drop.md` |
+| 0022 | M1.3 soft session serialization via lock token and TTL | accepted | 2026-02-18 | `decisions/0022-m1.3-soft-session-serialization-token-ttl.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。
