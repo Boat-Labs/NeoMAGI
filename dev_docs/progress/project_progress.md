@@ -55,3 +55,10 @@
 - Evidence: 28 tests passed (uv run pytest tests/test_config_schema.py tests/test_agent_tool_parse.py tests/test_session_history_filter.py -v), commit 2bd614a
 - Next: M1.2 评审
 - Risk: 无
+
+## 2026-02-18 23:50 (local) | M1.2
+- Status: done
+- Done: M1.2 深审完成，6 项发现（F1-F6）；F2/F3 已在 M1.1 修复周期中解决；本轮修复 F1(P1) read_file `startswith` 边界绕过（换 `is_relative_to` + 类型校验）、F5(P2) model_client `choices[]` 空防护（`_first_choice` + stream 跳过）、F6a(P3) 补齐安全测试（10 组 read_file + 5 组 model_client）；F4(P2) 流式回退和 F6b(P3) 集成测试延至 M1.4（owner=backend, due=2026-03-04）
+- Evidence: commit 1e48eed (F1) + 5360c80 (F5) + 3078a69 (F6a-1) + 00b0bfb (F6a-2), 43 tests passed, ruff clean, dev_docs/plans/m1.2_audit-fixes_2026-02-18.md
+- Next: M1.3 评审
+- Risk: F4 流式回退为已知体验回退，已排入 M1.4 跟踪
