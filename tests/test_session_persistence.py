@@ -22,7 +22,7 @@ class TestConcurrentSessionCreation:
         # Patch _persist_message to track calls without real DB
         call_count = 0
 
-        async def fake_persist(session_id, msg):
+        async def fake_persist(session_id, msg, **kwargs):
             nonlocal call_count
             call_count += 1
 
@@ -43,7 +43,7 @@ class TestCrossWorkerSeqUniqueness:
         manager = SessionManager(db_session_factory=mock_db)
         seqs: list[int] = []
 
-        async def tracking_persist(session_id, msg):
+        async def tracking_persist(session_id, msg, **kwargs):
             seqs.append(len(seqs))  # Simulate sequential allocation
 
         with patch.object(manager, "_persist_message", side_effect=tracking_persist):

@@ -126,18 +126,13 @@ class TestTTLExpiryReclaim:
         await manager_b.release_session("s1", token_b)
 
 
-class TestTakeoverPrerequisite:
-    """Prerequisite for fencing: B can take over after A's TTL expires.
+class TestFencingInterception:
+    """R2: stale worker write is rejected after lock takeover.
 
-    The actual fencing assertion (stale A write → SessionFencingError) will
-    be added when R2 lands. This test locks down the takeover mechanism that
-    fencing depends on.
+    A claims with short TTL → B takes over after expiry → A's write with
+    stale token raises SessionFencingError.
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Stale write should raise SessionFencingError after R2 (lock fencing)",
-    )
     async def test_stale_worker_rejected_after_takeover(self, db_session_factory) -> None:
         from src.infra.errors import SessionFencingError
 

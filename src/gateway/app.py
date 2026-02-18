@@ -172,6 +172,7 @@ async def _handle_chat_send(
         async for event in agent_loop.handle_message(
             session_id=parsed.session_id,
             content=parsed.content,
+            lock_token=lock_token,
         ):
             if isinstance(event, TextChunk):
                 chunk = RPCStreamChunk(

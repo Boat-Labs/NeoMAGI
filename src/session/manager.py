@@ -117,12 +117,17 @@ class SessionManager:
         *,
         tool_calls: list[dict[str, Any]] | None = None,
         tool_call_id: str | None = None,
+        lock_token: str | None = None,
     ) -> Message:
         """Append a message to a session: persist to DB first, then write memory.
 
         [Decision 0021] Persist is synchronous — failure propagates to caller,
         no silent drop. Memory is only updated after DB confirms success,
         preventing ghost messages in local cache on failure.
+
+        When lock_token is provided, _persist_message atomically verifies the
+        token matches the current session lock holder. Raises SessionFencingError
+        on mismatch (stale worker after TTL takeover).
         """
         session = self.get_or_create(session_id)
         msg = Message(
@@ -133,7 +138,7 @@ class SessionManager:
         )
 
         # [Decision 0021] Persist first — no memory pollution on failure
-        await self._persist_message(session_id, msg)
+        await self._persist_message(session_id, msg, lock_token=lock_token)
 
         # Only reach here if persist succeeded
         session.messages.append(msg)
@@ -234,31 +239,53 @@ class SessionManager:
             return []
         return _messages_to_history_format(session.messages)
 
-    async def _persist_message(self, session_id: str, msg: Message) -> None:
-        """Persist a single message to DB with atomic seq allocation.
+    async def _persist_message(
+        self, session_id: str, msg: Message, *, lock_token: str | None = None
+    ) -> None:
+        """Persist a single message to DB with atomic seq allocation and fencing.
 
         [Decision 0021] Raises on failure — no silent drop.
         SQLAlchemy async context manager auto-rollbacks on exception.
+
+        When lock_token is provided, the ON CONFLICT WHERE clause atomically
+        verifies the token matches the current session holder. Single statement,
+        no race window between lock check and seq allocation.
         """
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+        from src.infra.errors import SessionFencingError
+
         async with self._db() as db_session:
             # Atomic: upsert session + allocate seq (row lock serializes per-session)
-            stmt = (
-                pg_insert(SessionRecord)
-                .values(id=session_id, next_seq=1)
-                .on_conflict_do_update(
+            update_set = {"next_seq": SessionRecord.next_seq + 1}
+            stmt = pg_insert(SessionRecord).values(id=session_id, next_seq=1)
+
+            if lock_token is not None:
+                # Fencing: only update if lock_token matches or is NULL.
+                # WHERE false → no update → RETURNING empty → fencing failed.
+                stmt = stmt.on_conflict_do_update(
                     index_elements=["id"],
-                    set_={"next_seq": SessionRecord.next_seq + 1},
+                    set_=update_set,
+                    where=or_(
+                        SessionRecord.lock_token == lock_token,
+                        SessionRecord.lock_token.is_(None),
+                    ),
                 )
-                .returning(
-                    # New session: next_seq 0→1, returns 1-1=0
-                    # Existing session: next_seq N→N+1, returns N+1-1=N
-                    SessionRecord.next_seq - 1
+            else:
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["id"],
+                    set_=update_set,
                 )
-            )
+
+            stmt = stmt.returning(SessionRecord.next_seq - 1)
             result = await db_session.execute(stmt)
-            seq = result.scalar_one()
+            seq = result.scalar_one_or_none()
+
+            if seq is None:
+                raise SessionFencingError(
+                    f"Lock token mismatch for session {session_id}: "
+                    "another worker has taken over"
+                )
 
             db_session.add(
                 MessageRecord(
