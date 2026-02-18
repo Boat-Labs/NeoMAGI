@@ -18,6 +18,20 @@ logger = structlog.get_logger()
 MAX_TOOL_ITERATIONS = 10
 
 
+def _safe_parse_args(raw: str) -> tuple[dict, str | None]:
+    """Parse JSON tool call arguments. Returns (dict, error_message | None).
+
+    Enforces dict type to match protocol.ToolCallData.arguments.
+    """
+    try:
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, TypeError) as e:
+        return {}, f"JSON parse error: {e}"
+    if not isinstance(parsed, dict):
+        return {}, f"Expected dict, got {type(parsed).__name__}"
+    return parsed, None
+
+
 class AgentLoop:
     """Core agent loop with tool calling support.
 
@@ -94,9 +108,17 @@ class AgentLoop:
 
                 # Execute each tool call
                 for tc in response.tool_calls:
+                    parsed_args, parse_err = _safe_parse_args(tc.function.arguments)
+                    if parse_err:
+                        logger.warning(
+                            "tool_call_args_parse_failed",
+                            tool_name=tc.function.name,
+                            error=parse_err,
+                            raw_args=tc.function.arguments[:200],
+                        )
                     yield ToolCallInfo(
                         tool_name=tc.function.name,
-                        arguments=json.loads(tc.function.arguments),
+                        arguments=parsed_args,
                         call_id=tc.id,
                     )
 
@@ -146,8 +168,13 @@ class AgentLoop:
 
         try:
             arguments = json.loads(arguments_json)
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, TypeError) as e:
             return {"error_code": "INVALID_ARGS", "message": f"Invalid JSON arguments: {e}"}
+        if not isinstance(arguments, dict):
+            return {
+                "error_code": "INVALID_ARGS",
+                "message": f"Expected dict arguments, got {type(arguments).__name__}",
+            }
 
         try:
             result = await tool.execute(arguments)
