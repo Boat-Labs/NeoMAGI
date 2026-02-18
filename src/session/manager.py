@@ -292,7 +292,7 @@ def _messages_to_history_format(messages: list[Message]) -> list[dict[str, Any]]
     Only includes user + assistant messages with non-empty content.
     Strips tool_calls/tool_call_id to avoid leaking internal state.
     """
-    # [Decision 0019] Keep display schema minimal and stable: user/assistant + content (+ timestamp).
+    # [Decision 0019] Minimal display schema: user/assistant + content + timestamp.
     result: list[dict[str, Any]] = []
     for m in messages:
         if m.role not in ("user", "assistant"):

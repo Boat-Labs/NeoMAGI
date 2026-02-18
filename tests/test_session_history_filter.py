@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from unittest.mock import patch
 
 from src.session.manager import Message, SessionManager, _messages_to_history_format
 
@@ -75,7 +73,10 @@ class TestGetHistoryForDisplay:
         manager = SessionManager(db_session_factory=MagicMock())
         # force=True in get_history_for_display triggers load_session_from_db;
         # patch to return False (session not found in DB).
-        with patch.object(manager, "load_session_from_db", new_callable=AsyncMock, return_value=False):
+        with patch.object(
+            manager, "load_session_from_db",
+            new_callable=AsyncMock, return_value=False,
+        ):
             result = await manager.get_history_for_display("nonexistent")
         assert result == []
 
@@ -90,7 +91,10 @@ class TestGetHistoryForDisplay:
             await manager.append_message("s1", "tool", '{"ok": true}', tool_call_id="c1")
 
         # Patch load_session_from_db to no-op (messages already in memory).
-        with patch.object(manager, "load_session_from_db", new_callable=AsyncMock, return_value=True):
+        with patch.object(
+            manager, "load_session_from_db",
+            new_callable=AsyncMock, return_value=True,
+        ):
             result = await manager.get_history_for_display("s1")
         assert len(result) == 2
         assert result[0]["role"] == "user"
@@ -130,7 +134,10 @@ class TestHistoryContract:
     @pytest.mark.asyncio
     async def test_empty_session_returns_empty_list(self):
         manager = SessionManager(db_session_factory=MagicMock())
-        with patch.object(manager, "load_session_from_db", new_callable=AsyncMock, return_value=False):
+        with patch.object(
+            manager, "load_session_from_db",
+            new_callable=AsyncMock, return_value=False,
+        ):
             result = await manager.get_history_for_display("nonexistent-xyz")
         assert result == []
 

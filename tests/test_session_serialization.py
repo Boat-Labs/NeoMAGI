@@ -42,6 +42,7 @@ class TestSessionBusyRPC:
     @pytest.mark.asyncio
     async def test_session_busy_error_response(self):
         import json
+
         from src.gateway.app import _handle_chat_send
 
         mock_ws = AsyncMock()
@@ -197,7 +198,10 @@ class TestCrossWorkerContextContinuity:
 
         # get_history_for_display returns user+assistant
         # Patch load_session_from_db to no-op (messages already in memory).
-        with patch.object(manager, "load_session_from_db", new_callable=AsyncMock, return_value=True):
+        with patch.object(
+            manager, "load_session_from_db",
+            new_callable=AsyncMock, return_value=True,
+        ):
             history = await manager.get_history_for_display("s1")
         assert len(history) == 2
 

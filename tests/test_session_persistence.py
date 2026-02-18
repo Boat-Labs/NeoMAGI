@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -42,8 +42,6 @@ class TestCrossWorkerSeqUniqueness:
         mock_db = MagicMock()
         manager = SessionManager(db_session_factory=mock_db)
         seqs: list[int] = []
-
-        original_persist = manager._persist_message
 
         async def tracking_persist(session_id, msg):
             seqs.append(len(seqs))  # Simulate sequential allocation

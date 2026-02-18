@@ -73,6 +73,7 @@ class TestGatewayTTLValidation:
     def test_ttl_zero_rejected(self, monkeypatch):
         monkeypatch.setenv("GATEWAY_SESSION_CLAIM_TTL_SECONDS", "0")
         from pydantic import ValidationError
+
         from src.config.settings import GatewaySettings
 
         with pytest.raises(ValidationError):
@@ -81,6 +82,7 @@ class TestGatewayTTLValidation:
     def test_ttl_negative_rejected(self, monkeypatch):
         monkeypatch.setenv("GATEWAY_SESSION_CLAIM_TTL_SECONDS", "-1")
         from pydantic import ValidationError
+
         from src.config.settings import GatewaySettings
 
         with pytest.raises(ValidationError):
@@ -89,6 +91,7 @@ class TestGatewayTTLValidation:
     def test_ttl_over_max_rejected(self, monkeypatch):
         monkeypatch.setenv("GATEWAY_SESSION_CLAIM_TTL_SECONDS", "3601")
         from pydantic import ValidationError
+
         from src.config.settings import GatewaySettings
 
         with pytest.raises(ValidationError):
