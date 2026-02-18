@@ -23,7 +23,9 @@ class TestDBSchemaConstant:
     def test_models_message_schema(self):
         from src.session.models import MessageRecord
 
-        assert MessageRecord.__table_args__["schema"] == DB_SCHEMA
+        # __table_args__ is a tuple: (UniqueConstraint(...), {"schema": ...})
+        table_opts = MessageRecord.__table_args__[-1]
+        assert table_opts["schema"] == DB_SCHEMA
 
     def test_settings_default_matches_constant(self):
         from src.config.settings import DatabaseSettings
@@ -63,3 +65,38 @@ class TestDatabaseSettingsValidator:
         with pytest.raises(Exception) as exc_info:
             DatabaseSettings()
         assert "ADR 0017" in str(exc_info.value)
+
+
+class TestGatewayTTLValidation:
+    """R6e: GATEWAY_SESSION_CLAIM_TTL_SECONDS fail-fast validation."""
+
+    def test_ttl_zero_rejected(self, monkeypatch):
+        monkeypatch.setenv("GATEWAY_SESSION_CLAIM_TTL_SECONDS", "0")
+        from pydantic import ValidationError
+        from src.config.settings import GatewaySettings
+
+        with pytest.raises(ValidationError):
+            GatewaySettings()
+
+    def test_ttl_negative_rejected(self, monkeypatch):
+        monkeypatch.setenv("GATEWAY_SESSION_CLAIM_TTL_SECONDS", "-1")
+        from pydantic import ValidationError
+        from src.config.settings import GatewaySettings
+
+        with pytest.raises(ValidationError):
+            GatewaySettings()
+
+    def test_ttl_over_max_rejected(self, monkeypatch):
+        monkeypatch.setenv("GATEWAY_SESSION_CLAIM_TTL_SECONDS", "3601")
+        from pydantic import ValidationError
+        from src.config.settings import GatewaySettings
+
+        with pytest.raises(ValidationError):
+            GatewaySettings()
+
+    def test_ttl_valid_value(self, monkeypatch):
+        monkeypatch.setenv("GATEWAY_SESSION_CLAIM_TTL_SECONDS", "60")
+        from src.config.settings import GatewaySettings
+
+        s = GatewaySettings()
+        assert s.session_claim_ttl_seconds == 60

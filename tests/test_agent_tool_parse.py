@@ -112,6 +112,7 @@ class TestHandleMessageWithBadArgs:
         )
 
         session_manager = MagicMock()
+        session_manager.append_message = AsyncMock()
         session_manager.get_or_create.return_value = MagicMock(messages=[])
         session_manager.get_history.return_value = []
 
@@ -158,6 +159,7 @@ class TestHandleMessageWithBadArgs:
         )
 
         session_manager = MagicMock()
+        session_manager.append_message = AsyncMock()
         session_manager.get_or_create.return_value = MagicMock(messages=[])
         session_manager.get_history.return_value = []
 

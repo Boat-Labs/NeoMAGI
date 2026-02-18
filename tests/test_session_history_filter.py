@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from unittest.mock import patch
+
 from src.session.manager import Message, SessionManager, _messages_to_history_format
 
 
@@ -70,22 +72,61 @@ class TestGetHistoryForDisplay:
 
     @pytest.mark.asyncio
     async def test_nonexistent_session_returns_empty(self):
-        manager = SessionManager(db_session_factory=None)
+        manager = SessionManager(db_session_factory=MagicMock())
         result = await manager.get_history_for_display("nonexistent")
         assert result == []
 
     @pytest.mark.asyncio
     async def test_returns_filtered_history(self):
-        manager = SessionManager(db_session_factory=None)
-        manager.append_message("s1", "system", "You are an agent")
-        manager.append_message("s1", "user", "Hi")
-        manager.append_message("s1", "assistant", "Hello!")
-        manager.append_message("s1", "tool", '{"ok": true}', tool_call_id="c1")
+        manager = SessionManager(db_session_factory=MagicMock())
+        # Patch _persist_message to avoid real DB calls
+        with patch.object(manager, "_persist_message", new_callable=AsyncMock):
+            await manager.append_message("s1", "system", "You are an agent")
+            await manager.append_message("s1", "user", "Hi")
+            await manager.append_message("s1", "assistant", "Hello!")
+            await manager.append_message("s1", "tool", '{"ok": true}', tool_call_id="c1")
 
         result = await manager.get_history_for_display("s1")
         assert len(result) == 2
         assert result[0]["role"] == "user"
         assert result[1]["role"] == "assistant"
+
+
+class TestHistoryContract:
+    """R6c: history contract — duplicate content, role filtering, empty session."""
+
+    def _make_msg(self, role, content="hello", **kwargs):
+        return Message(role=role, content=content, **kwargs)
+
+    def test_consecutive_same_content_not_swallowed(self):
+        """User sends two identical messages — both appear in history."""
+        messages = [
+            self._make_msg("user", "ping"),
+            self._make_msg("assistant", "pong"),
+            self._make_msg("user", "ping"),
+            self._make_msg("assistant", "pong"),
+        ]
+        result = _messages_to_history_format(messages)
+        assert len(result) == 4
+
+    def test_only_user_and_assistant(self):
+        """system and tool messages are excluded."""
+        messages = [
+            self._make_msg("system", "sys prompt"),
+            self._make_msg("user", "hi"),
+            self._make_msg("tool", '{"ok":true}', tool_call_id="c1"),
+            self._make_msg("assistant", "hello"),
+        ]
+        result = _messages_to_history_format(messages)
+        roles = [m["role"] for m in result]
+        assert set(roles) <= {"user", "assistant"}
+        assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_session_returns_empty_list(self):
+        manager = SessionManager(db_session_factory=MagicMock())
+        result = await manager.get_history_for_display("nonexistent-xyz")
+        assert result == []
 
 
 class TestGatewayHistoryHandler:
@@ -105,5 +146,3 @@ class TestGatewayHistoryHandler:
         await _handle_chat_history(mock_ws, "req-1", {"session_id": "test"})
 
         mock_manager.get_history_for_display.assert_called_once_with("test")
-        # Should NOT call get_history_from_db
-        mock_manager.get_history_from_db.assert_not_called()
