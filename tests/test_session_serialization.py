@@ -196,7 +196,9 @@ class TestCrossWorkerContextContinuity:
         assert session.messages[1].content == "reply-A"
 
         # get_history_for_display returns user+assistant
-        history = await manager.get_history_for_display("s1")
+        # Patch load_session_from_db to no-op (messages already in memory).
+        with patch.object(manager, "load_session_from_db", new_callable=AsyncMock, return_value=True):
+            history = await manager.get_history_for_display("s1")
         assert len(history) == 2
 
 

@@ -73,7 +73,10 @@ class TestGetHistoryForDisplay:
     @pytest.mark.asyncio
     async def test_nonexistent_session_returns_empty(self):
         manager = SessionManager(db_session_factory=MagicMock())
-        result = await manager.get_history_for_display("nonexistent")
+        # force=True in get_history_for_display triggers load_session_from_db;
+        # patch to return False (session not found in DB).
+        with patch.object(manager, "load_session_from_db", new_callable=AsyncMock, return_value=False):
+            result = await manager.get_history_for_display("nonexistent")
         assert result == []
 
     @pytest.mark.asyncio
@@ -86,7 +89,9 @@ class TestGetHistoryForDisplay:
             await manager.append_message("s1", "assistant", "Hello!")
             await manager.append_message("s1", "tool", '{"ok": true}', tool_call_id="c1")
 
-        result = await manager.get_history_for_display("s1")
+        # Patch load_session_from_db to no-op (messages already in memory).
+        with patch.object(manager, "load_session_from_db", new_callable=AsyncMock, return_value=True):
+            result = await manager.get_history_for_display("s1")
         assert len(result) == 2
         assert result[0]["role"] == "user"
         assert result[1]["role"] == "assistant"
@@ -125,7 +130,8 @@ class TestHistoryContract:
     @pytest.mark.asyncio
     async def test_empty_session_returns_empty_list(self):
         manager = SessionManager(db_session_factory=MagicMock())
-        result = await manager.get_history_for_display("nonexistent-xyz")
+        with patch.object(manager, "load_session_from_db", new_callable=AsyncMock, return_value=False):
+            result = await manager.get_history_for_display("nonexistent-xyz")
         assert result == []
 
 
@@ -136,8 +142,8 @@ class TestGatewayHistoryHandler:
     async def test_handler_calls_display_method(self):
         from src.gateway.app import _handle_chat_history
 
-        mock_ws = AsyncMock()
-        mock_ws.app = MagicMock()
+        mock_ws = MagicMock()
+        mock_ws.send_text = AsyncMock()
 
         mock_manager = MagicMock()
         mock_manager.get_history_for_display = AsyncMock(return_value=[])

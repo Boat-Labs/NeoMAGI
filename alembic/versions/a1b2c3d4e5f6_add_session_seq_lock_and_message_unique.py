@@ -51,6 +51,26 @@ def upgrade() -> None:
         """
     )
 
+    # --- messages: deduplicate before adding UNIQUE constraint ---
+    # Old Python-side seq allocation could produce duplicates under race conditions.
+    # Keep the row with the smallest id (earliest insert) and delete later duplicates.
+    op.execute(
+        """
+        DELETE FROM neomagi.messages
+        WHERE id IN (
+            SELECT id FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY session_id, seq
+                           ORDER BY id
+                       ) AS rn
+                FROM neomagi.messages
+            ) ranked
+            WHERE rn > 1
+        )
+        """
+    )
+
     # --- messages: add UNIQUE constraint on (session_id, seq) ---
     op.create_unique_constraint(
         "uq_messages_session_seq",

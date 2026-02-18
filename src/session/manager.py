@@ -226,7 +226,9 @@ class SessionManager:
     async def get_history_for_display(self, session_id: str) -> list[dict[str, Any]]:
         """Get filtered history for chat UI. Only user + assistant with content."""
         # [Decision 0019] chat.history is a UI history API, not an internal context export API.
-        await self.load_session_from_db(session_id)
+        # Always force-reload from DB to avoid returning stale cache when
+        # another worker wrote new messages since our last load.
+        await self.load_session_from_db(session_id, force=True)
         session = self._sessions.get(session_id)
         if session is None:
             return []
