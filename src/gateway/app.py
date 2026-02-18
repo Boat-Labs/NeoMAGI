@@ -198,6 +198,6 @@ async def _handle_chat_history(
     parsed = ChatHistoryParams.model_validate(params)
     session_manager: SessionManager = websocket.app.state.session_manager
 
-    history = await session_manager.get_history_from_db(parsed.session_id)
+    history = await session_manager.get_history_for_display(parsed.session_id)
     response = RPCHistoryResponse(id=request_id, data=RPCHistoryResponseData(messages=history))
     await websocket.send_text(response.model_dump_json())

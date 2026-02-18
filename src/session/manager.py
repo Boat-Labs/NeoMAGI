@@ -148,6 +148,14 @@ class SessionManager:
             logger.exception("session_load_failed", session_id=session_id)
             return False
 
+    async def get_history_for_display(self, session_id: str) -> list[dict[str, Any]]:
+        """Get filtered history for chat UI. Only user + assistant with content."""
+        await self.load_session_from_db(session_id)
+        session = self._sessions.get(session_id)
+        if session is None:
+            return []
+        return _messages_to_history_format(session.messages)
+
     async def get_history_from_db(self, session_id: str) -> list[dict[str, Any]]:
         """Get history from DB (for chat.history RPC). Falls back to memory."""
         # Try loading from DB first
@@ -194,6 +202,26 @@ def _messages_to_openai_format(messages: list[Message]) -> list[dict[str, Any]]:
         if m.tool_call_id is not None:
             msg_dict["tool_call_id"] = m.tool_call_id
         result.append(msg_dict)
+    return result
+
+
+def _messages_to_history_format(messages: list[Message]) -> list[dict[str, Any]]:
+    """Convert Message list to display-friendly format for chat history.
+
+    Only includes user + assistant messages with non-empty content.
+    Strips tool_calls/tool_call_id to avoid leaking internal state.
+    """
+    result: list[dict[str, Any]] = []
+    for m in messages:
+        if m.role not in ("user", "assistant"):
+            continue
+        if not m.content:
+            continue
+        result.append({
+            "role": m.role,
+            "content": m.content,
+            "timestamp": m.timestamp.isoformat(),
+        })
     return result
 
 
