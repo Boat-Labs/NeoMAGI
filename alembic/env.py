@@ -22,7 +22,7 @@ DB_PORT = os.getenv("DATABASE_PORT", "5432")
 DB_USER = os.getenv("DATABASE_USER", "postgres")
 DB_PASSWORD = os.getenv("DATABASE_PASSWORD", "")
 DB_NAME = os.getenv("DATABASE_NAME", "neomagi")
-DB_SCHEMA = os.getenv("DATABASE_SCHEMA", "neomagi")
+from src.constants import DB_SCHEMA  # noqa: E402
 
 DATABASE_URL = f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 

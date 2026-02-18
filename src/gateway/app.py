@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     settings = get_settings()
 
-    # Database setup (optional — falls back to in-memory if unavailable)
+    # Database setup (optional — falls back to in-memory if allowed)
     db_session_factory = None
     engine = None
     try:
@@ -50,6 +50,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         db_session_factory = make_session_factory(engine)
         logger.info("db_connected")
     except Exception:
+        if not settings.database.allow_memory_fallback:
+            logger.exception(
+                "db_connection_failed",
+                host=settings.database.host,
+                port=settings.database.port,
+                database=settings.database.name,
+                schema=settings.database.schema_,
+                msg="Set DATABASE_ALLOW_MEMORY_FALLBACK=true to allow memory-only mode",
+            )
+            raise
         logger.warning("db_unavailable", msg="Running in memory-only mode")
 
     session_manager = SessionManager(db_session_factory=db_session_factory)

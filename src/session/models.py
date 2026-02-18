@@ -8,6 +8,8 @@ from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from src.constants import DB_SCHEMA
+
 
 class Base(DeclarativeBase):
     pass
@@ -15,7 +17,7 @@ class Base(DeclarativeBase):
 
 class SessionRecord(Base):
     __tablename__ = "sessions"
-    __table_args__ = {"schema": "neomagi"}
+    __table_args__ = {"schema": DB_SCHEMA}
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -31,11 +33,11 @@ class SessionRecord(Base):
 
 class MessageRecord(Base):
     __tablename__ = "messages"
-    __table_args__ = {"schema": "neomagi"}
+    __table_args__ = {"schema": DB_SCHEMA}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_id: Mapped[str] = mapped_column(
-        String(128), ForeignKey("neomagi.sessions.id"), index=True
+        String(128), ForeignKey(f"{DB_SCHEMA}.sessions.id"), index=True
     )
     seq: Mapped[int] = mapped_column(Integer)
     role: Mapped[str] = mapped_column(String(16))

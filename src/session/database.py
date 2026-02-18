@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import structlog
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
+from src.constants import DB_SCHEMA
 from src.session.models import Base
 
 if TYPE_CHECKING:
@@ -25,13 +26,13 @@ async def create_db_engine(settings: DatabaseSettings) -> AsyncEngine:
         url,
         pool_size=5,
         max_overflow=10,
-        connect_args={"server_settings": {"search_path": settings.schema_}},
+        connect_args={"server_settings": {"search_path": f"{settings.schema_}, public"}},
     )
     logger.info("db_engine_created", host=settings.host, database=settings.name)
     return engine
 
 
-async def ensure_schema(engine: AsyncEngine, schema: str = "neomagi") -> None:
+async def ensure_schema(engine: AsyncEngine, schema: str = DB_SCHEMA) -> None:
     """Ensure the target schema exists, then create all tables."""
     async with engine.begin() as conn:
         await conn.execute(
