@@ -8,7 +8,7 @@ from typing import Any
 import structlog
 
 from src.agent.events import AgentEvent, TextChunk, ToolCallInfo
-from src.agent.model_client import ModelClient
+from src.agent.model_client import ContentDelta, ModelClient, ToolCallsComplete
 from src.agent.prompt_builder import PromptBuilder
 from src.session.manager import SessionManager
 from src.tools.registry import ToolRegistry
@@ -53,16 +53,21 @@ class AgentLoop:
         self._model = model
 
     async def handle_message(
-        self, session_id: str, content: str
+        self, session_id: str, content: str, *, lock_token: str | None = None
     ) -> AsyncIterator[AgentEvent]:
         """Handle an incoming user message and yield agent events.
 
         Yields TextChunk for text content and ToolCallInfo for tool calls.
         Implements a tool call loop: LLM may call tools multiple times before
         producing a final text response.
+
+        When lock_token is provided, all append_message calls include atomic
+        fencing to reject stale writes after lock takeover.
         """
         # 1. Append user message
-        await self._session_manager.append_message(session_id, "user", content)
+        await self._session_manager.append_message(
+            session_id, "user", content, lock_token=lock_token
+        )
 
         # 2. Build system prompt
         system_prompt = self._prompt_builder.build(session_id)
@@ -72,7 +77,7 @@ class AgentLoop:
         if self._tool_registry and self._tool_registry.list_tools():
             tools_schema = self._tool_registry.get_tools_schema()
 
-        # 4. Tool call loop
+        # 4. Streaming tool call loop
         for iteration in range(MAX_TOOL_ITERATIONS):
             history = self._session_manager.get_history(session_id)
             messages: list[dict[str, Any]] = [
@@ -80,77 +85,83 @@ class AgentLoop:
                 *history,
             ]
 
-            # Use non-streaming to detect tool calls vs text
-            response = await self._model_client.chat_completion(
-                messages, self._model, tools=tools_schema
-            )
+            # Stream the LLM response — content tokens arrive immediately,
+            # tool calls are accumulated and yielded at the end of the stream.
+            collected_text = ""
+            tool_calls_result: list[dict[str, str]] | None = None
 
-            # If model wants to call tools
-            if response.tool_calls:
-                # Store assistant message with tool_calls
+            async for event in self._model_client.chat_stream_with_tools(
+                messages, self._model, tools=tools_schema
+            ):
+                if isinstance(event, ContentDelta):
+                    yield TextChunk(content=event.text)
+                    collected_text += event.text
+                elif isinstance(event, ToolCallsComplete):
+                    tool_calls_result = event.tool_calls
+
+            # Branch: tool calls detected
+            if tool_calls_result:
                 tool_calls_data = [
                     {
-                        "id": tc.id,
+                        "id": tc["id"],
                         "type": "function",
                         "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
+                            "name": tc["name"],
+                            "arguments": tc["arguments"],
                         },
                     }
-                    for tc in response.tool_calls
+                    for tc in tool_calls_result
                 ]
                 await self._session_manager.append_message(
                     session_id,
                     "assistant",
-                    response.content or "",
+                    collected_text,  # may be empty when model only returns tool_calls
                     tool_calls=tool_calls_data,
+                    lock_token=lock_token,
                 )
 
-                # Execute each tool call
-                for tc in response.tool_calls:
-                    parsed_args, parse_err = _safe_parse_args(tc.function.arguments)
+                for tc in tool_calls_result:
+                    parsed_args, parse_err = _safe_parse_args(tc["arguments"])
                     if parse_err:
                         logger.warning(
                             "tool_call_args_parse_failed",
-                            tool_name=tc.function.name,
+                            tool_name=tc["name"],
                             error=parse_err,
-                            raw_args=str(tc.function.arguments)[:200],
+                            raw_args=tc["arguments"][:200],
                         )
                     yield ToolCallInfo(
-                        tool_name=tc.function.name,
+                        tool_name=tc["name"],
                         arguments=parsed_args,
-                        call_id=tc.id,
+                        call_id=tc["id"],
                     )
 
-                    result = await self._execute_tool(
-                        tc.function.name, tc.function.arguments
-                    )
-
-                    # Store tool result
+                    result = await self._execute_tool(tc["name"], tc["arguments"])
                     await self._session_manager.append_message(
                         session_id,
                         "tool",
                         json.dumps(result),
-                        tool_call_id=tc.id,
+                        tool_call_id=tc["id"],
+                        lock_token=lock_token,
                     )
 
                 logger.info(
                     "tool_call_iteration",
                     iteration=iteration + 1,
-                    tools_called=len(response.tool_calls),
+                    tools_called=len(tool_calls_result),
                     session_id=session_id,
                 )
                 continue
 
-            # No tool calls — this is the final text response
-            text = response.content or ""
-            if text:
-                yield TextChunk(content=text)
-            await self._session_manager.append_message(session_id, "assistant", text)
-            logger.info("response_complete", session_id=session_id, chars=len(text))
+            # Branch: no tool calls — this is the final text response
+            await self._session_manager.append_message(
+                session_id, "assistant", collected_text, lock_token=lock_token
+            )
+            logger.info(
+                "response_complete", session_id=session_id, chars=len(collected_text)
+            )
             return
 
-        # Safety: if we hit max iterations, yield what we have
+        # Safety: max iterations
         logger.warning("max_tool_iterations", max=MAX_TOOL_ITERATIONS, session_id=session_id)
         yield TextChunk(
             content="I've reached the maximum number of tool calls. Please try again."

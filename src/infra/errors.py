@@ -55,3 +55,10 @@ class ToolError(AgentError):
 
     def __init__(self, message: str, *, code: str = "TOOL_ERROR") -> None:
         super().__init__(message, code=code)
+
+
+class SessionFencingError(GatewayError):
+    """Raised when a stale worker tries to write after lock takeover."""
+
+    def __init__(self, message: str = "Session lock fencing check failed") -> None:
+        super().__init__(message, code="SESSION_FENCED")

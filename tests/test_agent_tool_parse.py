@@ -8,6 +8,7 @@ import pytest
 
 from src.agent.agent import AgentLoop, _safe_parse_args
 from src.agent.events import ToolCallInfo
+from src.agent.model_client import ContentDelta, ToolCallsComplete
 
 
 class TestSafeParseArgs:
@@ -92,23 +93,19 @@ class TestHandleMessageWithBadArgs:
 
     @pytest.mark.asyncio
     async def test_bad_args_yields_tool_call_with_empty_dict(self, tmp_path):
-        # Mock the LLM to return a tool_call with bad JSON, then a text response
-        bad_tool_call = MagicMock()
-        bad_tool_call.id = "call_1"
-        bad_tool_call.function.name = "test_tool"
-        bad_tool_call.function.arguments = "{bad json}"
+        # Mock chat_stream_with_tools: first call returns tool_call with bad JSON,
+        # second call returns final text
+        async def stream_with_tools_iter(*args, **kwargs):
+            yield ToolCallsComplete(
+                tool_calls=[{"id": "call_1", "name": "test_tool", "arguments": "{bad json}"}]
+            )
 
-        response_with_tools = MagicMock()
-        response_with_tools.tool_calls = [bad_tool_call]
-        response_with_tools.content = ""
-
-        response_final = MagicMock()
-        response_final.tool_calls = None
-        response_final.content = "Done"
+        async def stream_final_iter(*args, **kwargs):
+            yield ContentDelta(text="Done")
 
         model_client = MagicMock()
-        model_client.chat_completion = AsyncMock(
-            side_effect=[response_with_tools, response_final]
+        model_client.chat_stream_with_tools = MagicMock(
+            side_effect=[stream_with_tools_iter(), stream_final_iter()]
         )
 
         session_manager = MagicMock()
@@ -140,22 +137,18 @@ class TestHandleMessageWithBadArgs:
     @pytest.mark.asyncio
     async def test_none_args_yields_tool_call_with_empty_dict(self, tmp_path):
         """Ollama/Gemini may return null for tool call arguments."""
-        none_tool_call = MagicMock()
-        none_tool_call.id = "call_2"
-        none_tool_call.function.name = "test_tool"
-        none_tool_call.function.arguments = None
 
-        response_with_tools = MagicMock()
-        response_with_tools.tool_calls = [none_tool_call]
-        response_with_tools.content = ""
+        async def stream_with_tools_iter(*args, **kwargs):
+            yield ToolCallsComplete(
+                tool_calls=[{"id": "call_2", "name": "test_tool", "arguments": "null"}]
+            )
 
-        response_final = MagicMock()
-        response_final.tool_calls = None
-        response_final.content = "Done"
+        async def stream_final_iter(*args, **kwargs):
+            yield ContentDelta(text="Done")
 
         model_client = MagicMock()
-        model_client.chat_completion = AsyncMock(
-            side_effect=[response_with_tools, response_final]
+        model_client.chat_stream_with_tools = MagicMock(
+            side_effect=[stream_with_tools_iter(), stream_final_iter()]
         )
 
         session_manager = MagicMock()

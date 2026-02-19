@@ -4,6 +4,7 @@ import asyncio
 import random
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Callable, Coroutine
+from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
 import structlog
@@ -24,6 +25,23 @@ logger = structlog.get_logger()
 T = TypeVar("T")
 
 _RETRYABLE = (APIConnectionError, APITimeoutError, RateLimitError)
+
+
+@dataclass
+class ContentDelta:
+    """A chunk of streamed text content."""
+
+    text: str
+
+
+@dataclass
+class ToolCallsComplete:
+    """Accumulated tool calls from a completed stream."""
+
+    tool_calls: list[dict[str, str]] = field(default_factory=list)
+
+
+StreamEvent = ContentDelta | ToolCallsComplete
 
 
 class ModelClient(ABC):
@@ -54,6 +72,22 @@ class ModelClient(ABC):
         tools: list[dict] | None = None,
     ) -> ChatCompletionMessage:
         """Non-streaming call. Returns full message (may contain content or tool_calls)."""
+        ...
+
+    @abstractmethod
+    def chat_stream_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        *,
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        """Stream response with tool call support.
+
+        Content tokens yield immediately as ContentDelta.
+        Tool call deltas are accumulated; a single ToolCallsComplete is yielded
+        after the stream ends if any tool calls were detected.
+        """
         ...
 
 
@@ -184,3 +218,70 @@ class OpenAICompatModelClient(ModelClient):
             tool_calls=len(message.tool_calls) if message.tool_calls else 0,
         )
         return message
+
+    async def chat_stream_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        *,
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        """Stream LLM response, yielding content deltas and accumulated tool calls.
+
+        Content tokens are yielded immediately as ContentDelta.
+        Tool call deltas are accumulated silently; after the stream ends,
+        a single ToolCallsComplete is yielded if any tool calls were detected.
+
+        OpenAI streaming tool_calls format:
+        - First chunk per tool: {index, id, function: {name, arguments: ""}}
+        - Subsequent chunks: {index, function: {arguments: "partial..."}}
+        - Arguments are partial JSON strings that must be concatenated.
+        """
+        logger.debug(
+            "chat_stream_with_tools_request",
+            model=model,
+            message_count=len(messages),
+            tool_count=len(tools) if tools else 0,
+        )
+        stream = await self._retry_call(
+            lambda: self._client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools if tools else NOT_GIVEN,
+                stream=True,
+            ),
+            context="chat_stream_with_tools",
+        )
+
+        # Accumulate tool_calls delta fragments, keyed by index
+        pending_tool_calls: dict[int, dict[str, str]] = {}
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+
+            # Content path: yield immediately
+            if delta.content:
+                yield ContentDelta(text=delta.content)
+
+            # Tool calls path: accumulate delta fragments
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in pending_tool_calls:
+                        pending_tool_calls[idx] = {"id": "", "name": "", "arguments": ""}
+                    entry = pending_tool_calls[idx]
+                    if tc_delta.id:
+                        entry["id"] = tc_delta.id
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            entry["name"] = tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            entry["arguments"] += tc_delta.function.arguments
+
+        # After stream ends: yield accumulated tool calls if any
+        if pending_tool_calls:
+            yield ToolCallsComplete(
+                tool_calls=[pending_tool_calls[i] for i in sorted(pending_tool_calls)]
+            )
