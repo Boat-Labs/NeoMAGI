@@ -70,6 +70,17 @@ class RPCHistoryResponse(BaseModel):
 
 
 def parse_rpc_request(raw: str) -> RPCRequest:
-    """Parse a raw JSON string into an RPCRequest. Raises ValidationError on invalid input."""
-    data = json.loads(raw)
-    return RPCRequest.model_validate(data)
+    """Parse a raw JSON string into an RPCRequest.
+
+    Raises GatewayError(code="PARSE_ERROR") on invalid JSON or schema mismatch.
+    """
+    from src.infra.errors import GatewayError
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise GatewayError(f"Invalid JSON: {e}", code="PARSE_ERROR") from e
+    try:
+        return RPCRequest.model_validate(data)
+    except Exception as e:
+        raise GatewayError(f"Invalid RPC request: {e}", code="PARSE_ERROR") from e

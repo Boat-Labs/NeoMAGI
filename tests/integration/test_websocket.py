@@ -62,7 +62,13 @@ class FakeModelClient(ModelClient):
                 yield event
 
 
-def _make_app(pg_url: str, tmp_path, *, fake_model: FakeModelClient | None = None):
+def _make_app(
+    pg_url: str,
+    tmp_path,
+    *,
+    fake_model: FakeModelClient | None = None,
+    pre_claim_sessions: list[str] | None = None,
+):
     """Create a FastAPI app with its own engine (created within TestClient's event loop)."""
     from src.gateway.app import _handle_rpc_message
 
@@ -88,6 +94,10 @@ def _make_app(pg_url: str, tmp_path, *, fake_model: FakeModelClient | None = Non
             workspace_dir=tmp_path,
             model="test-model",
         )
+
+        # Pre-claim sessions for SESSION_BUSY testing
+        for sid in pre_claim_sessions or []:
+            await session_manager.try_claim_session(sid, ttl_seconds=300)
 
         app.state.agent_loop = agent_loop
         app.state.session_manager = session_manager
@@ -220,29 +230,24 @@ class TestSessionBusy:
     """SESSION_BUSY error on concurrent claims."""
 
     def test_session_busy_error(self, pg_url, tmp_path):
-        """Verify SESSION_BUSY by claiming session before sending chat."""
-        app, model = _make_app(pg_url, tmp_path)
-        model.set_responses([ContentDelta(text="response")])
+        """Pre-claim a session in lifespan → chat.send to same session → SESSION_BUSY."""
+        app, model = _make_app(
+            pg_url, tmp_path, pre_claim_sessions=["busy-session"],
+        )
+        model.set_responses([ContentDelta(text="should not reach")])
 
         with TestClient(app) as client, client.websocket_connect("/ws") as ws:
-            # Pre-claim the session so chat.send gets SESSION_BUSY
-            # We need to do this inside the TestClient context.
-            # Send a chat.send with a session, then send another to the same session.
             _send_rpc(
                 ws, method="chat.send",
-                params={"content": "first", "session_id": "busy-session"},
-                request_id="req-1",
+                params={"content": "hi", "session_id": "busy-session"},
+                request_id="req-busy",
             )
-            _collect_until_done(ws)
+            messages = _collect_until_done(ws)
 
-            # Now the session is released. To test BUSY, we need concurrent access.
-            # Instead, manually claim the session from within the app's event loop.
-            # Use a custom method on the WS endpoint.
-
-            # Simpler: test the error response format by using a known error path
-            # The SESSION_BUSY path is already well-tested in unit tests. Here we
-            # verify the RPC error format works end-to-end through a METHOD_NOT_FOUND.
-            pass
+            errors = [m for m in messages if m["type"] == "error"]
+            assert len(errors) == 1
+            assert errors[0]["id"] == "req-busy"
+            assert errors[0]["error"]["code"] == "SESSION_BUSY"
 
 
 class TestUnknownMethod:
@@ -271,4 +276,4 @@ class TestInvalidJSON:
             data = json.loads(ws.receive_text())
 
             assert data["type"] == "error"
-            assert data["error"]["code"] == "INTERNAL_ERROR"
+            assert data["error"]["code"] == "PARSE_ERROR"

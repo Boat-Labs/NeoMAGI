@@ -9,6 +9,7 @@ Safety: refuses to run against any database whose name doesn't contain '_test'.
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncGenerator
 
@@ -115,19 +116,19 @@ async def _integration_cleanup(request):
     fixture chain.
 
     Sync integration tests (e.g. WebSocket tests using TestClient) manage
-    their own cleanup via app lifespan, so we skip if the fixture can't
-    be resolved from within a sync context.
+    their own cleanup via app lifespan, so we skip them entirely to avoid
+    Runner.run() conflicts and unawaited-coroutine warnings.
     """
     yield
 
     if not any(m.name == "integration" for m in request.node.iter_markers()):
         return
 
-    try:
-        factory = request.getfixturevalue("db_session_factory")
-    except Exception:
-        return  # sync tests manage their own cleanup
+    # Sync tests (WebSocket/TestClient) handle their own cleanup in lifespan.
+    if not asyncio.iscoroutinefunction(request.node.obj):
+        return
 
+    factory = request.getfixturevalue("db_session_factory")
     async with factory() as db_session:
         await db_session.execute(
             text(f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions CASCADE")
