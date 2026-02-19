@@ -1,48 +1,97 @@
-# 最小化实现需要的模块
+# 模块架构（当前实现 + 后续边界）
+
+> 本文按“已实现 / 计划中”描述模块状态，作为 roadmap 的技术补充。  
+> 产品目标与优先级请看 `design_docs/roadmap_milestones_v3.md`。
 
 ## 1. Gateway（控制平面）
-核心是一个 WebSocket 服务器（默认 ws://127.0.0.1:19789），负责消息路由和调度。
-最小化只需实现：消息接收 → Session 路由 → 分发给 Agent Runtime → 返回响应。
-OpenClaw 用的是 RPC over WebSocket 协议。这里借鉴这个方案
+- 状态：M1 已实现
+- 现状：
+  - FastAPI + WebSocket (`/ws`)。
+  - RPC 方法：`chat.send`、`chat.history`。
+  - 统一错误响应与会话并发串行化入口。
 
-## 2. Agent Runtime / Pi Agent
-这是最核心的部分。openclaw里src/agents/agent-pi.ts 里的 PiEmbeddedRunner 负责整个 agent loop：
+实现参考：
+- `src/gateway/app.py`
+- `src/gateway/protocol.py`
 
-System Prompt 组装：从 workspace 读取 AGENTS.md、SOUL.md、TOOLS.md，注入 Skills，查询 Memory
-Model Provider 调用：通过 pi-ai SDK 调用 LLM（Anthropic/OpenAI/本地模型）
-Tool Call 拦截与执行：监听模型返回的 tool calls，执行后把结果流式返回模型
-Model Resolver：管理多 provider failover，key 轮换和退避策略
+## 2. Agent Runtime
+- 状态：M1 已实现（后续继续演进）
+- 现状：
+  - Prompt 组装（workspace context + tooling + datetime）。
+  - Model 调用走 OpenAI SDK 统一接口（OpenAI-compatible）。
+  - Tool loop 支持流式 content 与 tool_calls 聚合。
 
-Pi agent 原始repo链接
-https://github.com/badlogic/pi-mono
+实现参考：
+- `src/agent/agent.py`
+- `src/agent/prompt_builder.py`
+- `src/agent/model_client.py`
 
-## 3. Session 管理
-Session 系统决定了对话隔离和上下文连续性：
+## 3. Session
+- 状态：M1 已实现（M2 继续扩展）
+- 现状：
+  - 会话持久化统一 PostgreSQL（非 SQLite）。
+  - DM -> `main`，group -> `group:{channel_id}`。
+  - 具备顺序语义、claim/release、TTL、fencing。
 
-每个 DM 合并到一个共享的 main session
-每个 group chat 有独立 session
-Session 数据存为 ~/.magi/agents/<agentId>/sessions/*.jsonl
-包含 transcript 存储和 auto-compaction（context overflow 时自动压缩）
+实现参考：
+- `src/session/manager.py`
+- `src/session/models.py`
+- `decisions/0021-multi-worker-session-ordering-and-no-silent-drop.md`
+- `decisions/0022-m1.3-soft-session-serialization-token-ttl.md`
 
-## 4. Memory 系统
-这里的magi 参考 OpenClaw 的 Memory 分两层：
+## 4. Memory
+- 状态：部分实现（M3 计划中）
+- 现状：
+  - `MEMORY.md` 在 main session 注入。
+  - `memory_search` 已注册但仍是占位实现。
+  - `memory_append` 尚未实现（当前缺少受控记忆写入原子）。
+- 规划边界：
+  - 记忆数据层对齐 PostgreSQL 16 + `pg_search` + `pgvector`。
+  - 按阶段推进：先 BM25，再 Hybrid Search。
+  - 引入记忆原子操作分工：`memory_search`（检索）+ `memory_append`（追加写入）。
 
-短期记忆：memory/YYYY-MM-DD.md 每日 append-only 日志，启动时加载今天+昨天
-长期记忆搜索：Hybrid Search = Vector Search (70% 权重, cosine similarity, SQLite + sqlite-vec) + BM25 Keyword Search (30% 权重, SQLite FTS5)，用 union 而非 intersection 合并结果
-
-最小化实现可以先用 BM25-only fallback（不需要 embedding），然后再加 vector search。
+实现与决议参考：
+- `src/agent/prompt_builder.py`
+- `src/tools/builtins/memory_search.py`
+- `decisions/0006-use-postgresql-pgvector-instead-of-sqlite.md`
+- `decisions/0014-paradedb-tokenization-icu-primary-jieba-fallback.md`
 
 ## 5. Tool Registry
-参考 openclaw 需要在 src/tools/registry.ts 管理所有可用工具。最小化至少需要：
+- 状态：基础能力已实现（M1.5 计划中）
+- 现状：
+  - 具备工具注册、schema 生成与执行主链路。
+  - 当前内置工具：`current_time`、`read_file`、`memory_search`（占位）。
+- 规划边界：
+  - 进入模式化授权（`chat_safe` / `coding`）。
+  - 在可控边界下扩展 `read/write/edit/bash` 代码闭环能力。
+  - 补齐记忆写入原子工具 `memory_append`，与 `memory_search` 形成记忆闭环接口。
 
-exec（执行 shell 命令）
-read / write / edit（文件操作）
-memory_search / memory_get（记忆检索）
-Tool Policy Resolution（控制哪些工具允许/禁止）
+实现参考：
+- `src/tools/base.py`
+- `src/tools/registry.py`
+- `src/tools/builtins/*.py`
+- `design_docs/m1_5_architecture.md`
 
-## 6. Channel Adapter（聊天软件接口）
+## 6. Channel Adapter
+- 状态：WebChat 已实现，Telegram 计划中（M4）
+- 现状：
+  - WebChat 已作为第一渠道打通。
+  - `channels` 包尚无第二渠道实现。
 
-每个 Channel 把平台消息标准化为统一格式。最小化建议只实现一个，比如 Telegram（用 grammY 库）或者 WebChat。OpenClaw 支持 12+ 平台，但学习目的一个就够了。
+实现参考：
+- `src/frontend/`
+- `src/channels/`
+- `decisions/0003-channel-baseline-webchat-first-telegram-second.md`
 
-## 7. Config 系统 
-参考 openclaw 的 openclaw.json（JSON5 格式）+ Zod schema 验证 + 热加载。这是把整个系统串起来的粘合剂，也是 magi 设计哲学的关键 — 一切都是声明式配置。
+## 7. Config
+- 状态：M1 已实现（M6 继续扩展）
+- 现状：
+  - `pydantic-settings` + `.env` / `.env_template`。
+  - DB schema、gateway、openai 配置已落地并做 fail-fast 校验。
+- 规划边界：
+  - 保持 OpenAI 默认路径，Gemini 在 M6 做迁移验证。
+
+实现参考：
+- `src/config/settings.py`
+- `decisions/0013-backend-configuration-pydantic-settings.md`
+- `decisions/0016-model-sdk-strategy-openai-sdk-unified-v1.md`

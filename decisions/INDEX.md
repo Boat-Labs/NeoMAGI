@@ -26,6 +26,8 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0020 | Database hard dependency with fail-fast startup | accepted | 2026-02-18 | `decisions/0020-database-hard-dependency-fail-fast.md` |
 | 0021 | Multi-worker session ordering and no-silent-drop persistence semantics | accepted | 2026-02-18 | `decisions/0021-multi-worker-session-ordering-and-no-silent-drop.md` |
 | 0022 | M1.3 soft session serialization via lock token and TTL | accepted | 2026-02-18 | `decisions/0022-m1.3-soft-session-serialization-token-ttl.md` |
+| 0023 | Roadmap product-oriented boundary | accepted | 2026-02-19 | `decisions/0023-roadmap-product-oriented-boundary.md` |
+| 0024 | M1.5 tool modes and priority reorder | accepted | 2026-02-19 | `decisions/0024-m1.5-tool-modes-and-priority-reorder.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。

@@ -1,60 +1,71 @@
-# 记忆架构
-NeoMAGI的记忆不是 fine-tuning 也不是 model 层面的记忆，而是一套"写文件 + 检索文件"的管道。
-核心原则是：**"Mental notes don't survive session restarts. Files do."**
+# 记忆架构（当前状态 + M2/M3 规划）
 
-## 记忆分层架构
+> 原则不变：记忆基于文件，不依赖模型参数记忆。  
+> 核心句：**"Mental notes don't survive session restarts. Files do."**
+
+## 1. 当前状态（截至 2026-02-19）
+
+### 1.1 已实现
+- 工作区初始化会创建 `memory/` 与 `MEMORY.md` 模板。
+- main session 会注入 `MEMORY.md`（group session 不注入）。
+- 记忆相关工具入口已存在：`memory_search` 已注册。
+
+实现参考：
+- `src/infra/init_workspace.py`
+- `src/agent/prompt_builder.py`
+- `src/tools/builtins/memory_search.py`
+
+### 1.2 未实现（已明确进入后续里程碑）
+- `memory_search` 检索逻辑仍为占位。
+- `memory_append` 原子写入工具尚未实现。
+- 自动加载“今天+昨天”daily notes 尚未落地。
+- pre-compaction memory flush 尚未落地。
+- 会话 compaction 尚未落地。
+
+## 2. 架构分层（目标形态）
+
 ```
-┌─────────────────────────────────────────────────┐
-│           Context Window (每次 turn)              │
-│  ┌─────────────┐  ┌──────────┐  ┌─────────────┐ │
-│  │ AGENTS.md   │  │ SOUL.md  │  │  USER.md    │ │
-│  │ IDENTITY.md │  │ TOOLS.md │  │  MEMORY.md* │ │
-│  └─────────────┘  └──────────┘  └─────────────┘ │
-│            * 仅 main session 加载                  │
-├─────────────────────────────────────────────────┤
-│           Session History (当前对话)              │
-│  transcript stored as JSONL per session          │
-├─────────────────────────────────────────────────┤
-│  Short-term Memory (今天+昨天)                    │
-│  memory/2026-02-16.md  (自动加载)                 │
-│  memory/2026-02-15.md  (自动加载)                 │
-├─────────────────────────────────────────────────┤
-│           Long-term Memory Search (按需检索)       │
-│  Hybrid Search: Vector (70%) + BM25 (30%)        │
-│  SQLite + sqlite-vec + FTS5                      │
-│  搜索范围: 所有 memory/*.md + MEMORY.md +          │
-│           session transcripts (可选)              │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│ Context Window (每次 turn)                        │
+│ AGENTS / USER / SOUL / IDENTITY / TOOLS / MEMORY │
+│ * MEMORY.md 仅 main session 注入                  │
+├──────────────────────────────────────────────────┤
+│ Session History（当前对话）                        │
+│ PostgreSQL sessions + messages                    │
+├──────────────────────────────────────────────────┤
+│ Short-term Memory（daily notes）                  │
+│ memory/YYYY-MM-DD.md（append-only）               │
+├──────────────────────────────────────────────────┤
+│ Long-term Memory（curated）                       │
+│ MEMORY.md                                         │
+├──────────────────────────────────────────────────┤
+│ Retrieval Data Plane                              │
+│ PostgreSQL 16 + ParadeDB pg_search + pgvector    │
+└──────────────────────────────────────────────────┘
 ```
 
-## 记忆写入：三种方式
+说明：
+- 文件层（daily notes / MEMORY.md）是记忆源数据。
+- PostgreSQL 检索层用于召回，不改变“记忆以文件为准”的设计边界。
 
-**方式一：用户显式要求**
+## 3. 检索路线（与决议对齐）
+- 决议基线：统一 PostgreSQL 16（`pgvector` + `pg_search`），不使用 SQLite。
+- 阶段策略：
+  - 先 BM25（`pg_search`）形成可用检索。
+  - 再 Hybrid Search（BM25 + vector）提升召回质量。
 
-用户说"记住这个"，agent 直接写入 `memory/YYYY-MM-DD.md` 或相关文件。
-也可以显式要求写入 USER.md，比如 "Add to USER.md that I prefer short answers"。
+决议参考：
+- `decisions/0006-use-postgresql-pgvector-instead-of-sqlite.md`
+- `decisions/0014-paradedb-tokenization-icu-primary-jieba-fallback.md`
 
-**方式二：Agent 主动记录**
+## 4. 写入与治理边界
+- 用户显式要求可写入记忆文件。
+- Agent 在明确规则下可沉淀 daily notes 与长期记忆。
+- 记忆原子操作目标：
+  - `memory_search`：检索历史记忆
+  - `memory_append`：受控追加写入 `memory/YYYY-MM-DD.md`
+- 接近 context 上限时，先做 memory flush，再做 compaction（M2/M3 衔接点）。
 
-AGENTS.md 里的指令告诉 agent：遇到重要决策、上下文、教训时，主动写入 daily notes。
-agent 还被要求定期从 daily notes 中提炼有价值的信息，晋升到 MEMORY.md。
-重要学习内容要和用户进行1on1会议确认。
-
-**方式三：Pre-compaction Memory Flush **
-
-当 session 接近 context window 上限时（比如 200K window，在约 176K tokens 时触发），NeoMAGI应该在压缩之前自动发起一个 **silent agentic turn**，提示 model 把值得保留的信息写入 `memory/YYYY-MM-DD.md`，然后才执行 compaction。如果没有什么值得保存的，model 回复 `NO_REPLY` 或 `NO_FLUSH`，不会产生垃圾。
-这解决了一个关键问题：长对话被 compaction 截断时，重要信息不会丢失。
-
-### 记忆检索：Hybrid Search
-
-Agent 有一个内置工具 `memory_search`，当需要回忆历史信息时调用。检索流程：
-```
-Query → 同时触发两路搜索
-  ├─ Vector Search (sqlite-vec, cosine similarity) → 70% 权重
-  │   概念匹配："gateway host" ≈ "machine running gateway"
-  └─ BM25 Search (SQLite FTS5) → 30% 权重
-      精确匹配：error codes, 函数名, 唯一标识符
-
-→ Union (取并集，不是交集)
-→ finalScore = vectorWeight × vectorScore + textWeight × textScore
-→ 返回 top-k chunks 注入到当前 turn 的 context
+## 5. 里程碑映射
+- M2：会话内连续性（含 pre-compaction memory flush 与 compaction 衔接机制）。
+- M3：会话外持久记忆（记忆检索闭环与长期治理）。
