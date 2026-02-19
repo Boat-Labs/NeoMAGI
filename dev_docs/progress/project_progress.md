@@ -78,3 +78,20 @@
 - Decisions: ADR 0019 + 0020 + 0021 + 0022
 - Next: 进入 M1.4（审计修复收尾）
 - Risk: P2 follow-up 待 M1.4 前置完成 — conftest.py PG fixture + 3 条集成测试 (claim/release, seq 原子分配, force reload) + CI PostgreSQL job
+
+## 2026-02-19 (local) | M1.4
+- Status: done
+- Done: 审计修复收尾 + 测试基础设施，7 项 task 全部完成
+- Detail:
+  - T1: PG 集成测试基础设施 — testcontainers-python session-scoped fixture + conftest + 6 组集成测试 (CRUD, seq atomic, claim/release, TTL reclaim, force reload, fencing)
+  - T2: CI 落地 — GitHub Actions workflow (unit + integration + frontend) + justfile test commands
+  - T3: 前端 vitest 基础设施 — vitest + jsdom + zustand store 10 组测试
+  - T4/R1: history 请求超时兜底 — 10s setTimeout guard + 2 组 fake timer 测试
+  - T5/R2: lock fencing — SessionFencingError + `_persist_message` ON CONFLICT WHERE 原子 token 校验
+  - T6/F4: 全程流式 — ContentDelta/ToolCallsComplete/StreamEvent 类型 + chat_stream_with_tools 替代 chat_completion + delta 聚合
+  - T7/F6b: WebSocket + tool loop flow 集成测试 — 12 组 (streaming chat, history, tool loop, SESSION_BUSY, unknown method, invalid JSON, single/multi-round tool calls, mixed content, tool failure, max iterations, fencing mid-loop)
+  - Review fixes: SESSION_BUSY 实测、unawaited coroutine 消除、PARSE_ERROR 语义对齐
+- Evidence: 8 commits on feat/m1.4-audit-test-infra, 82 tests passed (64 unit + 18 integration), 10 frontend tests passed, ruff clean
+- Plan: dev_docs/plans/m1.4_audit-test-infra_2026-02-18.md
+- Next: M1 审计全部完成，进入 M2 规划
+- Risk: 无
