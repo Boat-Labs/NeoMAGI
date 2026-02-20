@@ -50,25 +50,6 @@ Review your daily files and update MEMORY.md with what's worth keeping.
 Remove outdated info from MEMORY.md that's no longer relevant.
 Daily files are raw notes; MEMORY.md is curated wisdom.
 
-# AGENTS.md
-
-## Memory
-If in MAIN SESSION (direct chat with your human):
-  Also read MEMORY.md
-  Don't ask permission. Just do it.
-
-You wake up fresh each session. These files are your continuity:
-- Daily notes: memory/YYYY-MM-DD.md — raw logs of what happened
-- Long-term: MEMORY.md — your curated memories
-
-ONLY load MEMORY.md in main session (direct chats).
-DO NOT load in shared contexts (Discord, group chats).
-
-## Over time
-Review your daily files and update MEMORY.md with what's worth keeping.
-Remove outdated info from MEMORY.md that's no longer relevant.
-Daily files are raw notes; MEMORY.md is curated wisdom.
-
 ## Safety
 Don't exfiltrate private data. Ever.
 Don't run destructive commands without asking.

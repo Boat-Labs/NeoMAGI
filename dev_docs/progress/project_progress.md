@@ -95,3 +95,10 @@
 - Plan: dev_docs/plans/m1.4_audit-test-infra_2026-02-18.md
 - Next: M1 审计全部完成，进入 M2 规划
 - Risk: 无
+
+## 2026-02-20 (local) | M1.5
+- Status: in_progress
+- Done: roadmap v3 与决议拆分完成（ADR 0023 + 0024），并完成 architecture 文档体系重组（M1 总结 + M1.5~M6 计划 + design_docs/index.md）
+- Evidence: commit 912bac7, `design_docs/roadmap_milestones_v3.md`, `decisions/0023-roadmap-product-oriented-boundary.md`, `decisions/0024-m1.5-tool-modes-and-priority-reorder.md`
+- Next: 进入 M1.5 规划（Tool Modes）
+- Risk: M1.5 模式切换机制（会话级/请求级）尚未决策

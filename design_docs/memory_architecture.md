@@ -66,6 +66,14 @@
   - `memory_append`：受控追加写入 `memory/YYYY-MM-DD.md`
 - 接近 context 上限时，先做 memory flush，再做 compaction（M2/M3 衔接点）。
 
-## 5. 里程碑映射
+## 5. M2/M3 衔接点（Contract）
+- M2 输出两类产物：
+  - 会话内产物：compaction 后继续对话所需的压缩上下文。
+  - 记忆候选产物：memory flush 生成的候选条目（至少包含候选内容与来源定位）。
+- M2 阶段 focus 在“触发时机 + 输出契约”，不要求交付会话外持久写入能力。
+- M3 阶段接管持久化写入：通过 `memory_append` 将候选落盘到 `memory/YYYY-MM-DD.md`，并纳入检索闭环。
+- 该分层用于避免 M2 完成后 M3 反向修改 flush/compaction 的输出接口。
+
+## 6. 里程碑映射
 - M2：会话内连续性（含 pre-compaction memory flush 与 compaction 衔接机制）。
 - M3：会话外持久记忆（记忆检索闭环与长期治理）。

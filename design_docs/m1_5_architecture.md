@@ -12,6 +12,7 @@
 - 当前可用工具为 `current_time`、`read_file`、`memory_search`（占位）。
 - `memory_append` 尚未加入当前内置工具集合。
 - 尚无“按模式过滤工具”与“执行前二次授权校验”。
+- Memory 组在本阶段仅做模式授权框架预留，不在本阶段落地持久化写入能力。
 
 实现参考：
 - `src/tools/registry.py`
@@ -23,7 +24,7 @@
 
 ### 3.1 工具分组
 - Code 组：`read/write/edit/bash`
-- Memory 组：`memory_search`、`memory_append`
+- Memory 组（框架预留）：`memory_search`、`memory_append`
 - World 组：`current_time`
 
 ### 3.2 模式定义
@@ -43,6 +44,7 @@
   - 支撑可控的代码任务闭环。
 - Out:
   - 不引入组织级 RBAC、策略中心或复杂审批工作流。
+  - 不在本阶段交付会话外记忆写入闭环（`memory_append` 实现归 M3）。
 
 ## 5. 验收对齐（来自 roadmap）
 - `coding` 模式下，可完成修复代码并执行验证的完整流程。

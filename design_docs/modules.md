@@ -49,6 +49,7 @@
   - 记忆数据层对齐 PostgreSQL 16 + `pg_search` + `pgvector`。
   - 按阶段推进：先 BM25，再 Hybrid Search。
   - 引入记忆原子操作分工：`memory_search`（检索）+ `memory_append`（追加写入）。
+  - 里程碑边界：M1.5 仅做 Memory 组授权框架预留，`memory_append` 实现归 M3。
 
 实现与决议参考：
 - `src/agent/prompt_builder.py`
@@ -64,7 +65,7 @@
 - 规划边界：
   - 进入模式化授权（`chat_safe` / `coding`）。
   - 在可控边界下扩展 `read/write/edit/bash` 代码闭环能力。
-  - 补齐记忆写入原子工具 `memory_append`，与 `memory_search` 形成记忆闭环接口。
+  - 在模式层为 `memory_append` 预留授权接口；实际工具落地与记忆闭环归 M3。
 
 实现参考：
 - `src/tools/base.py`

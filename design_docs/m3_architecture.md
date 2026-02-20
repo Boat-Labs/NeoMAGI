@@ -12,6 +12,7 @@
 - `MEMORY.md` 已在 main session 注入。
 - `memory_search` 工具已注册但仍为占位实现。
 - `memory_append` 尚未落地，当前缺少受控的记忆写入原子接口。
+- M1.5 仅预留 Memory 组授权框架，不负责 `memory_append` 的实际实现。
 
 实现参考：
 - `src/infra/init_workspace.py`

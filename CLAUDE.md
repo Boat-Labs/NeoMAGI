@@ -13,10 +13,10 @@
 
 ## 项目状态
 
-**当前阶段：v0.1 设计中，尚无可运行代码。**
+**当前阶段：M1（M1.1~M1.4）已完成，正在进入 M1.5（Tool Modes）规划。**
 
-优先实现最小可用版本：Gateway + Single Agent + WebChat（first）+ Telegram（second）+ file-based memory。
-不要跳步实现后续功能（hybrid search、multi-agent、heartbeat 等）。
+当前基线：后端单元/集成测试通过，前端测试通过，CI 已落地。  
+下一阶段优先级以 `design_docs/roadmap_milestones_v3.md` 为准。
 
 ## 项目结构
 
@@ -29,8 +29,17 @@ neomagi/
 ├── .env_template             # 环境变量模板（不含真实凭据）
 ├── decisions/                # 决策追踪（ADR-lite，关键变更需更新）
 ├── design_docs/              # 设计文档（只读参考，不要修改）
-│   ├── architecture.md       # 整体架构
-│   ├── memory.md             # 记忆系统设计
+│   ├── index.md              # 设计文档入口（渐进式披露）
+│   ├── modules.md            # 模块架构总览（现状 + 边界）
+│   ├── roadmap_milestones_v3.md # 产品向路线图（当前生效）
+│   ├── m1_architecture.md    # M1 已完成架构总结
+│   ├── m1_5_architecture.md  # M1.5 架构计划
+│   ├── m2_architecture.md    # M2 架构计划
+│   ├── m3_architecture.md    # M3 架构计划
+│   ├── m4_architecture.md    # M4 架构计划
+│   ├── m5_architecture.md    # M5 架构计划
+│   ├── m6_architecture.md    # M6 架构计划
+│   ├── memory_architecture.md # 记忆架构（当前状态 + 规划）
 │   └── system_prompt.md      # System prompt 文件体系
 ├── workspace/                # Agent workspace（bootstrap 文件）
 │   ├── AGENTS.md             # 行为 SOP
@@ -50,9 +59,7 @@ neomagi/
 │   ├── channels/             # Channel adapters (webchat first, telegram second)
 │   ├── config/               # 配置加载, 验证, 热加载
 │   └── infra/                # 日志, 错误处理, 工具函数
-├── tests/
-└── config/
-    └── neomagi.toml          # 用户配置文件
+└── tests/
 ```
 
 ## 技术栈
@@ -77,7 +84,7 @@ neomagi/
 
 **重要：不要使用 SQLite。本项目所有持久化都走 PostgreSQL 16。**
 **重要：数据库连接信息读取本地 `.env`，模板维护在 `.env_template`。**
-**重要：运行时配置优先级为 环境变量 > `.env` > 默认值；`config/neomagi.toml` 仅用于非敏感默认配置。**
+**重要：运行时配置优先级为 环境变量 > `.env` > 默认值。**
 **重要：容器相关命令一律使用 podman，不是 docker。**
 
 ## 编码规范
