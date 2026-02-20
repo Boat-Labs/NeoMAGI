@@ -142,10 +142,10 @@ neomagi/
 6. Memory recall（memory_search 结果，如有）
 7. Date/Time + timezone
 
-### Memory 实现路径（渐进式）
-- **v0.1**: File-based only — MEMORY.md + daily notes 直接注入 context，无搜索
-- **v0.2**: BM25 search — ParadeDB `pg_search` 全文检索（ICU 主召回 + Jieba 补充）
-- **v0.3**: Hybrid search — `pg_search` + `pgvector` 融合排序（weighted score fusion）
+### Memory 实现路径（渐进式，按 Milestone 映射）
+- **M1 基线**: File-based only — MEMORY.md + daily notes 直接注入 context，无搜索
+- **M3 阶段 1（BM25）**: ParadeDB `pg_search` 全文检索（ICU 主召回 + Jieba 补充）
+- **M3 阶段 2（Hybrid）**: `pg_search` + `pgvector` 融合排序（weighted score fusion）
 
 ### Session 策略
 - DM 消息 → 合并到 `main` session

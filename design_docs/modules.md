@@ -63,7 +63,7 @@
   - 具备工具注册、schema 生成与执行主链路。
   - 当前内置工具：`current_time`、`read_file`、`memory_search`（占位）。
 - 规划边界：
-  - 进入模式化授权（`chat_safe` / `coding`）。
+  - 进入模式化授权框架（`chat_safe` 生效，`coding` 预留）。
   - 在可控边界下扩展 `read/write/edit/bash` 代码闭环能力。
   - 在模式层为 `memory_append` 预留授权接口；实际工具落地与记忆闭环归 M3。
 

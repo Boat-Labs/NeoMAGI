@@ -56,7 +56,7 @@ Don't run destructive commands without asking.
 When in doubt, ask.
 ```
 
-### 2. SOUL.md — "灵魂 / 人格"
+### 2.2 SOUL.md — "灵魂 / 人格"
 
 定义 agent 是谁，不是做什么。当 SOUL.md 存在时，prompt 会注入：`"If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it."`
 关键设计理念是：SOUL.md 不是配置文件，是哲学声明。
@@ -83,7 +83,7 @@ As you learn who you are, update it.
 
 这个文件有一个重要特性：agent 被鼓励自我学习和修改它。但是为了避免prompt injection攻击，任何学习和修改内容都要和自己的人类搭档也是用户沟通后才能写入，写入的时间是每天或者每周和人类搭档的1on1会议后经批准写入。
 
-### 3. USER.md — "用户画像"
+### 2.3 USER.md — "用户画像"
 个性化层，存储用户偏好和上下文，让 agent 知道他在为谁服务，他的人类搭档是谁。
 
 样例：
@@ -98,7 +98,7 @@ As you learn who you are, update it.
 - Preferences: short answers, copy-pastable commands
 ```
 
-## 4. IDENTITY.md — "身份名片"
+### 2.4 IDENTITY.md — "身份名片"
 结构化的身份信息（名字、角色、目标、声音），用于展示层。与 SOUL.md 的区别：SOUL.md 是内在哲学，IDENTITY.md 是外在呈现。
 
 学习 OpenClaw 用 cascade resolution 解析 identity：`config global → per-agent config → IDENTITY.md → 默认值 "Assistant"`
@@ -109,7 +109,7 @@ role: Personal AI Assistant
 emoji: 🎸
 ```
 
-## 5. TOOLS.md — "工具备忘录"
+### 2.5 TOOLS.md — "工具备忘录"
 记录工具使用细节和本地环境特有的配置。
 样例：
 ```markdown
@@ -128,7 +128,7 @@ emoji: 🎸
 - vLLM runs on port 8000
 ```
 
-## 6. HEARTBEAT.md — "定时巡检清单"
+### 2.6 HEARTBEAT.md — "定时巡检清单"
 Gateway 有一个 daemon 进程，每隔固定时间（默认 30 分钟）发送一个心跳 poll 给 agent。
 Agent 收到后：
 读取 workspace 里的 HEARTBEAT.md
