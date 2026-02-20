@@ -1,6 +1,18 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from enum import StrEnum
+
+
+class ToolGroup(StrEnum):
+    code = "code"
+    memory = "memory"
+    world = "world"
+
+
+class ToolMode(StrEnum):
+    chat_safe = "chat_safe"
+    coding = "coding"
 
 
 class BaseTool(ABC):
@@ -23,6 +35,16 @@ class BaseTool(ABC):
     def parameters(self) -> dict:
         """JSON Schema describing the tool's input parameters."""
         ...
+
+    @property
+    def group(self) -> ToolGroup:
+        """Tool group classification. Conservative default: code."""
+        return ToolGroup.code
+
+    @property
+    def allowed_modes(self) -> frozenset[ToolMode]:
+        """Modes in which this tool is available. Fail-closed: empty by default."""
+        return frozenset()
 
     @abstractmethod
     async def execute(self, arguments: dict) -> dict:

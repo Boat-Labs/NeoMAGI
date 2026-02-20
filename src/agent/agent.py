@@ -11,6 +11,7 @@ from src.agent.events import AgentEvent, TextChunk, ToolCallInfo
 from src.agent.model_client import ContentDelta, ModelClient, ToolCallsComplete
 from src.agent.prompt_builder import PromptBuilder
 from src.session.manager import SessionManager
+from src.tools.base import ToolMode
 from src.tools.registry import ToolRegistry
 
 logger = structlog.get_logger()
@@ -69,13 +70,16 @@ class AgentLoop:
             session_id, "user", content, lock_token=lock_token
         )
 
-        # 2. Build system prompt
-        system_prompt = self._prompt_builder.build(session_id)
+        # Phase 1: hardcode chat_safe; Phase 2 will read from SessionManager.get_mode
+        mode = ToolMode.chat_safe  # TODO(Phase 2): await self._session_manager.get_mode(session_id)
 
-        # 3. Get tools schema
+        # 2. Build system prompt
+        system_prompt = self._prompt_builder.build(session_id, mode)
+
+        # 3. Get tools schema (mode-filtered)
         tools_schema = None
-        if self._tool_registry and self._tool_registry.list_tools():
-            tools_schema = self._tool_registry.get_tools_schema()
+        if self._tool_registry and self._tool_registry.list_tools(mode):
+            tools_schema = self._tool_registry.get_tools_schema(mode)
 
         # 4. Streaming tool call loop
         for iteration in range(MAX_TOOL_ITERATIONS):
