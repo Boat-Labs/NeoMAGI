@@ -10,7 +10,7 @@
 
 ## 选了什么
 - mode 作为会话状态，存储在 SessionManager（每个 session 一个 mode 字段）。
-- 默认值由配置提供（`DEFAULT_SESSION_MODE`，默认 `chat_safe`），仅用于新 session 初始化。
+- 默认值由配置提供（环境变量 `SESSION_DEFAULT_MODE`，默认 `chat_safe`），仅用于新 session 初始化。
 - AgentLoop 每轮从 SessionManager 读取 mode，并传入 ToolRegistry：
   - 暴露闸门：按 mode 返回 `tools_schema`。
   - 执行闸门：按 mode 校验工具是否可执行。
