@@ -60,6 +60,19 @@ export interface ResponseMessage {
   }
 }
 
-export type ServerMessage = StreamChunkMessage | ErrorMessage | ToolCallMessage | ResponseMessage
+export interface ToolDeniedMessage {
+  type: "tool_denied"
+  id: RequestId
+  data: {
+    call_id: string
+    tool_name: string
+    mode: string
+    error_code: string
+    message: string
+    next_action: string
+  }
+}
+
+export type ServerMessage = StreamChunkMessage | ErrorMessage | ToolCallMessage | ResponseMessage | ToolDeniedMessage
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting"

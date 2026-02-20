@@ -16,7 +16,13 @@ export interface ToolCall {
   callId: string
   toolName: string
   arguments: Record<string, unknown>
-  status: "running" | "complete"
+  status: "running" | "complete" | "denied"
+  deniedInfo?: {
+    mode: string
+    errorCode: string
+    message: string
+    nextAction: string
+  }
 }
 
 export interface ChatMessage {
@@ -247,6 +253,35 @@ export const useChatStore = create<ChatState>()(
                 }),
                 false,
                 "toolCall"
+              )
+              break
+            }
+            case "tool_denied": {
+              const deniedToolCall: ToolCall = {
+                callId: message.data.call_id,
+                toolName: message.data.tool_name,
+                arguments: {},
+                status: "denied",
+                deniedInfo: {
+                  mode: message.data.mode,
+                  errorCode: message.data.error_code,
+                  message: message.data.message,
+                  nextAction: message.data.next_action,
+                },
+              }
+              set(
+                (state) => ({
+                  messages: state.messages.map((m) =>
+                    m.id === message.id
+                      ? {
+                          ...m,
+                          toolCalls: [...(m.toolCalls ?? []), deniedToolCall],
+                        }
+                      : m
+                  ),
+                }),
+                false,
+                "toolDenied"
               )
               break
             }
