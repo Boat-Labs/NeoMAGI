@@ -274,21 +274,17 @@ class TestRegistryOverride:
 # ===========================================================================
 
 class TestRegistrationWarning:
-    def test_warning_for_empty_allowed_modes(self, caplog):
-        import structlog
-        structlog.configure(
-            processors=[structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
-            wrapper_class=structlog.stdlib.BoundLogger,
-            logger_factory=structlog.stdlib.LoggerFactory(),
-        )
-        reg = ToolRegistry()
-        with caplog.at_level("WARNING"):
+    def test_warning_for_empty_allowed_modes(self):
+        from structlog.testing import capture_logs
+
+        with capture_logs() as cap:
+            reg = ToolRegistry()
             reg.register(_BareStubTool())
-        # Check structlog output or caplog
+
         assert any(
-            "tool_registered_without_modes" in r.message or "empty allowed_modes" in r.message
-            for r in caplog.records
-        ) or len(caplog.records) >= 0  # structlog may not use standard logging
+            entry.get("event") == "tool_registered_without_modes"
+            for entry in cap
+        ), f"Expected 'tool_registered_without_modes' event, got: {cap}"
 
 
 # ===========================================================================
