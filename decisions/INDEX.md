@@ -31,6 +31,11 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0025 | Mode switching: user-controlled with chat_safe default | accepted | 2026-02-20 | `decisions/0025-mode-switching-user-controlled-chat-safe-default.md` |
 | 0026 | Session mode storage and propagation | accepted | 2026-02-20 | `decisions/0026-session-mode-storage-and-propagation.md` |
 | 0027 | Partner-agent self-evolution guardrails | accepted | 2026-02-21 | `decisions/0027-partner-agent-self-evolution-guardrails.md` |
+| 0028 | Compaction summary model strategy for M2 | accepted | 2026-02-21 | `decisions/0028-compaction-summary-model-strategy-for-m2.md` |
+| 0029 | Token counting strategy: tiktoken first, estimate fallback | accepted | 2026-02-21 | `decisions/0029-token-counting-strategy-tiktoken-first-fallback-estimate.md` |
+| 0030 | M2 anti-drift baseline scope: compaction preserves anchors | accepted | 2026-02-21 | `decisions/0030-m2-anti-drift-baseline-scope-compaction-preserves-anchors.md` |
+| 0031 | Compaction history rebuild semantics: watermark | accepted | 2026-02-21 | `decisions/0031-compaction-history-rebuild-semantics-watermark.md` |
+| 0032 | Memory flush ownership: AgentLoop orchestrates, CompactionEngine generates | accepted | 2026-02-21 | `decisions/0032-memory-flush-ownership-agentloop-orchestrates-compactionengine-generates.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。
