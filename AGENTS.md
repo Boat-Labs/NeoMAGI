@@ -26,6 +26,28 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 禁止多人共享同一 working directory。
 - 任何阻塞反馈必须包含：现象、影响、已尝试动作、下一步建议。
 
+## 协作心跳与超时治理（Agent Teams）
+- 说明：本节定义协作层活性治理，不涉及运行时 agent heartbeat 机制实现。
+- 目标：避免“角色无响应导致长时间停滞”与“慢任务被误判挂死后误重启”。
+- 心跳 SLA：
+  - 每个 teammate 最多每 15 分钟必须同步一次状态。
+  - 长任务（长测、迁移、全量回归）开始时必须立即同步一次，结束后 2 分钟内同步结果。
+  - 心跳建议统一格式：`[HEARTBEAT] role=<role> phase=<phase> status=<working|blocked|done> since=<ISO8601> eta=<min> next=<one-line>`
+- PM 超时判定流程（禁止直接重启）：
+  - 超过 20 分钟无心跳，先发送一次 `PING`，等待 5 分钟。
+  - 若最近状态为长任务执行中，再追加 20 分钟观察窗口。
+  - 仍无响应，标记 `suspected_stale`，先上报影响与风险，再决定是否重启。
+- 重启前置条件（必须全部满足）：
+  - 连续两次 `PING` 无响应。
+  - 无新提交、无新增日志、无新状态事件。
+  - 已形成书面“重启影响评估 + 回滚方案”。
+- Tester 保护规则：
+  - Tester 声明长测执行中时，PM 不得因短时静默触发重启。
+  - 建议状态标记：`TEST_RUN_STARTED`、`TEST_RUN_PROGRESS`、`TEST_RUN_FINISHED`。
+- 协作日志建议：
+  - 采用 append-only 事件日志：`dev_docs/logs/{milestone}_{YYYY-MM-DD}/heartbeat_events.jsonl`
+  - 每条至少包含：`ts`、`role`、`phase`、`status`、`task`、`eta_min`。
+
 ## Git 与分支策略
 - Commit message 格式：`<type>(<scope>): <description>`
   - type: feat, fix, refactor, docs, test, chore
@@ -72,6 +94,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 状态：M1.5 阶段临时降级为“非阻塞”。
 - 原因：Agent Teams 当前存在指令未稳定透传到 agent 层的问题。
 - 执行：保留 `dev_docs/logs/{milestone}_{YYYY-MM-DD}/` 目录；由 PM 提交阶段汇总日志，各 role 日志改为尽力提供。
+- 建议：并行阶段同步维护 `heartbeat_events.jsonl`，用于 PM 活性巡检与误重启防护。
 - 验收：当前阶段不因缺少某个 role 日志而阻塞。
 - 恢复条件：并行流程连续 3 次无透传丢失后，恢复为强制门槛。
 - 如提交 role 日志，仍建议包含：技能/工具名称、调用次数、典型场景、效果评估。

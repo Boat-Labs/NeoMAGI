@@ -127,6 +127,29 @@ neomagi/
 - 清理或切换 worktree 后，先确认变更已迁移到目标分支，再继续开发或测试
 - 未经确认禁止执行破坏性操作（强制覆盖、批量删除、历史重写）
 
+## 协作心跳与超时治理（Agent Teams）
+
+- 说明：以下为协作层治理规则，不是运行时 agent heartbeat 功能实现。
+- 目标：防止 teammate 无响应导致长时间停滞，防止慢任务被误判并误重启。
+- 心跳 SLA：
+  - 每个 teammate 至少每 15 分钟同步一次状态。
+  - 长任务（测试、迁移、全量回归）开始即发状态，完成后 2 分钟内补发结果。
+  - 推荐统一格式：`[HEARTBEAT] role=<role> phase=<phase> status=<working|blocked|done> since=<ISO8601> eta=<min> next=<one-line>`
+- PM 超时判定流程：
+  - 超过 20 分钟无状态，先 `PING` 一次并等待 5 分钟。
+  - 若最近状态是长任务中，再追加 20 分钟观察窗口。
+  - 仍无响应，标记 `suspected_stale` 并先输出风险说明，再决定是否重启。
+- 重启前置条件（全部满足）：
+  - 连续两次 `PING` 无响应。
+  - 无新提交、无新增日志、无状态更新事件。
+  - 已形成“重启影响评估 + 回滚方案”并记录。
+- Tester 保护：
+  - Tester 声明长测执行中时，PM 不得按短时静默误判挂死。
+  - 建议状态标记：`TEST_RUN_STARTED` / `TEST_RUN_PROGRESS` / `TEST_RUN_FINISHED`。
+- 事件日志建议（append-only）：
+  - `dev_docs/logs/{milestone}_{YYYY-MM-DD}/heartbeat_events.jsonl`
+  - 字段至少包括：`ts`、`role`、`phase`、`status`、`task`、`eta_min`。
+
 ## 核心设计决策
 
 ### 与 OpenClaw 的关键差异
@@ -196,6 +219,7 @@ neomagi/
 - 状态：M1.5 阶段临时降级为“非阻塞”。
 - 原因：Agent Teams 当前存在指令未稳定透传到 agent 层的问题。
 - 执行：保留 `dev_docs/logs/{milestone}_{YYYY-MM-DD}/` 目录；由 PM 提交阶段汇总日志，各 role 日志改为尽力提供。
+- 建议：并行阶段同步维护 `heartbeat_events.jsonl`，用于活性巡检与误重启防护。
 - 验收：当前阶段不因缺少某个 role 日志而阻塞。
 - 恢复条件：并行流程连续 3 次无透传丢失后，恢复为强制门槛。
 
