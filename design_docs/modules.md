@@ -20,6 +20,9 @@
   - Prompt 组装（workspace context + tooling + datetime）。
   - Model 调用走 OpenAI SDK 统一接口（OpenAI-compatible）。
   - Tool loop 支持流式 content 与 tool_calls 聚合。
+- 规划边界：
+  - M2：增加长会话反漂移基线（压缩前后保持用户利益约束与角色边界）。
+  - M3：增加自我进化治理控制流（提案 -> eval -> 生效 -> 回滚），不允许未评测变更直接生效。
 
 实现参考：
 - `src/agent/agent.py`
@@ -50,6 +53,7 @@
   - 按阶段推进：先 BM25，再 Hybrid Search。
   - 引入记忆原子操作分工：`memory_search`（检索）+ `memory_append`（追加写入）。
   - 里程碑边界：M1.5 仅做 Memory 组授权框架预留，`memory_append` 实现归 M3。
+  - 与进化治理边界：Memory 负责证据数据面，`SOUL.md` 进化控制流不在本模块直接实现。
 
 实现与决议参考：
 - `src/agent/prompt_builder.py`
@@ -66,6 +70,7 @@
   - 进入模式化授权框架（`chat_safe` 生效，`coding` 预留）。
   - 在可控边界下扩展 `read/write/edit/bash` 代码闭环能力。
   - 在模式层为 `memory_append` 预留授权接口；实际工具落地与记忆闭环归 M3。
+  - M3 新增进化治理相关原子接口（提案/评测/生效/回滚），遵循“可验证、可回滚、可审计”。
 
 实现参考：
 - `src/tools/base.py`

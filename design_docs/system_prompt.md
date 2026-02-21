@@ -4,12 +4,14 @@
 
 ## 0. 运行时加载顺序与优先级（单一真源）
 
-每次 turn 固定读取并遵循（按顺序）：
+每次 turn 固定注入（Workspace context layer，按顺序）：
 1. `AGENTS.md`（行为契约）
 2. `SOUL.md`（人格/语气）
 3. `USER.md`（用户偏好）
 4. `IDENTITY.md`（身份展示）
-5. `TOOLS.md`（工具与环境备忘）
+
+每次 turn 固定注入（Tooling layer）：
+- `TOOLS.md`（工具与环境备忘；与工具清单同层，不在 workspace context layer）
 
 按需加载：
 - `MEMORY.md`（仅 main session）
@@ -30,7 +32,7 @@
 | SOUL.md | 人格 / 哲学 / 价值观 | 每次 turn 注入 |
 | USER.md | 用户偏好 / 个性化层 | 每次 turn 注入 |
 | IDENTITY.md | 结构化身份信息 | 每次 turn 注入 |
-| TOOLS.md | 工具使用说明 / 本地配置备忘 | 每次 turn 注入 |
+| TOOLS.md | 工具使用说明 / 本地配置备忘 | 每次 turn 注入（Tooling layer） |
 | MEMORY.md | 长期记忆（策展后的持久知识） | 仅私聊 session |
 | HEARTBEAT.md | 心跳任务清单 | 心跳轮询时 |
 | BOOTSTRAP.md | 首次初始化指令（"出生证明"） | 仅新 workspace |
@@ -81,6 +83,12 @@ When in doubt, ask.
 定义 agent 是谁，不是做什么。当 SOUL.md 存在时，prompt 会注入：`"If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it."`
 关键设计理念是：SOUL.md 不是配置文件，是哲学声明。
 
+治理护栏（对齐 ADR 0027）：
+- `SOUL.md` 文本原则上仅允许 agent 写入；人类不直接编辑内容。
+- 任意变更必须先经过 eval，再允许生效。
+- 人类保留 veto/rollback 权限，可回退到最近稳定版本。
+- 新生阶段（bootstrap）例外：若 workspace 不存在 `SOUL.md`，允许人类一次性写入 `v0-seed`；当 M3 的 eval/rollback 管线可用且首个 AI 提案通过 eval 后，切换为 AI-only 写入常态。
+
 样例：
 ```markdown
 # SOUL.md - Who You Are
@@ -101,7 +109,7 @@ Try to figure it out. Read the file. Check the context.
 As you learn who you are, update it.
 ```
 
-这个文件有一个重要特性：agent 被鼓励自我学习和修改它。但是为了避免prompt injection攻击，任何学习和修改内容都要和自己的人类搭档也是用户沟通后才能写入，写入的时间是每天或者每周和人类搭档的1on1会议后经批准写入。
+这个文件有一个重要特性：agent 被鼓励自我学习和修改它。为避免 prompt injection 和人格漂移，更新必须走“提案 -> eval -> 生效 -> 回滚”流程；人类不直接改文本，但始终保留 veto/rollback 控制权。
 
 ### 2.3 USER.md — "用户画像"
 个性化层，存储用户偏好和上下文，让 agent 知道他在为谁服务，他的人类搭档是谁。

@@ -3,7 +3,7 @@
 > 原则不变：记忆基于文件，不依赖模型参数记忆。  
 > 核心句：**"Mental notes don't survive session restarts. Files do."**
 
-## 1. 当前状态（截至 2026-02-19）
+## 1. 当前状态（截至 2026-02-21）
 
 ### 1.1 已实现
 - 工作区初始化会创建 `memory/` 与 `MEMORY.md` 模板。
@@ -65,15 +65,18 @@
   - `memory_search`：检索历史记忆
   - `memory_append`：受控追加写入 `memory/YYYY-MM-DD.md`
 - 接近 context 上限时，先做 memory flush，再做 compaction（M2/M3 衔接点）。
+- 本文仅定义记忆数据面，不定义 `SOUL.md` 进化治理流程（见 `design_docs/m3_architecture.md` + ADR 0027）。
+- `memory_append` 仅用于记忆文件，不用于写入 `SOUL.md`。
 
 ## 5. M2/M3 衔接点（Contract）
 - M2 输出两类产物：
   - 会话内产物：compaction 后继续对话所需的压缩上下文。
-  - 记忆候选产物：memory flush 生成的候选条目（至少包含候选内容与来源定位）。
+  - 记忆候选产物：memory flush 生成的候选条目（至少包含候选内容、来源定位、约束标签）。
 - M2 阶段 focus 在“触发时机 + 输出契约（含候选条目数据结构定义）”，不要求交付会话外持久写入能力。
 - M3 阶段接管持久化写入：通过 `memory_append` 将候选落盘到 `memory/YYYY-MM-DD.md`，并纳入检索闭环。
 - 该分层用于避免 M2 完成后 M3 反向修改 flush/compaction 的输出接口。
+- M3 的进化评测可消费记忆候选与历史记录作为证据输入，但不改变记忆写入边界。
 
 ## 6. 里程碑映射
 - M2：会话内连续性（含 pre-compaction memory flush 与 compaction 衔接机制）。
-- M3：会话外持久记忆（记忆检索闭环与长期治理）。
+- M3：会话外持久记忆（记忆检索闭环与长期治理），并为自我进化评测提供可追溯记忆证据面。
