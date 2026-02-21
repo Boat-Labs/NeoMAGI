@@ -2,6 +2,26 @@
 
 学习 OpenClaw 的设计， NeoMAGI每次 agent turn 都会动态组装 system prompt，核心由 buildAgentSystemPrompt() 函数完成。它从 workspace 目录加载一组 bootstrap 文件，全部注入到 context window 的 Project Context 区域。每个文件上限 65,536 字符。
 
+## 0. 运行时加载顺序与优先级（单一真源）
+
+每次 turn 固定读取并遵循（按顺序）：
+1. `AGENTS.md`（行为契约）
+2. `SOUL.md`（人格/语气）
+3. `USER.md`（用户偏好）
+4. `IDENTITY.md`（身份展示）
+5. `TOOLS.md`（工具与环境备忘）
+
+按需加载：
+- `MEMORY.md`（仅 main session）
+- `HEARTBEAT.md`（心跳轮询）
+- `BOOTSTRAP.md` / `BOOT.md`（初始化/启动）
+
+冲突时优先级：`Safety > AGENTS.md > USER.md > SOUL.md > IDENTITY.md`
+
+说明：
+- 本节是运行时文件加载与冲突处理的唯一规范来源（SSOT）。
+- `AGENTS.md` 仅做引用，不重复维护该细节；`CLAUDE.md` 可保留高层摘要，但不应维护冲突优先级与逐文件加载细节。
+
 ## 1. 文件定位加载条件
 
 | 文件 | 操作指南 / 行为契约 | 每次 turn 注入 | 

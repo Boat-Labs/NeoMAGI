@@ -92,7 +92,7 @@ neomagi/
 ### 风格
 - ruff 格式化，行宽 100
 - Type hints everywhere，使用 `from __future__ import annotations`
-- Pydantic v2 BaseModel 做数据验证和配置
+- Pydantic v2：BaseModel 用于数据验证；BaseSettings（pydantic-settings）用于配置加载与 env_prefix，禁止混用。
 - 优先使用 `pathlib.Path`，不用 `os.path`
 - 日志使用 `structlog`，不用 `print` 或 `logging`
 
@@ -123,6 +123,9 @@ neomagi/
 - 每个 teammate 在独立 worktree 中工作，禁止多人共享同一 working directory
 - PM 负责在 spawn 前创建 worktree，在阶段完成后合并和清理
 - 分支命名：feat/<role>-<milestone>-<owner-or-task>（如 feat/backend-m1.1-agent-loop, feat/frontend-m1.1-webchat-ui）
+- 开始改动前固定执行：`pwd && git branch --show-current && git status --short`
+- 清理或切换 worktree 后，先确认变更已迁移到目标分支，再继续开发或测试
+- 未经确认禁止执行破坏性操作（强制覆盖、批量删除、历史重写）
 
 ## 核心设计决策
 
@@ -180,19 +183,32 @@ neomagi/
 ## Plan 持久化
 
 - `dev_docs/plans/` 不分目录：允许存在一个讨论中的草稿文件和已审批正稿文件。
+- 计划文件统一放在 `dev_docs/plans/`，禁止写入 `docs/plans/` 或其他非标准路径。
 - 草稿命名：`{milestone}_{目标简述}_{YYYY-MM-DD}_draft.md`。
 - 讨论阶段必须持续更新同一个 `_draft` 文件；禁止因讨论轮次新开 `_v2`、`_v3`。
 - 用户批准后，使用正确正稿文件名生成计划：`{milestone}_{目标简述}_{YYYY-MM-DD}.md`（或满足条件时 `_v2`、`_v3`），并删除对应 `_draft` 文件。
 - `_v2`、`_v3` 仅用于“同一 scope 下，上一版已审批且已执行”后的再次获批修订；不得用于未执行的讨论迭代。
 - 这是项目的持久记忆，后续 PM 重启时首先读取最新 plan。
+- 产出计划或设计相关内容前，先对齐 `AGENTS.md`、`CLAUDE.md`、相关 `decisions/` 与 `design_docs/` 约束。
 
-## Agent 工作日志
+## Agent 工作日志（临时降级策略）
 
-- 每个 agent 在完成当前 milestone 所有任务后，将技能调用汇总写入 `dev_docs/logs/{milestone}_{YYYY-MM-DD}/{role}.md`。
-- 必须包含：技能/工具名称、调用次数、典型场景、效果评估。
-- 可选包含：关键决策、遇到的问题、对后续阶段的建议。
-- PM 负责在阶段结束时检查所有 agent 都已提交日志。
-- 日期格式统一使用 `YYYY-MM-DD`（本地时区）。
-- 日志必须脱敏，禁止记录密钥、token、隐私原文。
-- 调用次数需可核对（建议附工具入口命令或调用标识）。
-- 阶段验收时若缺任一 role 日志，该 milestone 不视为完成。
+- 状态：M1.5 阶段临时降级为“非阻塞”。
+- 原因：Agent Teams 当前存在指令未稳定透传到 agent 层的问题。
+- 执行：保留 `dev_docs/logs/{milestone}_{YYYY-MM-DD}/` 目录；由 PM 提交阶段汇总日志，各 role 日志改为尽力提供。
+- 验收：当前阶段不因缺少某个 role 日志而阻塞。
+- 恢复条件：并行流程连续 3 次无透传丢失后，恢复为强制门槛。
+
+## 评审与迭代协议
+
+- 对 design/plan/fix 文档，默认执行“先约束清单、后草稿、再自检、最后提交”。
+- 提交前必须完成一次自检：命名一致、路径正确、实现步骤与测试策略一致、无内部矛盾、无静默吞异常。
+- 每轮评审回复必须包含：本轮修改项、已解决问题、未解决问题/风险。
+- 信息不足时先列缺失上下文并请求补充，禁止臆测关键架构决策。
+
+## 测试执行基线
+
+- 开发过程中先跑受影响测试；提交前必须跑全量回归。
+- 后端测试使用 `just test`，前端测试使用 `just test-frontend`，静态检查使用 `just lint`（必要时 `just format`）。
+- 新 worktree 先完成环境检查（`.env`、依赖安装）再运行测试。
+- 事件名/字段名必须以代码真实定义为准，禁止按猜测编写测试。
