@@ -10,6 +10,8 @@ import structlog
 from src.agent.events import AgentEvent, TextChunk, ToolCallInfo, ToolDenied
 from src.agent.model_client import ContentDelta, ModelClient, ToolCallsComplete
 from src.agent.prompt_builder import PromptBuilder
+from src.agent.token_budget import BudgetTracker
+from src.config.settings import CompactionSettings
 from src.session.manager import SessionManager
 from src.tools.registry import ToolRegistry
 
@@ -45,12 +47,16 @@ class AgentLoop:
         workspace_dir: Path,
         model: str = "gpt-4o-mini",
         tool_registry: ToolRegistry | None = None,
+        compaction_settings: CompactionSettings | None = None,
     ) -> None:
         self._model_client = model_client
         self._session_manager = session_manager
         self._prompt_builder = PromptBuilder(workspace_dir, tool_registry=tool_registry)
         self._tool_registry = tool_registry
         self._model = model
+        self._budget_tracker: BudgetTracker | None = None
+        if compaction_settings is not None:
+            self._budget_tracker = BudgetTracker(compaction_settings, model)
 
     async def handle_message(
         self, session_id: str, content: str, *, lock_token: str | None = None
@@ -87,6 +93,27 @@ class AgentLoop:
                 {"role": "system", "content": system_prompt},
                 *history,
             ]
+
+            # Budget check (observe only, does not trigger compaction in Phase 1)
+            if self._budget_tracker is not None:
+                total_tokens = self._budget_tracker.counter.count_messages(messages)
+                if tools_schema:
+                    total_tokens += self._budget_tracker.counter.count_tools_schema(
+                        tools_schema
+                    )
+                budget_status = self._budget_tracker.check(total_tokens)
+                logger.info(
+                    "budget_check",
+                    session_id=session_id,
+                    model=self._model,
+                    iteration=iteration,
+                    current_tokens=budget_status.current_tokens,
+                    status=budget_status.status,
+                    usable_budget=budget_status.usable_budget,
+                    warn_threshold=budget_status.warn_threshold,
+                    compact_threshold=budget_status.compact_threshold,
+                    tokenizer_mode=budget_status.tokenizer_mode,
+                )
 
             # Stream the LLM response — content tokens arrive immediately,
             # tool calls are accumulated and yielded at the end of the stream.
