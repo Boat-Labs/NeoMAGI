@@ -102,3 +102,25 @@
 - Evidence: commit 912bac7, `design_docs/roadmap_milestones_v3.md`, `decisions/0023-roadmap-product-oriented-boundary.md`, `decisions/0024-m1.5-tool-modes-and-priority-reorder.md`, `decisions/0025-mode-switching-user-controlled-chat-safe-default.md`
 - Next: 按 ADR 0025 推进 M1.5（Tool Modes）详细方案与实现（固定 `chat_safe`，`coding` 预留）
 - Risk: 无
+
+## 2026-02-20 (local) | M1.5
+- Status: in_progress
+- Done: M1.5 Tool Modes 主体实现交付 — dual-gate mode 授权框架（暴露闸门 + 执行闸门）、ToolGroup/ToolMode enum、BaseTool fail-closed defaults、ToolRegistry mode-aware filtering/override/check_mode、3 个 builtin 工具 metadata 声明、AgentLoop 执行闸门 ToolDenied 路径、PromptBuilder mode-filtered tooling + safety layer、SessionManager.get_mode fail-closed + M1.5 guardrail、SessionSettings config validation、前端 tool_denied WebSocket 消息处理与 UI
+- Evidence: commit e0759b2..0a555b1, 123 unit tests + 24 integration tests + 13 frontend tests passed, ruff clean
+- Plan: dev_docs/plans/m1.5_tool-modes_2026-02-19.md
+- Decisions: ADR 0025 + 0026
+- Next: code review 后修复发现的问题
+- Risk: code review 发现 4 项问题待修
+
+## 2026-02-21 (local) | M1.5
+- Status: done
+- Done: M1.5 review-fixes 验收通过 — 修复 code review 发现的 4 项问题
+- Detail:
+  - P1: 前端 tool_denied 双状态 — tool_denied handler 从 append 改为 call_id findIndex update-or-insert；done handler 对 denied 状态做 preserve 而非覆写 complete
+  - P1: 未注册工具误分类 — agent.py gate 条件增加 `registry.get(name) is not None` 前置检查，未知工具跳过 mode gate 直接走 `_execute_tool` 的 UNKNOWN_TOOL 路径
+  - P2: structlog 测试恒真断言 — 从 caplog + `len(caplog.records) >= 0` 换为 `structlog.testing.capture_logs`
+  - P3: M1.5 milestone 日志 — 创建 `dev_docs/logs/m1.5_2026-02-21/developer.md`
+- Evidence: commit cb3c4d3..5e53407 (merge), 123 unit tests + 26 integration tests + 16 frontend tests passed, ruff clean
+- Plan: dev_docs/plans/m1.5_review-fixes_2026-02-21.md
+- Next: 进入 M2（会话内连续性）规划
+- Risk: 无
