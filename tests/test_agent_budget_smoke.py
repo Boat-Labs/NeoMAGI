@@ -1,7 +1,9 @@
-"""Smoke tests for agent loop budget check integration (Phase 1).
+"""Smoke tests for agent loop budget check integration (Phase 1/3).
 
 Verifies that budget_check log is emitted with all required fields
 during agent loop execution. Uses mock model client.
+
+Updated for Phase 3: agent loop now uses get_effective_history + get_compaction_state.
 """
 
 from __future__ import annotations
@@ -11,9 +13,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.agent.agent import AgentLoop
-from src.agent.events import TextChunk
 from src.agent.model_client import ContentDelta
 from src.config.settings import CompactionSettings
+from src.session.manager import Message, MessageWithSeq
 from src.tools.base import ToolMode
 
 
@@ -26,6 +28,19 @@ def _make_stream_response(text: str = "Hello!"):
     return stream
 
 
+def _make_session_manager(history_msgs: list[MessageWithSeq] | None = None):
+    """Create a mock SessionManager with Phase 3 interface."""
+    sm = MagicMock()
+    user_msg = MagicMock(spec=Message)
+    user_msg.seq = 0
+    sm.append_message = AsyncMock(return_value=user_msg)
+    sm.get_mode = AsyncMock(return_value=ToolMode.chat_safe)
+    sm.get_compaction_state = AsyncMock(return_value=None)
+    sm.get_effective_history = MagicMock(return_value=history_msgs or [])
+    sm.get_history_with_seq = MagicMock(return_value=history_msgs or [])
+    return sm
+
+
 @pytest.mark.asyncio
 class TestAgentBudgetSmoke:
     """Verify budget_check log is emitted with correct fields."""
@@ -36,12 +51,13 @@ class TestAgentBudgetSmoke:
             side_effect=[_make_stream_response()()]
         )
 
-        session_manager = MagicMock()
-        session_manager.append_message = AsyncMock()
-        session_manager.get_mode = AsyncMock(return_value=ToolMode.chat_safe)
-        session_manager.get_history.return_value = [
-            {"role": "user", "content": "Hi there"},
+        history = [
+            MessageWithSeq(
+                seq=0, role="user", content="Hi there",
+                tool_calls=None, tool_call_id=None,
+            ),
         ]
+        session_manager = _make_session_manager(history)
 
         settings = CompactionSettings(
             context_limit=10_000,
@@ -90,10 +106,7 @@ class TestAgentBudgetSmoke:
             side_effect=[_make_stream_response()()]
         )
 
-        session_manager = MagicMock()
-        session_manager.append_message = AsyncMock()
-        session_manager.get_mode = AsyncMock(return_value=ToolMode.chat_safe)
-        session_manager.get_history.return_value = []
+        session_manager = _make_session_manager()
 
         settings = CompactionSettings(
             context_limit=10_000,
@@ -129,10 +142,7 @@ class TestAgentBudgetSmoke:
             side_effect=[_make_stream_response()()]
         )
 
-        session_manager = MagicMock()
-        session_manager.append_message = AsyncMock()
-        session_manager.get_mode = AsyncMock(return_value=ToolMode.chat_safe)
-        session_manager.get_history.return_value = []
+        session_manager = _make_session_manager()
 
         settings = CompactionSettings(
             context_limit=10_000,
@@ -168,10 +178,7 @@ class TestAgentBudgetSmoke:
             side_effect=[_make_stream_response()()]
         )
 
-        session_manager = MagicMock()
-        session_manager.append_message = AsyncMock()
-        session_manager.get_mode = AsyncMock(return_value=ToolMode.chat_safe)
-        session_manager.get_history.return_value = []
+        session_manager = _make_session_manager()
 
         agent = AgentLoop(
             model_client=model_client,
@@ -197,12 +204,13 @@ class TestAgentBudgetSmoke:
             side_effect=[_make_stream_response()()]
         )
 
-        session_manager = MagicMock()
-        session_manager.append_message = AsyncMock()
-        session_manager.get_mode = AsyncMock(return_value=ToolMode.chat_safe)
-        session_manager.get_history.return_value = [
-            {"role": "user", "content": "Short message"},
+        history = [
+            MessageWithSeq(
+                seq=0, role="user", content="Short message",
+                tool_calls=None, tool_call_id=None,
+            ),
         ]
+        session_manager = _make_session_manager(history)
 
         settings = CompactionSettings(
             context_limit=10_000,

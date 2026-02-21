@@ -40,14 +40,24 @@ class PromptBuilder:
         self._workspace_dir = workspace_dir
         self._tool_registry = tool_registry
 
-    def build(self, session_id: str, mode: ToolMode) -> str:
-        """Build the complete system prompt by concatenating all non-empty layers."""
+    def build(
+        self,
+        session_id: str,
+        mode: ToolMode,
+        compacted_context: str | None = None,
+    ) -> str:
+        """Build the complete system prompt by concatenating all non-empty layers.
+
+        When compacted_context is provided (after compaction), it is injected
+        between workspace context and memory recall as a [会话摘要] block.
+        """
         layers = [
             self._layer_identity(),
             self._layer_tooling(mode),
             self._layer_safety(mode),
             self._layer_skills(),
             self._layer_workspace(session_id),
+            self._layer_compacted_context(compacted_context),
             self._layer_memory_recall(),
             self._layer_datetime(),
         ]
@@ -121,6 +131,12 @@ class PromptBuilder:
             return ""
 
         return "## Project Context\n\n" + "\n\n---\n\n".join(parts)
+
+    def _layer_compacted_context(self, compacted_context: str | None) -> str:
+        """Inject rolling summary from compaction (if any)."""
+        if not compacted_context:
+            return ""
+        return f"## 会话摘要\n\n{compacted_context}"
 
     def _layer_memory_recall(self) -> str:
         # Placeholder — no memory search in M1.2

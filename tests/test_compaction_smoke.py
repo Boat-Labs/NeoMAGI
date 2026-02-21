@@ -131,7 +131,10 @@ class TestCompactionSmoke:
         msgs1 = _make_long_history(10)
         result1 = await engine.compact(
             messages=msgs1,
-            system_prompt="System prompt content for validation purposes - this is long enough to pass the check",
+            system_prompt=(
+                "System prompt content for validation purposes"
+                " - this is long enough to pass the check"
+            ),
             tools_schema=[],
             budget_status=BudgetStatus("compact_needed", 9000, 9300, 6510, 7905, "exact"),
             last_compaction_seq=None,
@@ -157,7 +160,10 @@ class TestCompactionSmoke:
 
         result2 = await engine.compact(
             messages=msgs2,
-            system_prompt="System prompt content for validation purposes - this is long enough to pass the check",
+            system_prompt=(
+                "System prompt content for validation purposes"
+                " - this is long enough to pass the check"
+            ),
             tools_schema=[],
             budget_status=BudgetStatus("compact_needed", 9000, 9300, 6510, 7905, "exact"),
             last_compaction_seq=seq1,

@@ -8,13 +8,10 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
-
 from src.agent.compaction import Turn
-from src.agent.memory_flush import MemoryFlushCandidate, MemoryFlushGenerator
+from src.agent.memory_flush import MemoryFlushGenerator
 from src.config.settings import CompactionSettings
 from src.session.manager import MessageWithSeq
-
 
 # ---------------------------------------------------------------------------
 # Helpers

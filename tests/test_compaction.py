@@ -13,11 +13,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agent.compaction import CompactionEngine, CompactionResult, Turn, split_turns
+from src.agent.compaction import CompactionEngine, split_turns
 from src.agent.token_budget import BudgetStatus, TokenCounter
 from src.config.settings import CompactionSettings
 from src.session.manager import MessageWithSeq
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -58,7 +57,11 @@ def _make_settings(**overrides) -> CompactionSettings:
 def _make_engine(model_client=None, settings=None):
     if model_client is None:
         model_client = MagicMock()
-        model_client.chat = AsyncMock(return_value='{"facts":[],"decisions":[],"open_todos":[],"user_prefs":[],"timeline":[]}')
+        _empty_summary = (
+            '{"facts":[],"decisions":[],"open_todos":[],'
+            '"user_prefs":[],"timeline":[]}'
+        )
+        model_client.chat = AsyncMock(return_value=_empty_summary)
     if settings is None:
         settings = _make_settings()
     counter = TokenCounter("gpt-4o-mini")
@@ -191,7 +194,10 @@ class TestCompactionEngine:
         model_client.chat = AsyncMock(
             return_value='{"facts":["fact1"],"decisions":["dec1"],"open_todos":[],"user_prefs":[],"timeline":[]}'
         )
-        engine = _make_engine(model_client=model_client, settings=_make_settings(min_preserved_turns=3))
+        engine = _make_engine(
+            model_client=model_client,
+            settings=_make_settings(min_preserved_turns=3),
+        )
         msgs = _make_history(10)  # 20 messages, seq 0-19
 
         result = await engine.compact(
@@ -219,7 +225,10 @@ class TestCompactionEngine:
         model_client.chat = AsyncMock(
             return_value='{"facts":[],"decisions":[],"open_todos":[],"user_prefs":[],"timeline":[]}'
         )
-        engine = _make_engine(model_client=model_client, settings=_make_settings(min_preserved_turns=2))
+        engine = _make_engine(
+            model_client=model_client,
+            settings=_make_settings(min_preserved_turns=2),
+        )
 
         msgs = _make_history(8)  # seq 0-15
         result = await engine.compact(
@@ -243,7 +252,10 @@ class TestCompactionEngine:
         model_client.chat = AsyncMock(
             return_value='{"facts":[],"decisions":[],"open_todos":[],"user_prefs":[],"timeline":[]}'
         )
-        engine = _make_engine(model_client=model_client, settings=_make_settings(min_preserved_turns=2))
+        engine = _make_engine(
+            model_client=model_client,
+            settings=_make_settings(min_preserved_turns=2),
+        )
 
         msgs = _make_history(5)  # seq 0-9
         current_user_seq = 8  # Exclude current turn
@@ -268,7 +280,10 @@ class TestCompactionEngine:
         model_client.chat = AsyncMock(
             return_value='{"facts":[],"decisions":[],"open_todos":[],"user_prefs":[],"timeline":[]}'
         )
-        engine = _make_engine(model_client=model_client, settings=_make_settings(min_preserved_turns=2))
+        engine = _make_engine(
+            model_client=model_client,
+            settings=_make_settings(min_preserved_turns=2),
+        )
 
         msgs = _make_history(6)  # seq 0-11
         # Current turn starts at seq 10
@@ -337,7 +352,10 @@ class TestCompactionEngine:
         model_client.chat = AsyncMock(
             return_value='{"facts":[],"decisions":[],"open_todos":[],"user_prefs":[],"timeline":[]}'
         )
-        engine = _make_engine(model_client=model_client, settings=_make_settings(min_preserved_turns=2))
+        engine = _make_engine(
+            model_client=model_client,
+            settings=_make_settings(min_preserved_turns=2),
+        )
 
         msgs = _make_history(8)
         result = await engine.compact(
@@ -374,7 +392,6 @@ class TestCompactionEngine:
         engine = _make_engine(model_client=model_client, settings=settings)
 
         # Patch flush generator to be slow
-        import asyncio as _asyncio
 
         original_generate = engine._flush_generator.generate
 

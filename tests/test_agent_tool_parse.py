@@ -110,10 +110,13 @@ class TestHandleMessageWithBadArgs:
         )
 
         session_manager = MagicMock()
-        session_manager.append_message = AsyncMock()
+        user_msg = MagicMock()
+        user_msg.seq = 0
+        session_manager.append_message = AsyncMock(return_value=user_msg)
         session_manager.get_mode = AsyncMock(return_value=ToolMode.chat_safe)
-        session_manager.get_or_create.return_value = MagicMock(messages=[])
-        session_manager.get_history.return_value = []
+        session_manager.get_compaction_state = AsyncMock(return_value=None)
+        session_manager.get_effective_history = MagicMock(return_value=[])
+        session_manager.get_history_with_seq = MagicMock(return_value=[])
 
         registry = MagicMock()
         registry.list_tools.return_value = []
@@ -154,10 +157,13 @@ class TestHandleMessageWithBadArgs:
         )
 
         session_manager = MagicMock()
-        session_manager.append_message = AsyncMock()
+        user_msg = MagicMock()
+        user_msg.seq = 0
+        session_manager.append_message = AsyncMock(return_value=user_msg)
         session_manager.get_mode = AsyncMock(return_value=ToolMode.chat_safe)
-        session_manager.get_or_create.return_value = MagicMock(messages=[])
-        session_manager.get_history.return_value = []
+        session_manager.get_compaction_state = AsyncMock(return_value=None)
+        session_manager.get_effective_history = MagicMock(return_value=[])
+        session_manager.get_history_with_seq = MagicMock(return_value=[])
 
         registry = MagicMock()
         registry.list_tools.return_value = []

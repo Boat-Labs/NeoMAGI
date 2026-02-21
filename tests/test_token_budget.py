@@ -13,7 +13,6 @@ import pytest
 from src.agent.token_budget import BudgetStatus, BudgetTracker, TokenCounter
 from src.config.settings import CompactionSettings
 
-
 # ---------------------------------------------------------------------------
 # TokenCounter tests
 # ---------------------------------------------------------------------------
