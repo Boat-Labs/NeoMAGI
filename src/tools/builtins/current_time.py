@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from src.tools.base import BaseTool
+from src.tools.base import BaseTool, ToolGroup, ToolMode
 
 
 class CurrentTimeTool(BaseTool):
@@ -16,6 +16,14 @@ class CurrentTimeTool(BaseTool):
     @property
     def description(self) -> str:
         return "Get the current date and time, optionally in a specific timezone."
+
+    @property
+    def group(self) -> ToolGroup:
+        return ToolGroup.world
+
+    @property
+    def allowed_modes(self) -> frozenset[ToolMode]:
+        return frozenset({ToolMode.chat_safe, ToolMode.coding})
 
     @property
     def parameters(self) -> dict:

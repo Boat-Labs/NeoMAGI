@@ -48,6 +48,21 @@ class RPCToolCall(BaseModel):
     data: ToolCallData
 
 
+class ToolDeniedData(BaseModel):
+    call_id: str
+    tool_name: str
+    mode: str
+    error_code: str
+    message: str
+    next_action: str
+
+
+class RPCToolDenied(BaseModel):
+    type: Literal["tool_denied"] = "tool_denied"
+    id: str
+    data: ToolDeniedData
+
+
 class RPCErrorData(BaseModel):
     code: str
     message: str

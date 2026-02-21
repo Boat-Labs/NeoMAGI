@@ -27,7 +27,7 @@ from src.agent.model_client import ContentDelta, ModelClient, StreamEvent, ToolC
 from src.constants import DB_SCHEMA
 from src.session.manager import SessionManager
 from src.session.models import Base
-from src.tools.base import BaseTool
+from src.tools.base import BaseTool, ToolGroup, ToolMode
 from src.tools.registry import ToolRegistry
 
 pytestmark = pytest.mark.integration
@@ -77,6 +77,14 @@ class EchoTool(BaseTool):
         return "Echo arguments back"
 
     @property
+    def group(self) -> ToolGroup:
+        return ToolGroup.world
+
+    @property
+    def allowed_modes(self) -> frozenset[ToolMode]:
+        return frozenset({ToolMode.chat_safe, ToolMode.coding})
+
+    @property
     def parameters(self) -> dict:
         return {"type": "object", "properties": {"text": {"type": "string"}}}
 
@@ -94,6 +102,14 @@ class FailingTool(BaseTool):
     @property
     def description(self) -> str:
         return "Always fails"
+
+    @property
+    def group(self) -> ToolGroup:
+        return ToolGroup.world
+
+    @property
+    def allowed_modes(self) -> frozenset[ToolMode]:
+        return frozenset({ToolMode.chat_safe, ToolMode.coding})
 
     @property
     def parameters(self) -> dict:

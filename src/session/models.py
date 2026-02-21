@@ -20,6 +20,7 @@ class SessionRecord(Base):
     __table_args__ = {"schema": DB_SCHEMA}
 
     id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False, default="chat_safe")
     next_seq: Mapped[int] = mapped_column(Integer, default=0)
     lock_token: Mapped[str | None] = mapped_column(String(36), nullable=True, default=None)
     processing_since: Mapped[datetime | None] = mapped_column(

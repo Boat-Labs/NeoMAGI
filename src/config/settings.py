@@ -59,6 +59,24 @@ class GatewaySettings(BaseSettings):
     )
 
 
+class SessionSettings(BaseSettings):
+    """Session mode settings. Env vars prefixed with SESSION_."""
+
+    model_config = SettingsConfigDict(env_prefix="SESSION_")
+
+    default_mode: str = "chat_safe"
+
+    @field_validator("default_mode")
+    @classmethod
+    def _validate_default_mode(cls, v: str) -> str:
+        if v != "chat_safe":
+            raise ValueError(
+                f"SESSION_DEFAULT_MODE must be 'chat_safe' in M1.5 "
+                f"(got '{v}'). See ADR 0025."
+            )
+        return v
+
+
 class Settings(BaseSettings):
     """Root settings composing all sub-configurations."""
 
@@ -67,6 +85,7 @@ class Settings(BaseSettings):
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
     gateway: GatewaySettings = Field(default_factory=GatewaySettings)
+    session: SessionSettings = Field(default_factory=SessionSettings)
     workspace_dir: Path = Path("workspace")
 
 
