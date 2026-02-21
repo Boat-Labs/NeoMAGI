@@ -7,7 +7,7 @@ from typing import Any
 
 import structlog
 
-from src.agent.events import AgentEvent, TextChunk, ToolCallInfo
+from src.agent.events import AgentEvent, TextChunk, ToolCallInfo, ToolDenied
 from src.agent.model_client import ContentDelta, ModelClient, ToolCallsComplete
 from src.agent.prompt_builder import PromptBuilder
 from src.session.manager import SessionManager
@@ -69,13 +69,16 @@ class AgentLoop:
             session_id, "user", content, lock_token=lock_token
         )
 
-        # 2. Build system prompt
-        system_prompt = self._prompt_builder.build(session_id)
+        # Resolve effective mode (fail-closed to chat_safe on error)
+        mode = await self._session_manager.get_mode(session_id)
 
-        # 3. Get tools schema
+        # 2. Build system prompt
+        system_prompt = self._prompt_builder.build(session_id, mode)
+
+        # 3. Get tools schema (mode-filtered)
         tools_schema = None
-        if self._tool_registry and self._tool_registry.list_tools():
-            tools_schema = self._tool_registry.get_tools_schema()
+        if self._tool_registry and self._tool_registry.list_tools(mode):
+            tools_schema = self._tool_registry.get_tools_schema(mode)
 
         # 4. Streaming tool call loop
         for iteration in range(MAX_TOOL_ITERATIONS):
@@ -135,7 +138,43 @@ class AgentLoop:
                         call_id=tc["id"],
                     )
 
-                    result = await self._execute_tool(tc["name"], tc["arguments"])
+                    # Execution gate: check mode before running
+                    if self._tool_registry and not self._tool_registry.check_mode(
+                        tc["name"], mode
+                    ):
+                        logger.warning(
+                            "tool_denied_by_mode",
+                            tool_name=tc["name"],
+                            mode=mode.value,
+                            session_id=session_id,
+                        )
+                        denial_msg = (
+                            f"Tool '{tc['name']}' is not available in "
+                            f"'{mode.value}' mode."
+                        )
+                        denial_next = (
+                            "当前为 chat_safe 模式，代码工具不可用。"
+                            "未来版本将支持 coding 模式。"
+                        )
+                        yield ToolDenied(
+                            tool_name=tc["name"],
+                            call_id=tc["id"],
+                            mode=mode.value,
+                            error_code="MODE_DENIED",
+                            message=denial_msg,
+                            next_action=denial_next,
+                        )
+                        result = {
+                            "ok": False,
+                            "error_code": "MODE_DENIED",
+                            "tool_name": tc["name"],
+                            "mode": mode.value,
+                            "message": denial_msg,
+                            "next_action": denial_next,
+                        }
+                    else:
+                        result = await self._execute_tool(tc["name"], tc["arguments"])
+
                     await self._session_manager.append_message(
                         session_id,
                         "tool",

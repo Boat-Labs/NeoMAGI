@@ -4,7 +4,7 @@ from pathlib import Path
 
 import structlog
 
-from src.tools.base import BaseTool
+from src.tools.base import BaseTool, ToolGroup, ToolMode
 
 logger = structlog.get_logger()
 
@@ -14,6 +14,14 @@ class ReadFileTool(BaseTool):
 
     def __init__(self, workspace_dir: Path) -> None:
         self._workspace_dir = workspace_dir.resolve()
+
+    @property
+    def group(self) -> ToolGroup:
+        return ToolGroup.code
+
+    @property
+    def allowed_modes(self) -> frozenset[ToolMode]:
+        return frozenset({ToolMode.coding})
 
     @property
     def name(self) -> str:

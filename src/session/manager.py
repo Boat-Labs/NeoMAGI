@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.sql import func
 
 from src.session.models import MessageRecord, SessionRecord
+from src.tools.base import ToolMode
 
 logger = structlog.get_logger()
 
@@ -35,9 +36,14 @@ class Session:
 class SessionManager:
     """Session storage with in-memory cache and PostgreSQL persistence."""
 
-    def __init__(self, db_session_factory: async_sessionmaker) -> None:
+    def __init__(
+        self,
+        db_session_factory: async_sessionmaker,
+        default_mode: ToolMode = ToolMode.chat_safe,
+    ) -> None:
         self._sessions: dict[str, Session] = {}
         self._db: async_sessionmaker = db_session_factory
+        self._default_mode = default_mode
 
     def get_or_create(self, session_id: str) -> Session:
         """Get existing session or create a new one (in-memory)."""
@@ -45,6 +51,52 @@ class SessionManager:
             logger.info("session_created", session_id=session_id)
             self._sessions[session_id] = Session(id=session_id)
         return self._sessions[session_id]
+
+    async def get_mode(self, session_id: str) -> ToolMode:
+        """Get the effective ToolMode for a session.
+
+        Reads from DB. On any error or invalid value, fail-closed to chat_safe.
+        M1.5 guardrail: even valid 'coding' values are downgraded to chat_safe.
+        """
+        try:
+            async with self._db() as db_session:
+                stmt = select(SessionRecord.mode).where(SessionRecord.id == session_id)
+                result = await db_session.execute(stmt)
+                mode_str = result.scalar_one_or_none()
+
+            if mode_str is None:
+                return self._default_mode
+
+            try:
+                mode = ToolMode(mode_str)
+            except ValueError:
+                logger.warning(
+                    "session_mode_invalid",
+                    session_id=session_id,
+                    mode=mode_str,
+                    msg="Invalid mode value; falling back to chat_safe",
+                )
+                return ToolMode.chat_safe
+
+            # M1.5 guardrail: only chat_safe is allowed
+            if mode != ToolMode.chat_safe:
+                logger.warning(
+                    "session_mode_downgraded",
+                    session_id=session_id,
+                    requested_mode=mode.value,
+                    effective_mode="chat_safe",
+                    msg="M1.5 guardrail: non-chat_safe modes downgraded",
+                )
+                return ToolMode.chat_safe
+
+            return mode
+        except Exception:
+            logger.exception(
+                "session_mode_read_failed",
+                session_id=session_id,
+                msg="DB error; falling back to chat_safe",
+            )
+            return ToolMode.chat_safe
 
     async def try_claim_session(
         self, session_id: str, ttl_seconds: int = 300

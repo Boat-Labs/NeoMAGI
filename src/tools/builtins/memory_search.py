@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.tools.base import BaseTool
+from src.tools.base import BaseTool, ToolGroup, ToolMode
 
 
 class MemorySearchTool(BaseTool):
@@ -13,6 +13,14 @@ class MemorySearchTool(BaseTool):
     @property
     def description(self) -> str:
         return "Search through long-term memory for relevant information."
+
+    @property
+    def group(self) -> ToolGroup:
+        return ToolGroup.memory
+
+    @property
+    def allowed_modes(self) -> frozenset[ToolMode]:
+        return frozenset({ToolMode.chat_safe, ToolMode.coding})
 
     @property
     def parameters(self) -> dict:

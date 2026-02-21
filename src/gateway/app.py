@@ -8,7 +8,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.agent.agent import AgentLoop
-from src.agent.events import TextChunk, ToolCallInfo
+from src.agent.events import TextChunk, ToolCallInfo, ToolDenied
 from src.agent.model_client import OpenAICompatModelClient
 from src.config.settings import get_settings
 from src.gateway.protocol import (
@@ -20,14 +20,17 @@ from src.gateway.protocol import (
     RPCHistoryResponseData,
     RPCStreamChunk,
     RPCToolCall,
+    RPCToolDenied,
     StreamChunkData,
     ToolCallData,
+    ToolDeniedData,
     parse_rpc_request,
 )
 from src.infra.errors import NeoMAGIError
 from src.infra.logging import setup_logging
 from src.session.database import create_db_engine, ensure_schema, make_session_factory
 from src.session.manager import SessionManager
+from src.tools.base import ToolMode
 from src.tools.builtins import register_builtins
 from src.tools.registry import ToolRegistry
 
@@ -47,7 +50,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     db_session_factory = make_session_factory(engine)
     logger.info("db_connected")
 
-    session_manager = SessionManager(db_session_factory=db_session_factory)
+    session_manager = SessionManager(
+        db_session_factory=db_session_factory,
+        default_mode=ToolMode(settings.session.default_mode),
+    )
     model_client = OpenAICompatModelClient(
         api_key=settings.openai.api_key,
         base_url=settings.openai.base_url,
@@ -180,6 +186,19 @@ async def _handle_chat_send(
                     data=StreamChunkData(content=event.content, done=False),
                 )
                 await websocket.send_text(chunk.model_dump_json())
+            elif isinstance(event, ToolDenied):
+                denied_msg = RPCToolDenied(
+                    id=request_id,
+                    data=ToolDeniedData(
+                        call_id=event.call_id,
+                        tool_name=event.tool_name,
+                        mode=event.mode,
+                        error_code=event.error_code,
+                        message=event.message,
+                        next_action=event.next_action,
+                    ),
+                )
+                await websocket.send_text(denied_msg.model_dump_json())
             elif isinstance(event, ToolCallInfo):
                 tool_msg = RPCToolCall(
                     id=request_id,

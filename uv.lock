@@ -520,6 +520,11 @@ dev = [
     { name = "websockets" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "ruff" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0" },
@@ -541,6 +546,9 @@ requires-dist = [
     { name = "websockets", marker = "extra == 'dev'", specifier = ">=14.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "ruff", specifier = ">=0.15.1" }]
 
 [[package]]
 name = "openai"

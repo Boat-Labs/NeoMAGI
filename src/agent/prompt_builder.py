@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from src.tools.base import ToolMode
+
 if TYPE_CHECKING:
     from src.tools.registry import ToolRegistry
 
@@ -38,12 +40,12 @@ class PromptBuilder:
         self._workspace_dir = workspace_dir
         self._tool_registry = tool_registry
 
-    def build(self, session_id: str = "main") -> str:
+    def build(self, session_id: str, mode: ToolMode) -> str:
         """Build the complete system prompt by concatenating all non-empty layers."""
         layers = [
             self._layer_identity(),
-            self._layer_tooling(),
-            self._layer_safety(),
+            self._layer_tooling(mode),
+            self._layer_safety(mode),
             self._layer_skills(),
             self._layer_workspace(session_id),
             self._layer_memory_recall(),
@@ -58,13 +60,13 @@ class PromptBuilder:
             "Be helpful, concise, and honest."
         )
 
-    def _layer_tooling(self) -> str:
+    def _layer_tooling(self, mode: ToolMode) -> str:
         """Generate tooling layer from ToolRegistry + TOOLS.md."""
         parts: list[str] = []
 
-        # Tool descriptions from registry
+        # Tool descriptions from registry (mode-filtered)
         if self._tool_registry:
-            tools = self._tool_registry.list_tools()
+            tools = self._tool_registry.list_tools(mode)
             if tools:
                 lines = ["## Available Tools", ""]
                 for tool in tools:
@@ -80,8 +82,17 @@ class PromptBuilder:
 
         return "\n\n".join(parts) if parts else ""
 
-    def _layer_safety(self) -> str:
-        # Placeholder — will be expanded in later milestones
+    def _layer_safety(self, mode: ToolMode) -> str:
+        """Generate safety layer. Includes mode-specific constraints."""
+        if mode == ToolMode.chat_safe:
+            return (
+                "## Safety\n\n"
+                "Current session mode: **chat_safe**.\n"
+                "Only conversational tools (memory search, current time, etc.) are available.\n"
+                "Code-editing and file-system tools are disabled in this mode.\n\n"
+                "If the user requests code operations, explain that these tools are not "
+                "available in the current mode and will be enabled in a future version."
+            )
         return ""
 
     def _layer_skills(self) -> str:
