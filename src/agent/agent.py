@@ -138,9 +138,11 @@ class AgentLoop:
                         call_id=tc["id"],
                     )
 
-                    # Execution gate: check mode before running
-                    if self._tool_registry and not self._tool_registry.check_mode(
-                        tc["name"], mode
+                    # Execution gate: mode check (only for registered tools)
+                    if (
+                        self._tool_registry
+                        and self._tool_registry.get(tc["name"]) is not None
+                        and not self._tool_registry.check_mode(tc["name"], mode)
                     ):
                         logger.warning(
                             "tool_denied_by_mode",

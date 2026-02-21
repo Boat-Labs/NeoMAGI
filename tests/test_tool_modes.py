@@ -274,21 +274,17 @@ class TestRegistryOverride:
 # ===========================================================================
 
 class TestRegistrationWarning:
-    def test_warning_for_empty_allowed_modes(self, caplog):
-        import structlog
-        structlog.configure(
-            processors=[structlog.stdlib.ProcessorFormatter.wrap_for_formatter],
-            wrapper_class=structlog.stdlib.BoundLogger,
-            logger_factory=structlog.stdlib.LoggerFactory(),
-        )
-        reg = ToolRegistry()
-        with caplog.at_level("WARNING"):
+    def test_warning_for_empty_allowed_modes(self):
+        from structlog.testing import capture_logs
+
+        with capture_logs() as cap:
+            reg = ToolRegistry()
             reg.register(_BareStubTool())
-        # Check structlog output or caplog
+
         assert any(
-            "tool_registered_without_modes" in r.message or "empty allowed_modes" in r.message
-            for r in caplog.records
-        ) or len(caplog.records) >= 0  # structlog may not use standard logging
+            entry.get("event") == "tool_registered_without_modes"
+            for entry in cap
+        ), f"Expected 'tool_registered_without_modes' event, got: {cap}"
 
 
 # ===========================================================================
@@ -567,6 +563,101 @@ class TestExecutionGateDenial:
         # Must not contain "switch to coding" or "/mode coding" or similar
         assert "切换" not in na or "coding" not in na
         assert "/mode" not in na
+
+
+# ===========================================================================
+# 8b. Unknown Tool Handling
+# ===========================================================================
+
+class TestUnknownToolHandling:
+    """Unknown tools bypass mode gate and fall through to _execute_tool."""
+
+    def _make_agent(self, tmp_path):
+        from src.tools.builtins import register_builtins
+
+        registry = ToolRegistry()
+        register_builtins(registry, tmp_path)
+
+        session_manager = MagicMock()
+        session_manager.append_message = AsyncMock()
+        session_manager.get_mode = AsyncMock(return_value=ToolMode.chat_safe)
+        session_manager.get_or_create.return_value = MagicMock(messages=[])
+        session_manager.get_history.return_value = []
+
+        model_client = MagicMock()
+
+        agent = AgentLoop(
+            model_client=model_client,
+            session_manager=session_manager,
+            workspace_dir=tmp_path,
+            tool_registry=registry,
+        )
+        return agent, model_client, session_manager
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_no_tool_denied_event(self, tmp_path):
+        """Hallucinated tool name → no ToolDenied event (not a mode denial)."""
+        agent, model_client, _ = self._make_agent(tmp_path)
+
+        async def stream_unknown(*args, **kwargs):
+            yield ToolCallsComplete(
+                tool_calls=[{
+                    "id": "call_ghost",
+                    "name": "nonexistent_tool",
+                    "arguments": "{}",
+                }]
+            )
+
+        async def stream_final(*args, **kwargs):
+            yield ContentDelta(text="Sorry")
+
+        model_client.chat_stream_with_tools = MagicMock(
+            side_effect=[stream_unknown(), stream_final()]
+        )
+
+        events = []
+        async for event in agent.handle_message("s-unknown", "test"):
+            events.append(event)
+
+        # Must NOT produce ToolDenied — unknown tool is not a mode denial
+        denied = [e for e in events if isinstance(e, ToolDenied)]
+        assert len(denied) == 0
+
+    @pytest.mark.asyncio
+    async def test_unknown_tool_result_has_unknown_tool_error(self, tmp_path):
+        """Hallucinated tool → UNKNOWN_TOOL in tool result appended to session."""
+        agent, model_client, session_manager = self._make_agent(tmp_path)
+
+        async def stream_unknown(*args, **kwargs):
+            yield ToolCallsComplete(
+                tool_calls=[{
+                    "id": "call_ghost",
+                    "name": "nonexistent_tool",
+                    "arguments": "{}",
+                }]
+            )
+
+        async def stream_final(*args, **kwargs):
+            yield ContentDelta(text="Sorry")
+
+        model_client.chat_stream_with_tools = MagicMock(
+            side_effect=[stream_unknown(), stream_final()]
+        )
+
+        async for _ in agent.handle_message("s-unknown", "test"):
+            pass
+
+        # Find the tool result append_message call by tool_call_id
+        import json as _json
+        tool_result_calls = [
+            call for call in session_manager.append_message.call_args_list
+            if call.kwargs.get("tool_call_id") == "call_ghost"
+        ]
+        assert len(tool_result_calls) == 1
+        # Parse the content JSON and verify error_code
+        content_json = _json.loads(tool_result_calls[0].args[2])
+        assert content_json["error_code"] == "UNKNOWN_TOOL"
+        assert "nonexistent_tool" in content_json["message"]
 
 
 # ===========================================================================
