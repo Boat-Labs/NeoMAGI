@@ -1,0 +1,15 @@
+{"ts":"2026-02-22T00:00:00Z","role":"backend","phase":"Phase1","status":"working","task":"开始实现 Token Budget 基础设施","eta_min":30}
+{"ts":"2026-02-22T00:00:00Z","role":"tester","phase":"onboarding","status":"working","task":"阅读必读上下文，准备就位","eta_min":0}
+{"ts":"2026-02-22T00:07:00Z","role":"tester","phase":"onboarding","status":"done","task":"就位完成，等待 Gate 1","eta_min":0}
+{"ts":"2026-02-22T00:10:00Z","role":"backend","phase":"Phase1","status":"done","task":"Phase 1 完成，commit ed5712b 已 push","eta_min":0}
+{"ts":"2026-02-22T00:10:00Z","role":"tester","phase":"gate-1","status":"working","task":"Gate 1 验收启动","eta_min":30}
+{"ts":"2026-02-22T00:15:00Z","role":"tester","phase":"gate-1","status":"done","task":"Gate 1 PASS，报告已存放","eta_min":0}
+{"ts":"2026-02-22T00:20:00Z","role":"backend","phase":"Phase2","status":"working","task":"开始 Phase 2 Compaction 核心引擎","eta_min":45}
+{"ts":"2026-02-22T01:05:00Z","role":"backend","phase":"Phase2","status":"done","task":"Phase 2 完成，commit 48b60d1 已 push，36 新增测试通过","eta_min":0}
+{"ts":"2026-02-22T01:20:00Z","role":"backend","phase":"phase3-prep","status":"working","task":"context 压缩后重启，已读取 Phase 3 文件，等待 Gate 2 放行","eta_min":0}
+{"ts":"2026-02-22T01:25:00Z","role":"tester","phase":"gate-2","status":"done","task":"Gate 2 PASS，Phase 3 可以开始","eta_min":0}
+{"ts":"2026-02-22T01:50:00Z","role":"backend","phase":"Phase3","status":"done","task":"Phase 3 完成，commit 14d7f80 已 push，17 新增测试，全量 204 通过","eta_min":0}
+{"ts":"2026-02-22T02:10:00Z","role":"tester","phase":"gate-3","status":"done","task":"Gate 3 PASS，M2 milestone 可关闭，commit 4e1137b","eta_min":0}
+{"ts":"2026-02-22T02:15:00Z","role":"tester","phase":"gate-3-补充","status":"working","task":"补充反漂移离线评估记录 (ADR 0030)","eta_min":5}
+{"ts":"2026-02-22T02:16:00Z","role":"tester","phase":"gate-3-补充","status":"done","task":"反漂移评估完成，commit 1405b00，6 Probe 命中率 100%","eta_min":0}
+{"ts":"2026-02-22T02:20:00Z","role":"pm","phase":"closing","status":"done","task":"全部产物归档，teammates 关闭，team 清理完成","eta_min":0}
