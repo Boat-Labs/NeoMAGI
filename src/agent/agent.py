@@ -7,10 +7,13 @@ from typing import Any
 
 import structlog
 
+from src.agent.compaction import CompactionEngine, CompactionResult
 from src.agent.events import AgentEvent, TextChunk, ToolCallInfo, ToolDenied
 from src.agent.model_client import ContentDelta, ModelClient, ToolCallsComplete
 from src.agent.prompt_builder import PromptBuilder
-from src.session.manager import SessionManager
+from src.agent.token_budget import BudgetTracker
+from src.config.settings import CompactionSettings
+from src.session.manager import MessageWithSeq, SessionManager
 from src.tools.registry import ToolRegistry
 
 logger = structlog.get_logger()
@@ -32,10 +35,31 @@ def _safe_parse_args(raw: str | None) -> tuple[dict, str | None]:
     return parsed, None
 
 
+def _messages_with_seq_to_openai(messages: list[MessageWithSeq]) -> list[dict[str, Any]]:
+    """Convert MessageWithSeq list to OpenAI chat format dicts."""
+    result: list[dict[str, Any]] = []
+    for m in messages:
+        msg_dict: dict[str, Any] = {"role": m.role, "content": m.content or ""}
+        if m.tool_calls is not None:
+            msg_dict["tool_calls"] = m.tool_calls
+        if m.tool_call_id is not None:
+            msg_dict["tool_call_id"] = m.tool_call_id
+        result.append(msg_dict)
+    return result
+
+
 class AgentLoop:
     """Core agent loop with tool calling support.
 
-    Flow: user msg → build prompt → LLM → (tool_calls → execute → LLM)* → text response
+    Flow: user msg → build prompt → budget check → [compact] → LLM →
+          (tool_calls → execute → LLM)* → text response
+
+    Compaction integration (Phase 3, ADR 0031/0032):
+    - Budget check before each LLM call
+    - Compact when budget_status == "compact_needed"
+    - CompactionEngine owns flush generation (ADR 0032)
+    - Watermark rebuild via get_effective_history (ADR 0031)
+    - Reentry protection: max_compactions_per_request
     """
 
     def __init__(
@@ -45,12 +69,21 @@ class AgentLoop:
         workspace_dir: Path,
         model: str = "gpt-4o-mini",
         tool_registry: ToolRegistry | None = None,
+        compaction_settings: CompactionSettings | None = None,
     ) -> None:
         self._model_client = model_client
         self._session_manager = session_manager
         self._prompt_builder = PromptBuilder(workspace_dir, tool_registry=tool_registry)
         self._tool_registry = tool_registry
         self._model = model
+        self._settings = compaction_settings
+        self._budget_tracker: BudgetTracker | None = None
+        self._compaction_engine: CompactionEngine | None = None
+        if compaction_settings is not None:
+            self._budget_tracker = BudgetTracker(compaction_settings, model)
+            self._compaction_engine = CompactionEngine(
+                model_client, self._budget_tracker.counter, compaction_settings
+            )
 
     async def handle_message(
         self, session_id: str, content: str, *, lock_token: str | None = None
@@ -65,28 +98,110 @@ class AgentLoop:
         fencing to reject stale writes after lock takeover.
         """
         # 1. Append user message
-        await self._session_manager.append_message(
+        user_msg = await self._session_manager.append_message(
             session_id, "user", content, lock_token=lock_token
         )
+        current_user_seq = user_msg.seq
 
         # Resolve effective mode (fail-closed to chat_safe on error)
         mode = await self._session_manager.get_mode(session_id)
 
-        # 2. Build system prompt
-        system_prompt = self._prompt_builder.build(session_id, mode)
-
         # 3. Get tools schema (mode-filtered)
         tools_schema = None
+        tools_schema_list: list[dict] = []
         if self._tool_registry and self._tool_registry.list_tools(mode):
             tools_schema = self._tool_registry.get_tools_schema(mode)
+            tools_schema_list = tools_schema or []
+
+        # Compaction state tracking for this request
+        compaction_count = 0
+        max_compactions = (
+            self._settings.max_compactions_per_request if self._settings else 2
+        )
+
+        # 2. Load compaction state and build initial prompt
+        compaction_state = await self._session_manager.get_compaction_state(session_id)
+        last_compaction_seq = (
+            compaction_state.last_compaction_seq if compaction_state else None
+        )
+        compacted_context = (
+            compaction_state.compacted_context if compaction_state else None
+        )
+
+        system_prompt = self._prompt_builder.build(
+            session_id, mode, compacted_context=compacted_context
+        )
 
         # 4. Streaming tool call loop
         for iteration in range(MAX_TOOL_ITERATIONS):
-            history = self._session_manager.get_history(session_id)
+            # Build effective history via watermark (ADR 0031)
+            effective_msgs = self._session_manager.get_effective_history(
+                session_id, last_compaction_seq
+            )
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
-                *history,
+                *_messages_with_seq_to_openai(effective_msgs),
             ]
+
+            # Budget check + compaction trigger
+            if self._budget_tracker is not None:
+                total_tokens = self._budget_tracker.counter.count_messages(messages)
+                if tools_schema_list:
+                    total_tokens += self._budget_tracker.counter.count_tools_schema(
+                        tools_schema_list
+                    )
+                budget_status = self._budget_tracker.check(total_tokens)
+                logger.info(
+                    "budget_check",
+                    session_id=session_id,
+                    model=self._model,
+                    iteration=iteration,
+                    current_tokens=budget_status.current_tokens,
+                    status=budget_status.status,
+                    usable_budget=budget_status.usable_budget,
+                    warn_threshold=budget_status.warn_threshold,
+                    compact_threshold=budget_status.compact_threshold,
+                    tokenizer_mode=budget_status.tokenizer_mode,
+                )
+
+                # Trigger compaction if needed and allowed
+                if (
+                    budget_status.status == "compact_needed"
+                    and self._compaction_engine is not None
+                    and compaction_count < max_compactions
+                    and lock_token is not None
+                    and current_user_seq is not None
+                ):
+                    compact_result = await self._try_compact(
+                        session_id=session_id,
+                        system_prompt=system_prompt,
+                        tools_schema_list=tools_schema_list,
+                        budget_status=budget_status,
+                        last_compaction_seq=last_compaction_seq,
+                        compacted_context=compacted_context,
+                        current_user_seq=current_user_seq,
+                        lock_token=lock_token,
+                    )
+                    compaction_count += 1
+
+                    if compact_result and compact_result.status != "noop":
+                        # Update state with new watermark
+                        last_compaction_seq = compact_result.new_compaction_seq
+                        compacted_context = compact_result.compacted_context
+
+                        # Rebuild system prompt with new compacted context
+                        system_prompt = self._prompt_builder.build(
+                            session_id, mode, compacted_context=compacted_context
+                        )
+
+                        # Rebuild effective history with new watermark
+                        effective_msgs = self._session_manager.get_effective_history(
+                            session_id, last_compaction_seq
+                        )
+                        messages = [
+                            {"role": "system", "content": system_prompt},
+                            *_messages_with_seq_to_openai(effective_msgs),
+                        ]
 
             # Stream the LLM response — content tokens arrive immediately,
             # tool calls are accumulated and yielded at the end of the stream.
@@ -206,6 +321,130 @@ class AgentLoop:
         logger.warning("max_tool_iterations", max=MAX_TOOL_ITERATIONS, session_id=session_id)
         yield TextChunk(
             content="I've reached the maximum number of tool calls. Please try again."
+        )
+
+    async def _try_compact(
+        self,
+        *,
+        session_id: str,
+        system_prompt: str,
+        tools_schema_list: list[dict],
+        budget_status: Any,
+        last_compaction_seq: int | None,
+        compacted_context: str | None,
+        current_user_seq: int,
+        lock_token: str,
+    ) -> CompactionResult | None:
+        """Execute compaction with full error handling.
+
+        Returns CompactionResult on success/degraded, None on total failure.
+        Emergency trim is applied when compaction fails entirely.
+        """
+        try:
+            all_messages = self._session_manager.get_history_with_seq(session_id)
+            result = await self._compaction_engine.compact(
+                messages=all_messages,
+                system_prompt=system_prompt,
+                tools_schema=tools_schema_list,
+                budget_status=budget_status,
+                last_compaction_seq=last_compaction_seq,
+                previous_compacted_context=compacted_context,
+                current_user_seq=current_user_seq,
+                model=self._model,
+                session_id=session_id,
+            )
+
+            if result.status == "noop":
+                logger.info(
+                    "compaction_noop",
+                    session_id=session_id,
+                    last_compaction_seq=last_compaction_seq,
+                )
+                return result
+
+            # Persist compaction result (success/degraded/failed)
+            await self._session_manager.store_compaction_result(
+                session_id, result, lock_token=lock_token
+            )
+
+            logger.info(
+                "compaction_complete",
+                session_id=session_id,
+                status=result.status,
+                new_compaction_seq=result.new_compaction_seq,
+                flush_candidates=len(result.memory_flush_candidates),
+            )
+            return result
+
+        except Exception:
+            logger.exception("compaction_failed", session_id=session_id)
+
+            # Emergency trim: force watermark to reduce context
+            emergency_result = self._emergency_trim(
+                session_id=session_id,
+                current_user_seq=current_user_seq,
+            )
+            if emergency_result is not None:
+                try:
+                    await self._session_manager.store_compaction_result(
+                        session_id, emergency_result, lock_token=lock_token
+                    )
+                    logger.warning(
+                        "emergency_trim_applied",
+                        session_id=session_id,
+                        new_compaction_seq=emergency_result.new_compaction_seq,
+                    )
+                    return emergency_result
+                except Exception:
+                    logger.exception("emergency_trim_store_failed", session_id=session_id)
+
+            return None
+
+    def _emergency_trim(
+        self,
+        *,
+        session_id: str,
+        current_user_seq: int,
+    ) -> CompactionResult | None:
+        """Emergency trim: force watermark forward to reduce context.
+
+        Preserves only the most recent messages around current_user_seq.
+        No summary is generated — this is a last resort.
+        """
+        min_preserved = self._settings.min_preserved_turns if self._settings else 8
+        all_msgs = self._session_manager.get_history_with_seq(session_id)
+        if not all_msgs:
+            return None
+
+        # Find a watermark that leaves roughly min_preserved turns worth of messages
+        # Each turn is approximately 2 messages (user + assistant)
+        keep_count = min_preserved * 2
+        if len(all_msgs) <= keep_count:
+            return None
+
+        trim_point = all_msgs[-(keep_count + 1)]
+        new_seq = min(trim_point.seq, current_user_seq - 1)
+
+        from datetime import UTC, datetime
+
+        return CompactionResult(
+            status="failed",
+            compacted_context=None,
+            compaction_metadata={
+                "schema_version": 1,
+                "status": "failed",
+                "emergency_trim": True,
+                "triggered_at": datetime.now(UTC).isoformat(),
+                "preserved_count": min_preserved,
+                "summarized_count": 0,
+                "trimmed_count": len(all_msgs) - keep_count,
+                "flush_skipped": True,
+                "anchor_validation_passed": True,
+                "anchor_retry_used": False,
+                "compacted_context_tokens": 0,
+                "rolling_summary_input_tokens": 0,
+            },
+            new_compaction_seq=new_seq,
         )
 
     async def _execute_tool(self, tool_name: str, arguments_json: str) -> dict:
