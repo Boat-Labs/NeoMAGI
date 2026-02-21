@@ -309,6 +309,80 @@ class TestDenialPersistedToTranscript:
         assert found, "MODE_DENIED tool message not found in transcript"
 
 
+class TestUnknownToolNotDenied:
+    """Unknown tool must NOT produce tool_denied frame (protocol boundary)."""
+
+    def test_unknown_tool_no_denied_frame(self, pg_url, tmp_path):
+        """Model calls nonexistent tool → no tool_denied, UNKNOWN_TOOL in tool result."""
+        app, model = _make_app(pg_url, tmp_path)
+        model.set_responses(
+            [ToolCallsComplete(tool_calls=[{
+                "id": "call_ghost", "name": "nonexistent_tool", "arguments": "{}"
+            }])],
+            [ContentDelta(text="That tool does not exist.")],
+        )
+
+        with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+            messages = _send_and_collect(ws, content="use ghost tool")
+
+            # No tool_denied frame — unknown tool is not a mode denial
+            denied = [m for m in messages if m["type"] == "tool_denied"]
+            assert len(denied) == 0
+
+            # tool_call frame IS present (ToolCallInfo still yielded)
+            tool_calls = [m for m in messages if m["type"] == "tool_call"]
+            assert len(tool_calls) == 1
+            assert tool_calls[0]["data"]["tool_name"] == "nonexistent_tool"
+
+            # Conversation continues — done=true arrives
+            done = [
+                m for m in messages
+                if m["type"] == "stream_chunk" and m["data"]["done"]
+            ]
+            assert len(done) == 1
+
+    def test_unknown_tool_result_persisted_as_unknown(self, pg_url, tmp_path):
+        """UNKNOWN_TOOL error_code persisted in session transcript."""
+        app, model = _make_app(pg_url, tmp_path)
+        model.set_responses(
+            [ToolCallsComplete(tool_calls=[{
+                "id": "call_ghost2", "name": "ghost_tool", "arguments": "{}"
+            }])],
+            [ContentDelta(text="Sorry")],
+        )
+
+        with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+            _send_and_collect(ws, content="test", session_id="unknown-test")
+
+        import asyncio
+
+        async def check_db():
+            engine = create_async_engine(pg_url, echo=False)
+            async with engine.begin() as conn:
+                result = await conn.execute(
+                    text(
+                        f"SELECT content FROM {DB_SCHEMA}.messages "
+                        f"WHERE session_id = 'unknown-test' AND role = 'tool' "
+                        f"ORDER BY seq"
+                    )
+                )
+                rows = result.fetchall()
+            await engine.dispose()
+            return rows
+
+        rows = asyncio.get_event_loop().run_until_complete(check_db())
+        assert len(rows) >= 1
+        # Search all tool messages — don't assume row order
+        found = False
+        for row in rows:
+            content = json.loads(row[0])
+            if content.get("error_code") == "UNKNOWN_TOOL":
+                found = True
+                assert "ghost_tool" in content["message"]
+                break
+        assert found, "UNKNOWN_TOOL tool message not found in transcript"
+
+
 class TestToolDeniedTypeDistinguishable:
     """tool_denied type is distinct from stream_chunk, tool_call, error."""
 
