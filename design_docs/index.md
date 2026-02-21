@@ -12,15 +12,15 @@
    - 系统模块现状（已实现/计划中）与模块边界。
 
 3. 当前里程碑对应 architecture 文档  
-   - `design_docs/m1_5_architecture.md`（当前下一阶段）  
-   - 或按任务切换至 `m2/m3/m4/m5/m6` 对应文档。
+   - 按 `design_docs/roadmap_milestones_v3.md` 当前阶段读取对应文档。  
+   - 当前建议优先阅读：`design_docs/m2_architecture.md`（会话内连续性，含反漂移基线）。
 
 ## 2. 里程碑 Architecture 文档映射
 
 - `design_docs/m1_architecture.md`：M1 已完成总结（实现基线）
 - `design_docs/m1_5_architecture.md`：M1.5 计划（Tool Modes，可控执行闭环）
 - `design_docs/m2_architecture.md`：M2 计划（会话内连续性）
-- `design_docs/m3_architecture.md`：M3 计划（会话外持久记忆）
+- `design_docs/m3_architecture.md`：M3 计划（会话外持久记忆 + 自我进化治理闭环）
 - `design_docs/m4_architecture.md`：M4 计划（Telegram 第二渠道）
 - `design_docs/m5_architecture.md`：M5 计划（运营可靠性，触发式）
 - `design_docs/m6_architecture.md`：M6 计划（模型迁移验证）

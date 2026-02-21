@@ -30,6 +30,7 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0024 | M1.5 tool modes and priority reorder | accepted | 2026-02-19 | `decisions/0024-m1.5-tool-modes-and-priority-reorder.md` |
 | 0025 | Mode switching: user-controlled with chat_safe default | accepted | 2026-02-20 | `decisions/0025-mode-switching-user-controlled-chat-safe-default.md` |
 | 0026 | Session mode storage and propagation | accepted | 2026-02-20 | `decisions/0026-session-mode-storage-and-propagation.md` |
+| 0027 | Partner-agent self-evolution guardrails | accepted | 2026-02-21 | `decisions/0027-partner-agent-self-evolution-guardrails.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。

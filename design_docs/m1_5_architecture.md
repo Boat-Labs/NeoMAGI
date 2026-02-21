@@ -1,6 +1,6 @@
-# M1.5 Architecture（计划）
+# M1.5 Architecture（已完成）
 
-> 状态：planned  
+> 状态：completed  
 > 对应里程碑：M1.5 可控执行闭环（Tool Modes）  
 > 依据：`design_docs/roadmap_milestones_v3.md`、ADR 0024、ADR 0025、已讨论的工具分组与模式化授权
 
