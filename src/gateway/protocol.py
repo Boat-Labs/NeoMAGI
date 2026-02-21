@@ -49,10 +49,12 @@ class RPCToolCall(BaseModel):
 
 
 class ToolDeniedData(BaseModel):
-    tool_name: str
     call_id: str
-    current_mode: str
-    reason: str
+    tool_name: str
+    mode: str
+    error_code: str
+    message: str
+    next_action: str
 
 
 class RPCToolDenied(BaseModel):

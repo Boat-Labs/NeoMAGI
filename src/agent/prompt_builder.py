@@ -87,9 +87,11 @@ class PromptBuilder:
         if mode == ToolMode.chat_safe:
             return (
                 "## Safety\n\n"
-                "Current session mode: **chat_safe**. "
-                "Only conversational tools are available. "
-                "Code-editing and file-system tools are disabled."
+                "Current session mode: **chat_safe**.\n"
+                "Only conversational tools (memory search, current time, etc.) are available.\n"
+                "Code-editing and file-system tools are disabled in this mode.\n\n"
+                "If the user requests code operations, explain that these tools are not "
+                "available in the current mode and will be enabled in a future version."
             )
         return ""
 

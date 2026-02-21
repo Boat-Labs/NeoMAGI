@@ -148,17 +148,29 @@ class AgentLoop:
                             mode=mode.value,
                             session_id=session_id,
                         )
+                        denial_msg = (
+                            f"Tool '{tc['name']}' is not available in "
+                            f"'{mode.value}' mode."
+                        )
+                        denial_next = (
+                            "当前为 chat_safe 模式，代码工具不可用。"
+                            "未来版本将支持 coding 模式。"
+                        )
                         yield ToolDenied(
                             tool_name=tc["name"],
                             call_id=tc["id"],
-                            current_mode=mode.value,
-                            reason=f"Tool '{tc['name']}' is not available in "
-                            f"'{mode.value}' mode.",
+                            mode=mode.value,
+                            error_code="MODE_DENIED",
+                            message=denial_msg,
+                            next_action=denial_next,
                         )
                         result = {
-                            "error_code": "TOOL_DENIED",
-                            "message": f"Tool '{tc['name']}' is not available in "
-                            f"'{mode.value}' mode.",
+                            "ok": False,
+                            "error_code": "MODE_DENIED",
+                            "tool_name": tc["name"],
+                            "mode": mode.value,
+                            "message": denial_msg,
+                            "next_action": denial_next,
                         }
                     else:
                         result = await self._execute_tool(tc["name"], tc["arguments"])

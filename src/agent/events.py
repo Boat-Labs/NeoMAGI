@@ -25,8 +25,10 @@ class ToolDenied:
 
     tool_name: str
     call_id: str
-    current_mode: str
-    reason: str
+    mode: str
+    error_code: str = "MODE_DENIED"
+    message: str = ""
+    next_action: str = ""
 
 
 AgentEvent = TextChunk | ToolCallInfo | ToolDenied

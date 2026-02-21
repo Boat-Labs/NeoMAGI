@@ -190,10 +190,12 @@ async def _handle_chat_send(
                 denied_msg = RPCToolDenied(
                     id=request_id,
                     data=ToolDeniedData(
-                        tool_name=event.tool_name,
                         call_id=event.call_id,
-                        current_mode=event.current_mode,
-                        reason=event.reason,
+                        tool_name=event.tool_name,
+                        mode=event.mode,
+                        error_code=event.error_code,
+                        message=event.message,
+                        next_action=event.next_action,
                     ),
                 )
                 await websocket.send_text(denied_msg.model_dump_json())
