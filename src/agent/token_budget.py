@@ -36,7 +36,7 @@ class TokenCounter:
 
             self._encoding = tiktoken.encoding_for_model(model)
             self._mode = "exact"
-        except (KeyError, Exception):
+        except Exception:
             logger.warning("tokenizer_fallback", model=model, mode="estimate")
 
     @property
