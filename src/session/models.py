@@ -32,6 +32,16 @@ class SessionRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # Compaction fields (M2)
+    compacted_context: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    compaction_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    last_compaction_seq: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, default=None
+    )
+    memory_flush_candidates: Mapped[list | None] = mapped_column(
+        JSONB, nullable=True, default=None
+    )
+
     messages: Mapped[list[MessageRecord]] = relationship(
         back_populates="session", order_by="MessageRecord.seq", cascade="all, delete-orphan"
     )
