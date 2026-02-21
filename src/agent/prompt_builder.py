@@ -45,7 +45,7 @@ class PromptBuilder:
         layers = [
             self._layer_identity(),
             self._layer_tooling(mode),
-            self._layer_safety(),
+            self._layer_safety(mode),
             self._layer_skills(),
             self._layer_workspace(session_id),
             self._layer_memory_recall(),
@@ -82,8 +82,15 @@ class PromptBuilder:
 
         return "\n\n".join(parts) if parts else ""
 
-    def _layer_safety(self) -> str:
-        # Placeholder — will be expanded in later milestones
+    def _layer_safety(self, mode: ToolMode) -> str:
+        """Generate safety layer. Includes mode-specific constraints."""
+        if mode == ToolMode.chat_safe:
+            return (
+                "## Safety\n\n"
+                "Current session mode: **chat_safe**. "
+                "Only conversational tools are available. "
+                "Code-editing and file-system tools are disabled."
+            )
         return ""
 
     def _layer_skills(self) -> str:

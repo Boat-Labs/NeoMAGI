@@ -7,11 +7,10 @@ from typing import Any
 
 import structlog
 
-from src.agent.events import AgentEvent, TextChunk, ToolCallInfo
+from src.agent.events import AgentEvent, TextChunk, ToolCallInfo, ToolDenied
 from src.agent.model_client import ContentDelta, ModelClient, ToolCallsComplete
 from src.agent.prompt_builder import PromptBuilder
 from src.session.manager import SessionManager
-from src.tools.base import ToolMode
 from src.tools.registry import ToolRegistry
 
 logger = structlog.get_logger()
@@ -70,8 +69,8 @@ class AgentLoop:
             session_id, "user", content, lock_token=lock_token
         )
 
-        # Phase 1: hardcode chat_safe; Phase 2 will read from SessionManager.get_mode
-        mode = ToolMode.chat_safe  # TODO(Phase 2): await self._session_manager.get_mode(session_id)
+        # Resolve effective mode (fail-closed to chat_safe on error)
+        mode = await self._session_manager.get_mode(session_id)
 
         # 2. Build system prompt
         system_prompt = self._prompt_builder.build(session_id, mode)
@@ -139,7 +138,31 @@ class AgentLoop:
                         call_id=tc["id"],
                     )
 
-                    result = await self._execute_tool(tc["name"], tc["arguments"])
+                    # Execution gate: check mode before running
+                    if self._tool_registry and not self._tool_registry.check_mode(
+                        tc["name"], mode
+                    ):
+                        logger.warning(
+                            "tool_denied_by_mode",
+                            tool_name=tc["name"],
+                            mode=mode.value,
+                            session_id=session_id,
+                        )
+                        yield ToolDenied(
+                            tool_name=tc["name"],
+                            call_id=tc["id"],
+                            current_mode=mode.value,
+                            reason=f"Tool '{tc['name']}' is not available in "
+                            f"'{mode.value}' mode.",
+                        )
+                        result = {
+                            "error_code": "TOOL_DENIED",
+                            "message": f"Tool '{tc['name']}' is not available in "
+                            f"'{mode.value}' mode.",
+                        }
+                    else:
+                        result = await self._execute_tool(tc["name"], tc["arguments"])
+
                     await self._session_manager.append_message(
                         session_id,
                         "tool",

@@ -57,6 +57,13 @@ class ToolError(AgentError):
         super().__init__(message, code=code)
 
 
+class ToolModeError(ToolError):
+    """Tool call denied due to session mode restriction."""
+
+    def __init__(self, message: str = "Tool not available in current mode") -> None:
+        super().__init__(message, code="TOOL_DENIED")
+
+
 class SessionFencingError(GatewayError):
     """Raised when a stale worker tries to write after lock takeover."""
 

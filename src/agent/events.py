@@ -19,4 +19,14 @@ class ToolCallInfo:
     call_id: str
 
 
-AgentEvent = TextChunk | ToolCallInfo
+@dataclass
+class ToolDenied:
+    """Notification that a tool call was denied due to mode restriction."""
+
+    tool_name: str
+    call_id: str
+    current_mode: str
+    reason: str
+
+
+AgentEvent = TextChunk | ToolCallInfo | ToolDenied
