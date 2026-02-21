@@ -319,6 +319,18 @@ describe("chat store tool_denied handling", () => {
       isStreaming: true,
     })
 
+    // Precondition: tool_call arrives first
+    useChatStore.getState()._handleServerMessage({
+      type: "tool_call",
+      id: requestId,
+      data: {
+        tool_name: "read_file",
+        arguments: { path: "test.txt" },
+        call_id: "call-denied-1",
+      },
+    })
+
+    // Then: tool_denied arrives
     useChatStore.getState()._handleServerMessage({
       type: "tool_denied",
       id: requestId,
@@ -354,6 +366,17 @@ describe("chat store tool_denied handling", () => {
       isStreaming: true,
     })
 
+    // Precondition: tool_call arrives first
+    useChatStore.getState()._handleServerMessage({
+      type: "tool_call",
+      id: requestId,
+      data: {
+        tool_name: "read_file",
+        arguments: { path: "test.txt" },
+        call_id: "call-denied-1",
+      },
+    })
+
     useChatStore.getState()._handleServerMessage({
       type: "tool_denied",
       id: requestId,
@@ -385,6 +408,17 @@ describe("chat store tool_denied handling", () => {
       isStreaming: true,
     })
 
+    // Precondition: tool_call arrives first
+    useChatStore.getState()._handleServerMessage({
+      type: "tool_call",
+      id: requestId,
+      data: {
+        tool_name: "read_file",
+        arguments: { path: "test.txt" },
+        call_id: "call-denied-1",
+      },
+    })
+
     useChatStore.getState()._handleServerMessage({
       type: "tool_denied",
       id: requestId,
@@ -405,5 +439,137 @@ describe("chat store tool_denied handling", () => {
       message: "read_file is not allowed in chat_safe mode",
       nextAction: "coding mode required",
     })
+  })
+
+  it("tool_denied updates existing tool_call instead of appending", () => {
+    const requestId = "req-1"
+    useChatStore.setState({
+      messages: [
+        {
+          id: requestId,
+          role: "assistant",
+          content: "",
+          timestamp: Date.now(),
+          status: "streaming",
+        },
+      ],
+      isStreaming: true,
+    })
+
+    // First: tool_call arrives, creates a running entry
+    useChatStore.getState()._handleServerMessage({
+      type: "tool_call",
+      id: requestId,
+      data: {
+        tool_name: "read_file",
+        arguments: { path: "test.txt" },
+        call_id: "call-1",
+      },
+    })
+
+    // Then: tool_denied arrives for the same call_id
+    useChatStore.getState()._handleServerMessage({
+      type: "tool_denied",
+      id: requestId,
+      data: {
+        call_id: "call-1",
+        tool_name: "read_file",
+        mode: "chat_safe",
+        error_code: "MODE_DENIED",
+        message: "read_file is not allowed in chat_safe mode",
+        next_action: "coding mode required",
+      },
+    })
+
+    const msg = useChatStore.getState().messages[0]
+    // Must be 1 entry, not 2
+    expect(msg.toolCalls).toHaveLength(1)
+    expect(msg.toolCalls![0].callId).toBe("call-1")
+    expect(msg.toolCalls![0].status).toBe("denied")
+    expect(msg.toolCalls![0].deniedInfo).toBeDefined()
+  })
+
+  it("tool_denied without preceding tool_call inserts denied placeholder", () => {
+    const requestId = "req-1"
+    useChatStore.setState({
+      messages: [
+        {
+          id: requestId,
+          role: "assistant",
+          content: "",
+          timestamp: Date.now(),
+          status: "streaming",
+        },
+      ],
+      isStreaming: true,
+    })
+
+    // tool_denied arrives WITHOUT a preceding tool_call
+    useChatStore.getState()._handleServerMessage({
+      type: "tool_denied",
+      id: requestId,
+      data: {
+        call_id: "call-orphan",
+        tool_name: "read_file",
+        mode: "chat_safe",
+        error_code: "MODE_DENIED",
+        message: "read_file is not allowed in chat_safe mode",
+        next_action: "coding mode required",
+      },
+    })
+
+    const msg = useChatStore.getState().messages[0]
+    // Fallback: insert denied placeholder so denial is never silently lost
+    expect(msg.toolCalls).toHaveLength(1)
+    expect(msg.toolCalls![0].callId).toBe("call-orphan")
+    expect(msg.toolCalls![0].status).toBe("denied")
+    expect(msg.toolCalls![0].deniedInfo).toBeDefined()
+  })
+
+  it("done handler preserves denied status", () => {
+    const requestId = "req-1"
+    useChatStore.setState({
+      messages: [
+        {
+          id: requestId,
+          role: "assistant",
+          content: "",
+          timestamp: Date.now(),
+          status: "streaming",
+          toolCalls: [
+            {
+              callId: "call-ok",
+              toolName: "current_time",
+              arguments: {},
+              status: "running",
+            },
+            {
+              callId: "call-denied",
+              toolName: "read_file",
+              arguments: {},
+              status: "denied",
+              deniedInfo: {
+                mode: "chat_safe",
+                errorCode: "MODE_DENIED",
+                message: "denied",
+                nextAction: "n/a",
+              },
+            },
+          ],
+        },
+      ],
+      isStreaming: true,
+    })
+
+    // done arrives
+    useChatStore.getState()._handleServerMessage({
+      type: "stream_chunk",
+      id: requestId,
+      data: { content: "", done: true },
+    })
+
+    const tcs = useChatStore.getState().messages[0].toolCalls!
+    expect(tcs[0].status).toBe("complete") // running → complete
+    expect(tcs[1].status).toBe("denied")   // denied stays denied
   })
 })

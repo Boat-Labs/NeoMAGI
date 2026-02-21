@@ -171,10 +171,11 @@ export const useChatStore = create<ChatState>()(
                         ? {
                             ...m,
                             status: "complete" as const,
-                            toolCalls: m.toolCalls?.map((tc) => ({
-                              ...tc,
-                              status: "complete" as const,
-                            })),
+                            toolCalls: m.toolCalls?.map((tc) =>
+                              tc.status === "denied"
+                                ? tc
+                                : { ...tc, status: "complete" as const }
+                            ),
                           }
                         : m
                     ),
@@ -257,28 +258,45 @@ export const useChatStore = create<ChatState>()(
               break
             }
             case "tool_denied": {
-              const deniedToolCall: ToolCall = {
-                callId: message.data.call_id,
-                toolName: message.data.tool_name,
-                arguments: {},
-                status: "denied",
-                deniedInfo: {
-                  mode: message.data.mode,
-                  errorCode: message.data.error_code,
-                  message: message.data.message,
-                  nextAction: message.data.next_action,
-                },
+              const deniedInfo = {
+                mode: message.data.mode,
+                errorCode: message.data.error_code,
+                message: message.data.message,
+                nextAction: message.data.next_action,
               }
               set(
                 (state) => ({
-                  messages: state.messages.map((m) =>
-                    m.id === message.id
-                      ? {
-                          ...m,
-                          toolCalls: [...(m.toolCalls ?? []), deniedToolCall],
-                        }
-                      : m
-                  ),
+                  messages: state.messages.map((m) => {
+                    if (m.id !== message.id) return m
+                    const existing = m.toolCalls ?? []
+                    const idx = existing.findIndex(
+                      (tc) => tc.callId === message.data.call_id
+                    )
+                    if (idx >= 0) {
+                      // Update existing entry
+                      const updated = [...existing]
+                      updated[idx] = {
+                        ...updated[idx],
+                        status: "denied" as const,
+                        deniedInfo,
+                      }
+                      return { ...m, toolCalls: updated }
+                    }
+                    // Fallback: insert denied placeholder
+                    return {
+                      ...m,
+                      toolCalls: [
+                        ...existing,
+                        {
+                          callId: message.data.call_id,
+                          toolName: message.data.tool_name,
+                          arguments: {},
+                          status: "denied" as const,
+                          deniedInfo,
+                        },
+                      ],
+                    }
+                  }),
                 }),
                 false,
                 "toolDenied"
