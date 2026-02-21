@@ -28,7 +28,6 @@ from src.agent.model_client import ContentDelta, ModelClient, StreamEvent, ToolC
 from src.constants import DB_SCHEMA
 from src.session.manager import SessionManager
 from src.session.models import Base
-from src.tools.base import ToolMode
 from src.tools.builtins import register_builtins
 from src.tools.registry import ToolRegistry
 
@@ -188,7 +187,9 @@ class TestToolDeniedWebSocket:
         with TestClient(app) as client, client.websocket_connect("/ws") as ws:
             messages = _send_and_collect(ws, content="test")
             denied = [m for m in messages if m["type"] == "tool_denied"][0]
-            expected_fields = {"call_id", "tool_name", "mode", "error_code", "message", "next_action"}
+            expected_fields = {
+                "call_id", "tool_name", "mode", "error_code", "message", "next_action",
+            }
             assert set(denied["data"].keys()) == expected_fields
 
 

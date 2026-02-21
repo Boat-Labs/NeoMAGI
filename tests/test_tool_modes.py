@@ -14,7 +14,7 @@ Covers:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import ValidationError
@@ -25,7 +25,6 @@ from src.agent.model_client import ContentDelta, ToolCallsComplete
 from src.agent.prompt_builder import PromptBuilder
 from src.tools.base import BaseTool, ToolGroup, ToolMode
 from src.tools.registry import ToolRegistry
-
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -492,7 +491,10 @@ class TestExecutionGateDenial:
 
             async def stream_denied(*args, **kwargs):
                 yield ToolCallsComplete(
-                    tool_calls=[{"id": "det_call", "name": "read_file", "arguments": '{"path": "z"}'}]
+                    tool_calls=[{
+                        "id": "det_call", "name": "read_file",
+                        "arguments": '{"path": "z"}',
+                    }]
                 )
 
             async def stream_final(*args, **kwargs):
@@ -603,7 +605,9 @@ class TestPromptBuilderModeAware:
             schema_names = {s["function"]["name"] for s in reg.get_tools_schema(mode)}
             tooling_output = builder._layer_tooling(mode)
             for name in schema_names:
-                assert name in tooling_output, f"{name} in schema but not in tooling layer for {mode}"
+                assert name in tooling_output, (
+                    f"{name} in schema but not in tooling layer for {mode}"
+                )
 
     def test_safety_layer_mentions_chat_safe(self, tmp_path):
         builder = PromptBuilder(tmp_path)
