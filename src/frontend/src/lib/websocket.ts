@@ -63,7 +63,8 @@ export class WebSocketClient {
             msg.type === "stream_chunk" ||
             msg.type === "error" ||
             msg.type === "tool_call" ||
-            msg.type === "response"
+            msg.type === "response" ||
+            msg.type === "tool_denied"
           ) {
             this.options.onMessage(msg)
             return
