@@ -48,11 +48,11 @@ System Prompt (PromptBuilder.build)
 
 ### 2.3 Anchor Validation Implementation
 
-`_validate_anchors(system_prompt, summary)` — compaction.py:313-327
+`_validate_anchors(system_prompt, compacted_context, effective_history_text)` — compaction.py:371-397
 
-当前实现为最小安全网：检查 `len(system_prompt) > 50`。
+当前实现为锚点短语匹配校验：从 workspace 锚点文件（AGENTS.md, SOUL.md, USER.md）提取首个非空行作为 probe phrase，验证每个 phrase 在最终 model context（system_prompt + compacted_context + preserved_text）中可见。
 
-**评估**: 这是一个 structural check，验证 system_prompt 组装没有产生空结果。由于锚点在 Layer 5 独立注入、不进入压缩范围，actual anchor loss 只可能发生在 PromptBuilder 本身出错（如文件读取失败），此时 `len > 50` 检查可以捕获 catastrophic failure。
+**评估**: 这是 ADR 0030 要求的"锚点可见性校验"的完整实现，覆盖了锚点内容级匹配（非仅长度检查）。若任一锚点短语缺失，触发 retry → degrade 降级路径。
 
 ---
 
@@ -137,7 +137,7 @@ _validate_anchors fails
 
 ## 5. Known Limitations
 
-1. **`_validate_anchors` 为最小实现**: 仅检查 `len(system_prompt) > 50`，未做实际锚点内容匹配。这对于 M2 的架构隔离策略是充分的，但后续 milestone 如果改变 prompt 组装逻辑，需升级校验。
+1. **`_validate_anchors` 已升级为锚点短语匹配**: 从 AGENTS/SOUL/USER 文件提取首行作为 probe phrase，在最终 context 中验证可见性。当前覆盖 M2 反漂移需求，后续 milestone 可按需扩展 probe 粒度。
 
 2. **Probe 为代码级验证**: 当前 Probe 通过单元测试和代码审查执行，未使用真实 LLM 调用。真实 LLM 返回的 summary 质量不在本次评估范围内（属于 M3 阶段质量评估）。
 
@@ -150,9 +150,10 @@ _validate_anchors fails
 M2 反漂移基线验收 **PASS**。
 
 - 锚点通过架构隔离保护（PromptBuilder 层独立注入，不进入压缩范围）
-- 锚点校验存在最小安全网实现
+- 锚点校验已实现短语级匹配（从 AGENTS/SOUL/USER 提取 probe phrase，验证 final context 可见性）
 - Retry → degrade 降级路径完整且测试覆盖
 - 所有 6 个 Probe 场景通过，命中率 100%
 - 无丢失项，无失败样例
+- Probe 数量降阶决策见 ADR 0033：M2 基线 6 Probe，20 Probe 推迟至 M3
 
 本评估记录满足 ADR 0030 要求的"离线评估记录（命中率、丢失项、失败样例）"产出。
