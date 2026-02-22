@@ -148,3 +148,10 @@
 - Plan: dev_docs/plans/m2_post-review-fixes_2026-02-22.md
 - Next: PR merge 后进入 M2 验收或 M3 规划
 - Risk: 无
+
+## 2026-02-22 (local) | M2
+- Status: done
+- Done: M2 会话内连续性全部完成 — PR #3 merged to main，主体实现 + post-review fixes 合入
+- Evidence: commit 6c33bfa (merge), 258 tests passed, ruff clean
+- Next: 进入 M3（持久记忆）规划
+- Risk: 无
