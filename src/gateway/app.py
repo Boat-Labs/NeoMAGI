@@ -68,6 +68,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         workspace_dir=settings.workspace_dir,
         model=settings.openai.model,
         tool_registry=tool_registry,
+        compaction_settings=settings.compaction,
     )
 
     app.state.agent_loop = agent_loop

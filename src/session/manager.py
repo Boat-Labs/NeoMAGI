@@ -23,6 +23,27 @@ class Message:
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
+    seq: int | None = None  # Populated when loaded from DB or after persist
+
+
+@dataclass(frozen=True)
+class MessageWithSeq:
+    """Message with guaranteed seq for compaction operations (ADR 0031)."""
+
+    seq: int
+    role: str
+    content: str | None
+    tool_calls: list[dict[str, Any]] | None
+    tool_call_id: str | None
+
+
+@dataclass(frozen=True)
+class CompactionState:
+    """Compaction state loaded from session record."""
+
+    compacted_context: str | None
+    last_compaction_seq: int | None
+    compaction_metadata: dict | None
 
 
 @dataclass
@@ -190,7 +211,8 @@ class SessionManager:
         )
 
         # [Decision 0021] Persist first — no memory pollution on failure
-        await self._persist_message(session_id, msg, lock_token=lock_token)
+        seq = await self._persist_message(session_id, msg, lock_token=lock_token)
+        msg.seq = seq
 
         # Only reach here if persist succeeded
         session.messages.append(msg)
@@ -205,6 +227,117 @@ class SessionManager:
         """
         session = self.get_or_create(session_id)
         return _messages_to_openai_format(session.messages)
+
+    def get_history_with_seq(self, session_id: str) -> list[MessageWithSeq]:
+        """Return all messages with seq from in-memory cache.
+
+        Messages without seq (not yet persisted) are excluded.
+        """
+        session = self.get_or_create(session_id)
+        return [
+            MessageWithSeq(
+                seq=m.seq,
+                role=m.role,
+                content=m.content,
+                tool_calls=m.tool_calls,
+                tool_call_id=m.tool_call_id,
+            )
+            for m in session.messages
+            if m.seq is not None
+        ]
+
+    def get_effective_history(
+        self, session_id: str, last_compaction_seq: int | None
+    ) -> list[MessageWithSeq]:
+        """Unique rebuild entry point (ADR 0031).
+
+        Returns messages WHERE seq > last_compaction_seq (or all if None).
+        In-memory cache preferred.
+        """
+        all_msgs = self.get_history_with_seq(session_id)
+        if last_compaction_seq is None:
+            return all_msgs
+        return [m for m in all_msgs if m.seq > last_compaction_seq]
+
+    async def get_compaction_state(self, session_id: str) -> CompactionState | None:
+        """Load compacted_context + last_compaction_seq + compaction_metadata.
+
+        Returns None if session has no compaction history.
+        """
+        async with self._db() as db_session:
+            stmt = select(
+                SessionRecord.compacted_context,
+                SessionRecord.last_compaction_seq,
+                SessionRecord.compaction_metadata,
+            ).where(SessionRecord.id == session_id)
+            result = await db_session.execute(stmt)
+            row = result.one_or_none()
+
+        if row is None:
+            return None
+        if row[0] is None and row[1] is None and row[2] is None:
+            return None
+
+        return CompactionState(
+            compacted_context=row[0],
+            last_compaction_seq=row[1],
+            compaction_metadata=row[2],
+        )
+
+    async def store_compaction_result(
+        self,
+        session_id: str,
+        result: Any,
+        *,
+        lock_token: str,
+    ) -> None:
+        """Persist compaction state (ADR 0031 + ADR 0021 fencing).
+
+        MUST NOT be called when result.status == "noop" (caller responsibility).
+
+        Atomic UPDATE with lock_token fencing and monotonic seq protection.
+        """
+        from src.infra.errors import SessionFencingError
+
+        async with self._db() as db_session:
+            stmt = (
+                update(SessionRecord)
+                .where(
+                    SessionRecord.id == session_id,
+                    SessionRecord.lock_token == lock_token,
+                    or_(
+                        SessionRecord.last_compaction_seq.is_(None),
+                        SessionRecord.last_compaction_seq < result.new_compaction_seq,
+                    ),
+                )
+                .values(
+                    compacted_context=result.compacted_context,
+                    compaction_metadata=result.compaction_metadata,
+                    last_compaction_seq=result.new_compaction_seq,
+                    memory_flush_candidates=[
+                        c if isinstance(c, dict) else c.__dict__
+                        for c in (result.memory_flush_candidates or [])
+                    ],
+                )
+                .returning(SessionRecord.id)
+            )
+            exec_result = await db_session.execute(stmt)
+            updated = exec_result.scalar_one_or_none()
+
+            if updated is None:
+                raise SessionFencingError(
+                    f"Compaction store failed for session {session_id}: "
+                    "lock_token mismatch or seq not monotonic"
+                )
+
+            await db_session.commit()
+
+        logger.info(
+            "compaction_stored",
+            session_id=session_id,
+            new_compaction_seq=result.new_compaction_seq,
+            status=result.status,
+        )
 
     async def load_session_from_db(self, session_id: str, *, force: bool = False) -> bool:
         """Load a session from DB into memory cache. Returns True if found.
@@ -251,6 +384,7 @@ class SessionManager:
                         ),
                         tool_calls=mr.tool_calls,
                         tool_call_id=mr.tool_call_id,
+                        seq=mr.seq,
                     )
                     for mr in msg_records
                 ]
@@ -293,7 +427,7 @@ class SessionManager:
 
     async def _persist_message(
         self, session_id: str, msg: Message, *, lock_token: str | None = None
-    ) -> None:
+    ) -> int:
         """Persist a single message to DB with atomic seq allocation and fencing.
 
         [Decision 0021] Raises on failure — no silent drop.
@@ -302,6 +436,8 @@ class SessionManager:
         When lock_token is provided, the ON CONFLICT WHERE clause atomically
         verifies the token matches the current session holder. Single statement,
         no race window between lock check and seq allocation.
+
+        Returns the allocated seq number.
         """
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -350,6 +486,7 @@ class SessionManager:
                 )
             )
             await db_session.commit()
+            return seq
 
 
 def _messages_to_openai_format(messages: list[Message]) -> list[dict[str, Any]]:

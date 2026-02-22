@@ -124,3 +124,27 @@
 - Plan: dev_docs/plans/m1.5_review-fixes_2026-02-21.md
 - Next: 进入 M2（会话内连续性）规划
 - Risk: 无
+
+## 2026-02-22 (local) | M2
+- Status: in_progress
+- Done: M2 会话内连续性主体实现交付 — TokenCounter (tiktoken exact + fallback estimate) + BudgetTracker (三区间: ok/warn/compact_needed) + CompactionEngine (rolling summary + anchor validation ADR 0030 + memory flush ADR 0032) + AgentLoop compaction 集成 (budget check → compact → store → rebuild) + SessionManager watermark-aware get_effective_history
+- Evidence: commit 48b60d1..34867c5, merged to main
+- Next: post-review fixes
+- Risk: 无
+
+## 2026-02-22 (local) | M2
+- Status: in_progress
+- Done: M2 post-review fixes 完成 — 6 项 Finding + 2 项 P2 follow-up 全部修复并验证
+- Detail:
+  - F1: Post-compaction budget recheck + overflow → emergency trim → fail-open chain
+  - F2: Overflow 集成测试覆盖 recheck/emergency trim/store-rebuild-recheck/fail-open 路径
+  - F3: Wire summary_temperature from CompactionSettings into LLM call
+  - F4: Add compact_timeout_s / flush_timeout_s to CompactionSettings with Pydantic validation
+  - F5: UTF-8 byte-safe truncation in memory flush (CJK 无中断截断)
+  - F6: Strict 30% summary token cap + degraded path for small inputs
+  - P2-1: Remove early-exit when min_preserved_turns=1, always attempt emergency trim
+  - P2-2: Strengthen F2 test assertions with spy verification + model-not-called checks
+- Evidence: PR #3 (fix/m2-post-review-fixes), 258 tests passed, ruff clean
+- Plan: dev_docs/plans/m2_post-review-fixes_2026-02-22.md
+- Next: PR merge 后进入 M2 验收或 M3 规划
+- Risk: 无

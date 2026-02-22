@@ -23,6 +23,7 @@ from starlette.testclient import TestClient
 
 from src.agent.agent import AgentLoop
 from src.agent.model_client import ContentDelta, ModelClient, StreamEvent, ToolCallsComplete
+from src.config.settings import CompactionSettings
 from src.constants import DB_SCHEMA
 from src.session.manager import SessionManager
 from src.session.models import Base
@@ -41,7 +42,9 @@ class FakeModelClient(ModelClient):
         self._responses = list(sequences)
         self._call_idx = 0
 
-    async def chat(self, messages: list[dict[str, Any]], model: str) -> str:
+    async def chat(
+        self, messages: list[dict[str, Any]], model: str, temperature: float | None = None
+    ) -> str:
         return ""
 
     async def chat_stream(
@@ -93,6 +96,7 @@ def _make_app(
             session_manager=session_manager,
             workspace_dir=tmp_path,
             model="test-model",
+            compaction_settings=CompactionSettings(context_limit=100_000),
         )
 
         # Pre-claim sessions for SESSION_BUSY testing
