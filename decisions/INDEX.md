@@ -36,6 +36,7 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0030 | M2 anti-drift baseline scope: compaction preserves anchors | accepted | 2026-02-21 | `decisions/0030-m2-anti-drift-baseline-scope-compaction-preserves-anchors.md` |
 | 0031 | Compaction history rebuild semantics: watermark | accepted | 2026-02-21 | `decisions/0031-compaction-history-rebuild-semantics-watermark.md` |
 | 0032 | Memory flush ownership: AgentLoop orchestrates, CompactionEngine generates | accepted | 2026-02-21 | `decisions/0032-memory-flush-ownership-agentloop-orchestrates-compactionengine-generates.md` |
+| 0033 | M2 anti-drift Probe baseline adjustment: 6 in M2, 20+ moved to M3 | accepted | 2026-02-22 | `decisions/0033-m2-anti-drift-probe-baseline-adjustment-to-6.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。
