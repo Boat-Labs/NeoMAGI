@@ -82,7 +82,10 @@ class AgentLoop:
         if compaction_settings is not None:
             self._budget_tracker = BudgetTracker(compaction_settings, model)
             self._compaction_engine = CompactionEngine(
-                model_client, self._budget_tracker.counter, compaction_settings
+                model_client,
+                self._budget_tracker.counter,
+                compaction_settings,
+                workspace_dir=workspace_dir,
             )
 
     async def handle_message(
@@ -202,6 +205,111 @@ class AgentLoop:
                             {"role": "system", "content": system_prompt},
                             *_messages_with_seq_to_openai(effective_msgs),
                         ]
+
+                        # F2: Post-compaction budget recheck
+                        rebuilt_tokens = (
+                            self._budget_tracker.counter.count_messages(messages)
+                        )
+                        if tools_schema_list:
+                            rebuilt_tokens += (
+                                self._budget_tracker.counter.count_tools_schema(
+                                    tools_schema_list
+                                )
+                            )
+                        post_status = self._budget_tracker.check(rebuilt_tokens)
+
+                        if post_status.status == "compact_needed":
+                            # Overflow: try emergency trim with reduced preserved turns
+                            original_turns = (
+                                self._settings.min_preserved_turns
+                            )
+                            reduced_turns = max(original_turns // 2, 1)
+
+                            logger.warning(
+                                "post_compaction_still_over_budget",
+                                original_preserved=original_turns,
+                                reduced_preserved=reduced_turns,
+                                tokens=rebuilt_tokens,
+                            )
+                            emergency_result = self._emergency_trim(
+                                session_id=session_id,
+                                current_user_seq=current_user_seq,
+                                min_preserved_turns_override=reduced_turns,
+                            )
+                            if emergency_result is None:
+                                # Cannot trim further → fail-open
+                                logger.error(
+                                    "emergency_trim_returned_none",
+                                    session_id=session_id,
+                                )
+                                yield TextChunk(
+                                    content="抱歉，当前会话内容过长，无法进一步压缩。"
+                                    "请开始新会话继续对话。"
+                                )
+                                return
+
+                            # Emergency trim succeeded → store + rebuild + recheck
+                            try:
+                                await self._session_manager.store_compaction_result(
+                                    session_id,
+                                    emergency_result,
+                                    lock_token=lock_token,
+                                )
+                                last_compaction_seq = (
+                                    emergency_result.new_compaction_seq
+                                )
+                                compacted_context = (
+                                    emergency_result.compacted_context
+                                )
+                                system_prompt = self._prompt_builder.build(
+                                    session_id,
+                                    mode,
+                                    compacted_context=compacted_context,
+                                )
+                                effective_msgs = (
+                                    self._session_manager.get_effective_history(
+                                        session_id, last_compaction_seq
+                                    )
+                                )
+                                messages = [
+                                    {"role": "system", "content": system_prompt},
+                                    *_messages_with_seq_to_openai(effective_msgs),
+                                ]
+                                final_tokens = (
+                                    self._budget_tracker.counter.count_messages(
+                                        messages
+                                    )
+                                )
+                                if tools_schema_list:
+                                    final_tokens += (
+                                        self._budget_tracker.counter
+                                        .count_tools_schema(tools_schema_list)
+                                    )
+                                final_status = self._budget_tracker.check(
+                                    final_tokens
+                                )
+                                if final_status.status == "compact_needed":
+                                    logger.error(
+                                        "emergency_trim_still_over_budget",
+                                        tokens=final_tokens,
+                                        session_id=session_id,
+                                    )
+                                    yield TextChunk(
+                                        content="抱歉，当前会话内容过长，"
+                                        "无法进一步压缩。"
+                                        "请开始新会话继续对话。"
+                                    )
+                                    return
+                            except Exception:
+                                logger.exception(
+                                    "overflow_emergency_store_failed",
+                                    session_id=session_id,
+                                )
+                                yield TextChunk(
+                                    content="抱歉，会话压缩过程中遇到错误。"
+                                    "请开始新会话继续对话。"
+                                )
+                                return
 
             # Stream the LLM response — content tokens arrive immediately,
             # tool calls are accumulated and yielded at the end of the stream.
@@ -405,13 +513,17 @@ class AgentLoop:
         *,
         session_id: str,
         current_user_seq: int,
+        min_preserved_turns_override: int | None = None,
     ) -> CompactionResult | None:
         """Emergency trim: force watermark forward to reduce context.
 
         Preserves only the most recent messages around current_user_seq.
         No summary is generated — this is a last resort.
+
+        min_preserved_turns_override: per-call override, does NOT modify self._settings.
         """
-        min_preserved = self._settings.min_preserved_turns if self._settings else 8
+        default_preserved = self._settings.min_preserved_turns if self._settings else 8
+        min_preserved = min_preserved_turns_override or default_preserved
         all_msgs = self._session_manager.get_history_with_seq(session_id)
         if not all_msgs:
             return None

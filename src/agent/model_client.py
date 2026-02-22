@@ -48,7 +48,12 @@ class ModelClient(ABC):
     """Abstract base class for LLM model clients."""
 
     @abstractmethod
-    async def chat(self, messages: list[dict[str, Any]], model: str) -> str:
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        temperature: float | None = None,
+    ) -> str:
         """Send messages and return the complete response content."""
         ...
 
@@ -153,11 +158,20 @@ class OpenAICompatModelClient(ModelClient):
         # Unreachable, but satisfies type checker
         raise LLMError("Retry loop exhausted")  # pragma: no cover
 
-    async def chat(self, messages: list[dict[str, Any]], model: str) -> str:
+    async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        temperature: float | None = None,
+    ) -> str:
         """Send messages and return the complete response content."""
         logger.debug("chat_request", model=model, message_count=len(messages))
         response = await self._retry_call(
-            lambda: self._client.chat.completions.create(model=model, messages=messages),
+            lambda: self._client.chat.completions.create(
+                model=model,
+                messages=messages,
+                **({"temperature": temperature} if temperature is not None else {}),
+            ),
             context="chat",
         )
         content = _first_choice(response, context="chat").message.content or ""

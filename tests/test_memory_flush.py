@@ -131,7 +131,30 @@ class TestMemoryFlushGenerator:
         turns = [_make_turn(0, "请记住" + "a" * 100)]
         result = gen.generate(turns, "main")
         assert len(result) == 1
-        assert len(result[0].candidate_text) <= 20
+        assert len(result[0].candidate_text.encode("utf-8")) <= 20
+
+    def test_utf8_byte_truncation_chinese(self):
+        """Chinese text truncated by UTF-8 bytes, not characters (F5)."""
+        # Each Chinese char = 3 bytes in UTF-8; "请记住" prefix = 9 bytes
+        # Set limit to 15 bytes → should fit 5 Chinese chars (15 bytes)
+        gen = MemoryFlushGenerator(_make_settings(max_candidate_text_bytes=15))
+        text = "请记住我偏好这个方案"  # 10 chars = 30 bytes
+        turns = [_make_turn(0, text)]
+        result = gen.generate(turns, "main")
+        assert len(result) == 1
+        encoded = result[0].candidate_text.encode("utf-8")
+        assert len(encoded) <= 15
+        # Must not break mid-character
+        result[0].candidate_text.encode("utf-8").decode("utf-8")
+
+    def test_utf8_byte_truncation_ascii_unchanged(self):
+        """ASCII text: byte truncation behaves same as character truncation (F5)."""
+        gen = MemoryFlushGenerator(_make_settings(max_candidate_text_bytes=30))
+        text = "remember " + "x" * 100  # ASCII only
+        turns = [_make_turn(0, text)]
+        result = gen.generate(turns, "main")
+        assert len(result) == 1
+        assert len(result[0].candidate_text.encode("utf-8")) <= 30
 
     def test_candidate_structure_complete(self):
         """All fields from m2_architecture.md 3.3 must be present."""

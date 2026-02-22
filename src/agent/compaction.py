@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import structlog
@@ -116,10 +117,12 @@ class CompactionEngine:
         model_client: ModelClient,
         token_counter: TokenCounter,
         settings: CompactionSettings,
+        workspace_dir: Path | None = None,
     ) -> None:
         self._model_client = model_client
         self._counter = token_counter
         self._settings = settings
+        self._workspace_dir = workspace_dir
         self._flush_generator = MemoryFlushGenerator(settings)
 
     async def compact(
@@ -220,7 +223,28 @@ class CompactionEngine:
         # Step 6: Rolling summary via LLM
         conversation_text = self._turns_to_text(compressible_turns)
         input_tokens = self._counter.count_text(conversation_text)
-        max_summary_tokens = max(int(input_tokens * 0.3), 200)
+        max_summary_tokens = int(input_tokens * 0.3)
+
+        # Input too small for meaningful summary → degraded (trim-only, watermark advances)
+        if max_summary_tokens < 100:
+            logger.info(
+                "input_too_small_for_summary",
+                input_tokens=input_tokens,
+                max_summary_tokens=max_summary_tokens,
+            )
+            return CompactionResult(
+                status="degraded",
+                compacted_context=previous_compacted_context,
+                compaction_metadata=self._make_metadata(
+                    "degraded",
+                    preserved_count=len(preserved_turns),
+                    summarized_count=len(compressible_turns),
+                    flush_skipped=flush_skipped,
+                ),
+                new_compaction_seq=new_compaction_seq,
+                memory_flush_candidates=flush_candidates,
+                preserved_messages=[m for t in preserved_turns for m in t.messages],
+            )
 
         summary_text: str | None = None
         anchor_retry_used = False
@@ -241,9 +265,14 @@ class CompactionEngine:
             status = "degraded"
 
         # Step 7: Anchor visibility validation (ADR 0030)
+        # effective_history_text = preserved turns text (approximation of what the
+        # model will see alongside system_prompt + compacted_context)
+        preserved_text = self._turns_to_text(preserved_turns)
         anchor_passed = True
         if summary_text and status == "success":
-            anchor_passed = self._validate_anchors(system_prompt, summary_text)
+            anchor_passed = self._validate_anchors(
+                system_prompt, summary_text, preserved_text
+            )
             if not anchor_passed and self._settings.anchor_retry_enabled:
                 anchor_retry_used = True
                 logger.info("anchor_retry", session_id=session_id)
@@ -257,13 +286,17 @@ class CompactionEngine:
                         ),
                         timeout=self._settings.compact_timeout_s,
                     )
-                    anchor_passed = self._validate_anchors(system_prompt, summary_text)
+                    anchor_passed = self._validate_anchors(
+                        system_prompt, summary_text, preserved_text
+                    )
                 except (TimeoutError, Exception):
                     anchor_passed = False
 
                 if not anchor_passed:
                     status = "degraded"
-                    logger.warning("anchor_validation_failed_after_retry", session_id=session_id)
+                    logger.warning(
+                        "anchor_validation_failed_after_retry", session_id=session_id
+                    )
 
         # Build metadata
         metadata = self._make_metadata(
@@ -307,24 +340,61 @@ class CompactionEngine:
             {"role": "user", "content": prompt},
         ]
 
-        response = await self._model_client.chat(messages, model)
+        response = await self._model_client.chat(
+            messages, model, temperature=self._settings.summary_temperature
+        )
         return response.strip()
 
-    def _validate_anchors(self, system_prompt: str, summary: str) -> bool:
+    # Anchor files: first non-empty line used as probe (ADR 0030)
+    _ANCHOR_FILES = ("AGENTS.md", "SOUL.md", "USER.md")
+
+    def _extract_anchor_phrases(self) -> list[str]:
+        """Extract first non-empty line from each workspace anchor file."""
+        if self._workspace_dir is None:
+            return []
+        anchors: list[str] = []
+        for filename in self._ANCHOR_FILES:
+            filepath = self._workspace_dir / filename
+            if not filepath.exists():
+                continue
+            try:
+                text = filepath.read_text(encoding="utf-8")
+                for line in text.splitlines():
+                    stripped = line.strip()
+                    if stripped:
+                        anchors.append(stripped)
+                        break
+            except OSError:
+                logger.warning("anchor_file_read_error", file=filename)
+        return anchors
+
+    def _validate_anchors(
+        self,
+        system_prompt: str,
+        compacted_context: str | None,
+        effective_history_text: str = "",
+    ) -> bool:
         """Validate anchor visibility in final model context (ADR 0030).
 
-        Checks that key anchor phrases from workspace context (AGENTS/SOUL/USER)
-        are visible in the combined system_prompt. Since system_prompt always
-        contains workspace context, this is a safety net for prompt assembly errors.
+        Checks that first non-empty line from AGENTS/SOUL/USER files
+        is present in the final context sent to the model.
         """
-        # The system prompt always includes workspace context files.
-        # This check verifies the prompt assembly didn't break.
-        # In normal operation this always passes.
         if not system_prompt:
             return False
 
-        # Basic structural check: system prompt should have reasonable content
-        return len(system_prompt) > 50
+        final_context = system_prompt + (compacted_context or "") + effective_history_text
+
+        anchor_phrases = self._extract_anchor_phrases()
+        if not anchor_phrases:
+            # No anchors to validate → pass (don't block compaction)
+            return True
+
+        for phrase in anchor_phrases:
+            if phrase not in final_context:
+                logger.warning("anchor_missing", phrase=phrase[:80])
+                return False
+
+        return True
 
     def _turns_to_text(self, turns: list[Turn]) -> str:
         """Convert turns to plain text for summary input."""

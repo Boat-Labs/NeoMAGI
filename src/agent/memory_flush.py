@@ -110,8 +110,12 @@ class MemoryFlushGenerator:
                 if confidence < 0.1:
                     continue
 
-                # Truncate to max bytes
-                text = stripped[: self._max_text_bytes]
+                # Truncate to max bytes (UTF-8 safe)
+                encoded = stripped.encode("utf-8")
+                if len(encoded) > self._max_text_bytes:
+                    text = encoded[: self._max_text_bytes].decode("utf-8", errors="ignore")
+                else:
+                    text = stripped
 
                 candidates.append(
                     MemoryFlushCandidate(

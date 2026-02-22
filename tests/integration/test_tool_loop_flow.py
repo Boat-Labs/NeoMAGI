@@ -44,7 +44,9 @@ class FakeModelClient(ModelClient):
         self._responses = list(sequences)
         self._call_idx = 0
 
-    async def chat(self, messages: list[dict[str, Any]], model: str) -> str:
+    async def chat(
+        self, messages: list[dict[str, Any]], model: str, temperature: float | None = None
+    ) -> str:
         return ""
 
     async def chat_stream(

@@ -40,7 +40,7 @@ def _make_long_history(n_turns: int = 30) -> list[MessageWithSeq]:
 @pytest.mark.asyncio
 class TestCompactionSmoke:
 
-    async def test_full_pipeline_30_turns(self):
+    async def test_full_pipeline_30_turns(self, tmp_path):
         """30+ turns -> compact -> verify all outputs."""
         summary_response = (
             '{"facts":["fact1","fact2"],'
@@ -62,7 +62,7 @@ class TestCompactionSmoke:
             min_preserved_turns=8,
         )
         counter = TokenCounter("gpt-4o-mini")
-        engine = CompactionEngine(model_client, counter, settings)
+        engine = CompactionEngine(model_client, counter, settings, workspace_dir=tmp_path)
 
         msgs = _make_long_history(30)
         budget_status = BudgetStatus(
@@ -109,7 +109,7 @@ class TestCompactionSmoke:
             assert len(c.candidate_id) > 0
             assert c.source_session_id == "smoke-test"
 
-    async def test_second_compaction_advances_watermark(self):
+    async def test_second_compaction_advances_watermark(self, tmp_path):
         """Rolling compaction: second call advances watermark further."""
         model_client = MagicMock()
         model_client.chat = AsyncMock(
@@ -125,10 +125,10 @@ class TestCompactionSmoke:
             min_preserved_turns=3,
         )
         counter = TokenCounter("gpt-4o-mini")
-        engine = CompactionEngine(model_client, counter, settings)
+        engine = CompactionEngine(model_client, counter, settings, workspace_dir=tmp_path)
 
-        # First compaction
-        msgs1 = _make_long_history(10)
+        # First compaction (30 turns to exceed F6 small-input threshold)
+        msgs1 = _make_long_history(30)
         result1 = await engine.compact(
             messages=msgs1,
             system_prompt=(
@@ -146,7 +146,7 @@ class TestCompactionSmoke:
         seq1 = result1.new_compaction_seq
 
         # Add more messages and compact again
-        msgs2 = msgs1 + _make_long_history(10)
+        msgs2 = msgs1 + _make_long_history(30)
         # Fix seq for the second batch
         max_seq = max(m.seq for m in msgs1) + 1
         for i, m in enumerate(msgs2[len(msgs1):]):

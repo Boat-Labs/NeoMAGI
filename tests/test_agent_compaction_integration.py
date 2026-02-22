@@ -70,8 +70,16 @@ def _make_session_manager(
     sm.append_message = AsyncMock(return_value=user_msg)
     sm.get_mode = AsyncMock(return_value=ToolMode.chat_safe)
     sm.get_compaction_state = AsyncMock(return_value=compaction_state)
-    sm.get_effective_history = MagicMock(return_value=history or [])
-    sm.get_history_with_seq = MagicMock(return_value=history or [])
+
+    all_history = history or []
+
+    def _effective_history(session_id, last_compaction_seq):
+        if last_compaction_seq is None:
+            return all_history
+        return [m for m in all_history if m.seq > last_compaction_seq]
+
+    sm.get_effective_history = MagicMock(side_effect=_effective_history)
+    sm.get_history_with_seq = MagicMock(return_value=all_history)
     sm.store_compaction_result = AsyncMock()
     return sm
 
@@ -175,10 +183,13 @@ class TestAgentCompactionIntegration:
             side_effect=[_make_stream_response()()]
         )
 
-        # Large history to exceed compact threshold
+        # Large history to exceed compact threshold.
+        # context_limit=2000 → usable=1700 → compact_threshold=850.
+        # Initial 20 turns ≈ 1285 tokens > 850 → triggers compaction.
+        # Post-compaction preserved 3 turns ≈ 328 tokens < 850 → passes recheck.
         history = _make_long_history(20, start_seq=0)
         sm = _make_session_manager(history, user_seq=40)
-        settings = _make_settings(context_limit=500, compact_ratio=0.50, warn_ratio=0.30)
+        settings = _make_settings(context_limit=2000, compact_ratio=0.50, warn_ratio=0.30)
 
         agent = AgentLoop(
             model_client=model_client,
@@ -227,7 +238,7 @@ class TestAgentCompactionIntegration:
 
         sm.get_effective_history = MagicMock(side_effect=effective_history_side_effect)
 
-        settings = _make_settings(context_limit=500, compact_ratio=0.50, warn_ratio=0.30)
+        settings = _make_settings(context_limit=2000, compact_ratio=0.50, warn_ratio=0.30)
 
         agent = AgentLoop(
             model_client=model_client,
@@ -295,7 +306,7 @@ class TestAgentCompactionIntegration:
 
         history = _make_long_history(20, start_seq=0)
         sm = _make_session_manager(history, user_seq=40)
-        settings = _make_settings(context_limit=500, compact_ratio=0.50, warn_ratio=0.30)
+        settings = _make_settings(context_limit=2000, compact_ratio=0.50, warn_ratio=0.30)
 
         agent = AgentLoop(
             model_client=model_client,
@@ -326,7 +337,7 @@ class TestAgentCompactionIntegration:
         history = _make_long_history(20, start_seq=0)
         sm = _make_session_manager(history, user_seq=40)
         settings = _make_settings(
-            context_limit=500,
+            context_limit=2000,
             compact_ratio=0.50,
             warn_ratio=0.30,
             max_compactions_per_request=1,
@@ -445,3 +456,250 @@ class TestAgentCompactionIntegration:
 
         assert len(events) >= 1
         assert isinstance(events[0], TextChunk)
+
+
+# ---------------------------------------------------------------------------
+# F2: Post-compaction budget recheck + overflow retry
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestPostCompactionOverflow:
+
+    async def test_overflow_triggers_emergency_trim(self, tmp_path):
+        """After compaction, if still over budget → emergency trim with reduced turns."""
+        summary_response = (
+            '{"facts":[],"decisions":[],"open_todos":[],'
+            '"user_prefs":[],"timeline":[]}'
+        )
+        model_client = MagicMock()
+        model_client.chat = AsyncMock(return_value=summary_response)
+        model_client.chat_stream_with_tools = MagicMock(
+            side_effect=[_make_stream_response("After emergency trim")()]
+        )
+
+        # Large history. context_limit=500 → usable=200 → compact_threshold=100
+        # Post-compaction preserved turns still exceed 100 → overflow → emergency trim
+        history = _make_long_history(30, start_seq=0)
+        sm = _make_session_manager(history, user_seq=60)
+
+        settings = _make_settings(
+            context_limit=500,
+            compact_ratio=0.50,
+            warn_ratio=0.30,
+            min_preserved_turns=4,
+        )
+
+        agent = AgentLoop(
+            model_client=model_client,
+            session_manager=sm,
+            workspace_dir=tmp_path,
+            compaction_settings=settings,
+            model="gpt-4o-mini",
+        )
+
+        with patch.object(
+            agent, "_emergency_trim", wraps=agent._emergency_trim
+        ) as spy_trim:
+            events = []
+            async for event in agent.handle_message("test", "Go", lock_token="lock"):
+                events.append(event)
+
+            # _emergency_trim MUST have been called
+            assert spy_trim.call_count >= 1
+            # Verify reduced turns = max(4//2, 1) = 2
+            call_kwargs = spy_trim.call_args.kwargs
+            assert call_kwargs["min_preserved_turns_override"] == 2
+
+    async def test_emergency_trim_uses_reduced_turns(self, tmp_path):
+        """_emergency_trim receives min_preserved_turns_override (not mutating settings)."""
+        model_client = MagicMock()
+        summary_response = (
+            '{"facts":[],"decisions":[],"open_todos":[],'
+            '"user_prefs":[],"timeline":[]}'
+        )
+        model_client.chat = AsyncMock(return_value=summary_response)
+        model_client.chat_stream_with_tools = MagicMock(
+            side_effect=[_make_stream_response("Done")()]
+        )
+
+        history = _make_long_history(30, start_seq=0)
+        sm = _make_session_manager(history, user_seq=60)
+
+        settings = _make_settings(
+            context_limit=500,
+            compact_ratio=0.50,
+            warn_ratio=0.30,
+            min_preserved_turns=6,
+        )
+
+        agent = AgentLoop(
+            model_client=model_client,
+            session_manager=sm,
+            workspace_dir=tmp_path,
+            compaction_settings=settings,
+            model="gpt-4o-mini",
+        )
+
+        original_preserved = settings.min_preserved_turns
+
+        with patch.object(
+            agent, "_emergency_trim", wraps=agent._emergency_trim
+        ) as spy_trim:
+            events = []
+            async for event in agent.handle_message("test", "Go", lock_token="lock"):
+                events.append(event)
+
+            # Settings should NOT be mutated (concurrency safety)
+            assert settings.min_preserved_turns == original_preserved
+
+            # _emergency_trim called with reduced_turns = max(6//2, 1) = 3
+            if spy_trim.call_count >= 1:
+                call_kwargs = spy_trim.call_args.kwargs
+                assert call_kwargs["min_preserved_turns_override"] == 3
+
+    async def test_overflow_failopen_returns_error_message(self, tmp_path):
+        """When emergency trim returns None → fail-open with user-facing message."""
+        summary_response = (
+            '{"facts":[],"decisions":[],"open_todos":[],'
+            '"user_prefs":[],"timeline":[]}'
+        )
+        model_client = MagicMock()
+        model_client.chat = AsyncMock(return_value=summary_response)
+        model_client.chat_stream_with_tools = MagicMock(
+            side_effect=[_make_stream_response("Should not see this")()]
+        )
+
+        # context_limit=500 but very few messages (4 turns).
+        # Compaction triggers but few turns ≈ min_preserved → trim cannot reduce.
+        history = _make_long_history(4, start_seq=0)
+        sm = _make_session_manager(history, user_seq=8)
+
+        settings = _make_settings(
+            context_limit=500,
+            compact_ratio=0.50,
+            warn_ratio=0.30,
+            min_preserved_turns=2,
+        )
+
+        agent = AgentLoop(
+            model_client=model_client,
+            session_manager=sm,
+            workspace_dir=tmp_path,
+            compaction_settings=settings,
+            model="gpt-4o-mini",
+        )
+
+        events = []
+        async for event in agent.handle_message("test", "Go", lock_token="lock"):
+            events.append(event)
+
+        # Fail-open: error message present
+        text_events = [e for e in events if isinstance(e, TextChunk)]
+        assert len(text_events) >= 1
+        assert any("无法进一步压缩" in e.content for e in text_events)
+
+        # Model streaming MUST NOT be called (fail-open = no model call)
+        model_client.chat_stream_with_tools.assert_not_called()
+
+    async def test_overflow_store_exception_failopen(self, tmp_path):
+        """store_compaction_result throws during overflow → fail-open."""
+        from src.infra.errors import SessionFencingError
+
+        summary_response = (
+            '{"facts":[],"decisions":[],"open_todos":[],'
+            '"user_prefs":[],"timeline":[]}'
+        )
+        model_client = MagicMock()
+        model_client.chat = AsyncMock(return_value=summary_response)
+        model_client.chat_stream_with_tools = MagicMock(
+            side_effect=[_make_stream_response("Should not see this")()]
+        )
+
+        history = _make_long_history(30, start_seq=0)
+        sm = _make_session_manager(history, user_seq=60)
+
+        # Make store fail on the SECOND call (first call is from _try_compact)
+        call_count = [0]
+
+        async def store_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                raise SessionFencingError("lock stolen")
+
+        sm.store_compaction_result = AsyncMock(side_effect=store_side_effect)
+
+        settings = _make_settings(
+            context_limit=500,
+            compact_ratio=0.50,
+            warn_ratio=0.30,
+            min_preserved_turns=4,
+        )
+
+        agent = AgentLoop(
+            model_client=model_client,
+            session_manager=sm,
+            workspace_dir=tmp_path,
+            compaction_settings=settings,
+            model="gpt-4o-mini",
+        )
+
+        events = []
+        async for event in agent.handle_message("test", "Go", lock_token="lock"):
+            events.append(event)
+
+        # Fail-open: error message present (exception path uses different wording)
+        text_events = [e for e in events if isinstance(e, TextChunk)]
+        assert len(text_events) >= 1
+        assert any(
+            "压缩过程中遇到错误" in e.content or "无法进一步压缩" in e.content
+            for e in text_events
+        )
+
+        # store was called at least twice (normal + overflow retry that threw)
+        assert sm.store_compaction_result.call_count >= 2
+
+        # Model streaming MUST NOT be called (fail-open = no model call)
+        model_client.chat_stream_with_tools.assert_not_called()
+
+    async def test_min_preserved_1_still_tries_emergency_trim(self, tmp_path):
+        """P2-1: min_preserved_turns=1 → reduced_turns=1=original, still tries trim."""
+        summary_response = (
+            '{"facts":[],"decisions":[],"open_todos":[],'
+            '"user_prefs":[],"timeline":[]}'
+        )
+        model_client = MagicMock()
+        model_client.chat = AsyncMock(return_value=summary_response)
+        model_client.chat_stream_with_tools = MagicMock(
+            side_effect=[_make_stream_response("After trim")()]
+        )
+
+        history = _make_long_history(30, start_seq=0)
+        sm = _make_session_manager(history, user_seq=60)
+
+        settings = _make_settings(
+            context_limit=500,
+            compact_ratio=0.50,
+            warn_ratio=0.30,
+            min_preserved_turns=1,
+        )
+
+        agent = AgentLoop(
+            model_client=model_client,
+            session_manager=sm,
+            workspace_dir=tmp_path,
+            compaction_settings=settings,
+            model="gpt-4o-mini",
+        )
+
+        with patch.object(
+            agent, "_emergency_trim", wraps=agent._emergency_trim
+        ) as spy_trim:
+            events = []
+            async for event in agent.handle_message("test", "Go", lock_token="lock"):
+                events.append(event)
+
+            # _emergency_trim MUST be called (not short-circuited)
+            assert spy_trim.call_count >= 1
+            call_kwargs = spy_trim.call_args.kwargs
+            assert call_kwargs["min_preserved_turns_override"] == 1

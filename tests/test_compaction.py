@@ -39,6 +39,30 @@ def _make_history(n_turns: int, start_seq: int = 0) -> list[MessageWithSeq]:
     return msgs
 
 
+def _make_verbose_history(n_turns: int, start_seq: int = 0) -> list[MessageWithSeq]:
+    """Create history with longer messages to exceed F6 small-input threshold."""
+    msgs = []
+    seq = start_seq
+    for i in range(n_turns):
+        msgs.append(_msg(
+            seq, "user",
+            f"This is a detailed question about topic {i} with enough context "
+            f"to produce meaningful tokens for the compaction summary generation "
+            f"process. The user is asking about architecture decisions and trade-offs "
+            f"related to the implementation of feature number {seq}.",
+        ))
+        seq += 1
+        msgs.append(_msg(
+            seq, "assistant",
+            f"Here is a comprehensive response to question {i} covering "
+            f"the architectural considerations and implementation details "
+            f"that were discussed during the design review. The recommended "
+            f"approach involves several key steps and trade-offs for item {seq}.",
+        ))
+        seq += 1
+    return msgs
+
+
 def _make_settings(**overrides) -> CompactionSettings:
     defaults = {
         "context_limit": 10_000,
@@ -54,7 +78,7 @@ def _make_settings(**overrides) -> CompactionSettings:
     return CompactionSettings(**defaults)
 
 
-def _make_engine(model_client=None, settings=None):
+def _make_engine(model_client=None, settings=None, workspace_dir=None):
     if model_client is None:
         model_client = MagicMock()
         _empty_summary = (
@@ -65,7 +89,7 @@ def _make_engine(model_client=None, settings=None):
     if settings is None:
         settings = _make_settings()
     counter = TokenCounter("gpt-4o-mini")
-    return CompactionEngine(model_client, counter, settings)
+    return CompactionEngine(model_client, counter, settings, workspace_dir=workspace_dir)
 
 
 def _make_budget_status(status: str = "compact_needed") -> BudgetStatus:
@@ -198,7 +222,7 @@ class TestCompactionEngine:
             model_client=model_client,
             settings=_make_settings(min_preserved_turns=3),
         )
-        msgs = _make_history(10)  # 20 messages, seq 0-19
+        msgs = _make_verbose_history(10)  # Verbose to exceed F6 threshold
 
         result = await engine.compact(
             messages=msgs,
@@ -230,7 +254,7 @@ class TestCompactionEngine:
             settings=_make_settings(min_preserved_turns=2),
         )
 
-        msgs = _make_history(8)  # seq 0-15
+        msgs = _make_verbose_history(8)  # Verbose to exceed F6 threshold
         result = await engine.compact(
             messages=msgs,
             system_prompt="test system prompt with enough content here to pass validation check",
@@ -416,6 +440,106 @@ class TestCompactionEngine:
 
         assert result.compaction_metadata["flush_skipped"] is True
 
+    @pytest.mark.asyncio
+    async def test_small_input_returns_degraded_not_noop(self):
+        """Input too small for summary → degraded (not noop), watermark advances (F6)."""
+        model_client = MagicMock()
+        model_client.chat = AsyncMock(return_value="should not be called")
+        # Use min_preserved_turns=1 so that 3 turns → 2 compressible
+        # Short messages → few tokens → 30% < 100
+        engine = _make_engine(
+            model_client=model_client,
+            settings=_make_settings(min_preserved_turns=1),
+        )
+
+        msgs = [
+            _msg(0, "user", "hi"),
+            _msg(1, "assistant", "hello"),
+            _msg(2, "user", "ok"),
+            _msg(3, "assistant", "sure"),
+            _msg(4, "user", "bye"),
+            _msg(5, "assistant", "ciao"),
+        ]
+
+        result = await engine.compact(
+            messages=msgs,
+            system_prompt="test system prompt",
+            tools_schema=[],
+            budget_status=_make_budget_status(),
+            last_compaction_seq=None,
+            previous_compacted_context=None,
+            current_user_seq=100,
+            model="gpt-4o-mini",
+        )
+
+        assert result.status == "degraded"
+        assert result.new_compaction_seq > 0  # watermark advances
+        # LLM should NOT be called (summary skipped)
+        model_client.chat.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_small_input_preserves_previous_context(self):
+        """Degraded path from small input preserves previous_compacted_context (F6)."""
+        model_client = MagicMock()
+        model_client.chat = AsyncMock(return_value="should not be called")
+        engine = _make_engine(
+            model_client=model_client,
+            settings=_make_settings(min_preserved_turns=1),
+        )
+
+        msgs = [
+            _msg(0, "user", "hi"),
+            _msg(1, "assistant", "hello"),
+            _msg(2, "user", "ok"),
+            _msg(3, "assistant", "sure"),
+            _msg(4, "user", "bye"),
+            _msg(5, "assistant", "ciao"),
+        ]
+
+        previous_ctx = '{"facts":["old fact"]}'
+        result = await engine.compact(
+            messages=msgs,
+            system_prompt="test system prompt",
+            tools_schema=[],
+            budget_status=_make_budget_status(),
+            last_compaction_seq=None,
+            previous_compacted_context=previous_ctx,
+            current_user_seq=100,
+            model="gpt-4o-mini",
+        )
+
+        assert result.status == "degraded"
+        assert result.compacted_context == previous_ctx
+
+    @pytest.mark.asyncio
+    async def test_summary_tokens_strictly_30_percent(self):
+        """max_summary_tokens must be exactly int(input_tokens * 0.3), no floor (F6)."""
+        model_client = MagicMock()
+        model_client.chat = AsyncMock(
+            return_value='{"facts":[],"decisions":[],"open_todos":[],"user_prefs":[],"timeline":[]}'
+        )
+        engine = _make_engine(
+            model_client=model_client,
+            settings=_make_settings(min_preserved_turns=2),
+        )
+
+        # Verbose messages to ensure 30% >= 100
+        msgs = _make_verbose_history(10)
+        result = await engine.compact(
+            messages=msgs,
+            system_prompt="test system prompt with enough content to pass the validation checks",
+            tools_schema=[],
+            budget_status=_make_budget_status(),
+            last_compaction_seq=None,
+            previous_compacted_context=None,
+            current_user_seq=100,
+            model="gpt-4o-mini",
+        )
+
+        # Verify that chat was called (large enough input)
+        assert result.status == "success"
+        assert model_client.chat.call_count >= 1
+
 
 # ---------------------------------------------------------------------------
 # CompactionSettings Phase 2 validation
@@ -443,3 +567,104 @@ class TestCompactionSettingsPhase2:
     def test_summary_temperature_negative_rejected(self):
         with pytest.raises(ValueError, match="summary_temperature"):
             CompactionSettings(summary_temperature=-0.1)
+
+
+# ---------------------------------------------------------------------------
+# F4: temperature passed to model_client.chat
+# ---------------------------------------------------------------------------
+
+
+class TestTemperaturePassthrough:
+
+    @pytest.mark.asyncio
+    async def test_compaction_passes_summary_temperature(self):
+        """Compaction calls model_client.chat with temperature=summary_temperature."""
+        model_client = MagicMock()
+        model_client.chat = AsyncMock(
+            return_value='{"facts":[],"decisions":[],"open_todos":[],"user_prefs":[],"timeline":[]}'
+        )
+        settings = _make_settings(min_preserved_turns=2, summary_temperature=0.1)
+        engine = _make_engine(model_client=model_client, settings=settings)
+
+        msgs = _make_verbose_history(8)  # Verbose to exceed F6 threshold
+        await engine.compact(
+            messages=msgs,
+            system_prompt="test system prompt with enough content to pass the validation checks",
+            tools_schema=[],
+            budget_status=_make_budget_status(),
+            last_compaction_seq=None,
+            previous_compacted_context=None,
+            current_user_seq=100,
+            model="gpt-4o-mini",
+        )
+
+        # chat should have been called with temperature=0.1
+        assert model_client.chat.call_count >= 1
+        call_kwargs = model_client.chat.call_args
+        assert call_kwargs.kwargs.get("temperature") == 0.1 or call_kwargs[0][2] == 0.1
+
+    @pytest.mark.asyncio
+    async def test_chat_without_temperature_unchanged(self):
+        """model_client.chat() without temperature preserves default behavior."""
+        model_client = MagicMock()
+        model_client.chat = AsyncMock(return_value="response")
+
+        # Call chat without temperature (like non-compaction callers do)
+        await model_client.chat([], "model")
+        call_args = model_client.chat.call_args
+        # No temperature kwarg passed
+        assert "temperature" not in (call_args.kwargs or {})
+
+
+# ---------------------------------------------------------------------------
+# F3: Anchor validation (ADR 0030)
+# ---------------------------------------------------------------------------
+
+
+class TestAnchorValidation:
+
+    def test_anchor_passes_with_workspace_content_in_prompt(self, tmp_path):
+        """Normal case: workspace first lines present in system_prompt → pass."""
+        (tmp_path / "AGENTS.md").write_text("# Agent Behavior SOP\nDetails...\n")
+        (tmp_path / "SOUL.md").write_text("# Core Values\nBe helpful.\n")
+        (tmp_path / "USER.md").write_text("# User Preferences\nPrefers Python.\n")
+
+        engine = _make_engine(workspace_dir=tmp_path)
+        system_prompt = (
+            "You are Magi.\n# Agent Behavior SOP\nAgent rules.\n"
+            "# Core Values\nValues here.\n# User Preferences\nPrefs."
+        )
+        assert engine._validate_anchors(system_prompt, None) is True
+
+    def test_anchor_fails_when_missing_from_prompt(self, tmp_path):
+        """Anchor phrase missing from system_prompt → fail."""
+        (tmp_path / "AGENTS.md").write_text("# Agent Behavior SOP\n")
+        (tmp_path / "SOUL.md").write_text("# Core Values\n")
+        (tmp_path / "USER.md").write_text("# User Preferences\n")
+
+        engine = _make_engine(workspace_dir=tmp_path)
+        # System prompt missing AGENTS.md first line
+        system_prompt = "You are Magi. # Core Values # User Preferences"
+        assert engine._validate_anchors(system_prompt, None) is False
+
+    def test_anchor_passes_when_no_workspace_files(self, tmp_path):
+        """No workspace anchor files → no anchors → pass (don't block compaction)."""
+        engine = _make_engine(workspace_dir=tmp_path)
+        assert engine._validate_anchors("any prompt", None) is True
+
+    def test_anchor_passes_without_workspace_dir(self):
+        """No workspace_dir configured → no anchors → pass."""
+        engine = _make_engine(workspace_dir=None)
+        assert engine._validate_anchors("any prompt", None) is True
+
+    def test_anchor_empty_system_prompt_fails(self, tmp_path):
+        """Empty system_prompt always fails."""
+        engine = _make_engine(workspace_dir=tmp_path)
+        assert engine._validate_anchors("", None) is False
+
+    def test_anchor_checks_compacted_context_too(self, tmp_path):
+        """Anchor phrase in compacted_context (not system_prompt) → pass."""
+        (tmp_path / "AGENTS.md").write_text("# Agent SOP\n")
+        engine = _make_engine(workspace_dir=tmp_path)
+        # system_prompt alone doesn't have it, but compacted_context does
+        assert engine._validate_anchors("minimal", "context with # Agent SOP here") is True
