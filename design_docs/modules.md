@@ -30,28 +30,33 @@
 - `src/agent/model_client.py`
 
 ## 3. Session
-- 状态：M1 已实现（M2 继续扩展）
+- 状态：M1 已实现（M2 继续扩展，M3 校准 `dmScope`）
 - 现状：
   - 会话持久化统一 PostgreSQL（非 SQLite）。
-  - DM -> `main`，group -> `group:{channel_id}`。
+  - 当前默认解析：DM -> `main`，group -> `group:{channel_id}`。
   - 具备顺序语义、claim/release、TTL、fencing。
+- 规划边界：
+  - 对齐 OpenClaw `dmScope`（`main` / `per-peer` / `per-channel-peer` / `per-account-channel-peer`）。
+  - 会话解析作用域与记忆召回作用域保持同源一致。
 
 实现参考：
 - `src/session/manager.py`
 - `src/session/models.py`
 - `decisions/0021-multi-worker-session-ordering-and-no-silent-drop.md`
 - `decisions/0022-m1.3-soft-session-serialization-token-ttl.md`
+- `decisions/0034-openclaw-dmscope-session-and-memory-scope-alignment.md`
 
 ## 4. Memory
 - 状态：部分实现（M3 计划中）
 - 现状：
-  - `MEMORY.md` 在 main session 注入。
+  - 当前 `MEMORY.md` 注入规则为 main session 默认路径。
   - `memory_search` 已注册但仍是占位实现。
   - `memory_append` 尚未实现（当前缺少受控记忆写入原子）。
 - 规划边界：
   - 记忆数据层对齐 PostgreSQL 16 + `pg_search` + `pgvector`。
   - 按阶段推进：先 BM25，再 Hybrid Search。
   - 引入记忆原子操作分工：`memory_search`（检索）+ `memory_append`（追加写入）。
+  - 检索与 recall 按 `dmScope` 过滤，禁止未授权跨作用域召回。
   - 里程碑边界：M1.5 仅做 Memory 组授权框架预留，`memory_append` 实现归 M3。
   - 与进化治理边界：Memory 负责证据数据面，`SOUL.md` 进化控制流不在本模块直接实现。
 
@@ -60,6 +65,7 @@
 - `src/tools/builtins/memory_search.py`
 - `decisions/0006-use-postgresql-pgvector-instead-of-sqlite.md`
 - `decisions/0014-paradedb-tokenization-icu-primary-jieba-fallback.md`
+- `decisions/0034-openclaw-dmscope-session-and-memory-scope-alignment.md`
 
 ## 5. Tool Registry
 - 状态：基础能力已实现（M1.5 计划中）
