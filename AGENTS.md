@@ -1,7 +1,11 @@
 # AGENTS.md
 
+> 本文件与 `CLAUDE.md` 保持一致，供非 Claude Code 的 coding 系统使用；Claude Code 执行以 `CLAUDE.md`（行为约束）与 `AGENTTEAMS.md`（协作控制）为准。
+
 ## 定义与范围
 - `AGENTS.md` 是仓库级、多代理协作的治理契约；不是产品运行时规范。
+- `AGENTS.md` 面向非 Claude Code 系统；`CLAUDE.md` 面向 Claude Code。两者必须保持一致。
+- Agent Teams 协作控制协议以 `AGENTTEAMS.md` 为 SSOT，本文件保留一致性镜像与引用。
 - 本文件只定义协作流程、职责边界、交付质量、风险控制与验收门槛。
 - 运行时 prompt/memory/heartbeat 等实现细节不在此维护。
 
@@ -28,6 +32,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 
 ## 协作控制与活性治理（Agent Teams）
 - 说明：以下为协作层治理规则，不是运行时 agent heartbeat 功能实现。
+- SSOT：Agent Teams 协作控制协议以 `AGENTTEAMS.md` 为准；本节与 `CLAUDE.md` 保持一致。
 - 目标：解决“worktree 并行导致分支状态不一致、指令未确认即生效、Gate 越权推进、产物不可追溯”。
 - 规则优先级：`Gate 状态机` > `PM 非结构化指令` > `teammate 自主判断`。
 
@@ -114,6 +119,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
   - 例: `feat(memory): implement BM25 search with pg_search`
 - 一个 commit 做一件事，不要混合不相关的变更。
 - Agent Teams 必须使用 git worktree 隔离并行开发。
+- Agent Teams worktree 规则：PM 负责维护，teammate 必须遵守。
 - 每个 teammate 在独立 worktree 中工作，禁止多人共享同一 working directory。
 - PM 负责在 spawn 前创建 worktree，在阶段完成后合并和清理。
 - 分支命名：`feat/<role>-<milestone>-<owner-or-task>`（如 `feat/backend-m1.1-agent-loop`）。
@@ -143,6 +149,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 用户批准后，使用正确正稿文件名生成计划：`{milestone}_{目标简述}_{YYYY-MM-DD}.md`（或满足条件时 `_v2`、`_v3`），并删除对应 `_draft` 文件。
 - `_v2`、`_v3` 仅用于“同一 scope 下，上一版已审批且已执行”后的再次获批修订；不得用于未执行的讨论迭代。
 - 这是项目的持久记忆，后续 PM 重启时首先读取最新 plan。
+- 产出计划前先对齐 `AGENTTEAMS.md`、`AGENTS.md`、`CLAUDE.md`、`decisions/`、`design_docs/` 约束。
 
 ## 质量与验收
 - 开发过程先跑受影响测试；里程碑合并前必须跑全量回归。
