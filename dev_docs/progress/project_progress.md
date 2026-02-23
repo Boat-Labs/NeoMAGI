@@ -155,3 +155,12 @@
 - Evidence: commit 6c33bfa (merge), 258 tests passed, ruff clean
 - Next: 进入 M3（持久记忆）规划
 - Risk: 无
+
+## 2026-02-23 (local) | M3
+- Status: in_progress (planning done, implementation pending)
+- Done: M3 持久记忆实现计划完成并审批（rev6）— 5 Phase 拆分（Phase 0: ToolContext + dmScope 基础设施 → Phase 1: Memory Write Path → Phase 2: BM25 Index & Search → Phase 3: Memory Curation + Prompt Recall → Phase 4: Evolution Loop）；dmScope 策略对齐 roadmap 与 architecture；ADR 0034 落地
+- Evidence: commit f2a69b8, `dev_docs/plans/m3_persistent-memory_2026-02-22.md` (status: approved)
+- Plan: dev_docs/plans/m3_persistent-memory_2026-02-22.md
+- Decisions: ADR 0034 (dmScope)
+- Next: 按 Phase 0 → 1 → 2 → 3 → 4 顺序推进 M3 实现；Phase 2 前需完成 ParadeDB pg_search spike 验证
+- Risk: ParadeDB pg_search tokenizer 兼容性待 spike 验证
