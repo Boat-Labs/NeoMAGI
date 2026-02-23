@@ -164,3 +164,20 @@
 - Decisions: ADR 0034 (dmScope)
 - Next: 按 Phase 0 → 1 → 2 → 3 → 4 顺序推进 M3 实现；Phase 2 前需完成 ParadeDB pg_search spike 验证
 - Risk: ParadeDB pg_search tokenizer 兼容性待 spike 验证
+
+## 2026-02-23 (local) | M3
+- Status: in_progress (Phase 0 guardrail hardening gate)
+- Done: 启动 M2 风险回补并形成决议草案 ADR 0035（运行时最小反漂移防护）；同步更新 roadmap + m2/m3 architecture，将“Core Safety Contract guard + 风险分级 fail-closed”设为 M3 Phase 0 前置门槛
+- Reopened:
+  - R1(P1): 现有 compaction 锚点校验强度不足（首行探针级），无法覆盖关键约束失真场景；从 M2 结项残余风险重新开放，转入 M3 Phase 0 必修
+  - R2(P1): guard 失败后高风险路径仍可能沿 fail-open 继续执行；重新开放为执行闸门问题（高风险工具需 fail-closed）
+  - R3(P2): 反漂移证据以离线评估为主，缺少运行时强制防护；重新开放为“验收口径与运行时口径对齐”任务
+- Evidence: working tree updates — `decisions/0035-runtime-anti-drift-guardrail-hardening-and-risk-gated-fail-closed.md`, `decisions/INDEX.md`, `design_docs/roadmap_milestones_v3.md`, `design_docs/m2_architecture.md`, `design_docs/m3_architecture.md`
+- Plan: dev_docs/plans/m3_persistent-memory_2026-02-22.md（Phase 0 增补 ADR 0035 最小防护任务）
+- Decisions: ADR 0035 (proposed)
+- Next:
+  - 在 Phase 0 定义 Core Safety Contract 抽取与版本策略（来源：AGENTS/USER/SOUL）
+  - 在 AgentLoop 增加双检查点（LLM 调用前 + 高风险工具执行前）与统一 guard 状态传递
+  - 增加风险分级执行闸门：低风险可降级继续，高风险 fail-closed + 结构化错误码
+  - 补齐测试与验收：guard 缺失阻断、高风险工具拦截、审计日志可追溯
+- Risk: 若 Phase 0 未先完成该防护，M3 后续记忆写入/召回链会放大误执行风险并增加返工成本

@@ -2,12 +2,13 @@
 
 > 状态：planned  
 > 对应里程碑：M3 会话外持久记忆  
-> 依据：`design_docs/roadmap_milestones_v3.md`、`design_docs/memory_architecture.md`、ADR 0006/0014/0027/0034
+> 依据：`design_docs/roadmap_milestones_v3.md`、`design_docs/memory_architecture.md`、ADR 0006/0014/0027/0034/0035
 
 ## 1. 目标
 - 建立“可沉淀、可检索、可治理”的会话外记忆闭环。
 - 建立“可验证、可回滚、可审计”的自我进化最小闭环（以 `SOUL.md` 为首个治理对象）。
 - 在 M3 固化与 OpenClaw 对齐的 `dmScope` 契约，使会话隔离与记忆召回采用同一作用域语义。
+- 作为 M3 启动门槛，补齐最小运行时反漂移防护：关键约束 guard + 高风险路径 fail-closed。
 
 ## 2. 当前基线（输入）
 - 工作区模板已包含 `memory/` 与 `MEMORY.md`。
@@ -16,6 +17,7 @@
 - Session 解析当前为简化模型：DM -> `main`，group -> `group:{channel_id}`。
 - M2 已输出 flush 候选契约，包含 `source_session_id`，可作为 M3 作用域治理输入。
 - `SOUL.md` 已注入 prompt，但尚无提案/eval/回滚管线与版本审计。
+- M2 的锚点保护已落地最小基线（ADR 0030），但 guard 失败后默认 fail-open，尚未区分高风险执行路径。
 
 实现参考：
 - `src/session/manager.py`
@@ -24,7 +26,8 @@
 - `src/agent/compaction.py`
 
 ## 3. 目标架构（高层）
-- M3 采用“三层协同”：
+- M3 采用“四层协同”：
+  - Runtime Guardrail Plane：运行时反漂移 guard 与执行闸门（ADR 0035）。
   - Session Isolation Plane：会话作用域解析（`dmScope`）。
   - Memory Loop：记忆沉淀、检索、策展。
   - Evolution Loop：`SOUL.md` 提案、评测、生效、回滚。
@@ -71,8 +74,23 @@
   - 用户随时保留 veto/rollback 权限。
   - 版本链路必须可审计、可追溯。
 
+### 3.4 Runtime Guardrail Plane（M3 Phase 0 前置）
+- 防护目标：避免“上下文压缩后关键约束失真”直接穿透到高风险执行路径。
+- Core Safety Contract：
+  - 从 `AGENTS.md` / `USER.md` / `SOUL.md` 提取不可退让约束清单（非单条首行探针）。
+  - 校验口径统一为“最终执行上下文可见性”。
+- 双检查点：
+  - LLM 调用前校验（system prompt + compacted context + effective history）。
+  - 高风险工具执行前校验（复用同一 guard 状态，不重复推导）。
+- 失败语义（风险分级）：
+  - 低风险/纯对话路径：允许降级继续，保证会话连续性。
+  - 高风险路径（写入、执行或外部副作用）：fail-closed 阻断，返回结构化错误码并记录审计日志。
+- 阶段要求：
+  - 该防护在 M3 Phase 0 落地并验收通过后，才进入后续 memory phases。
+
 ## 4. M3 与 M4 职责切分
 - M3 负责：
+  - 运行时最小反漂移防护落地（Core Safety Contract + 风险分级执行闸门）。
   - `dmScope` 契约定义与验证口径落地。
   - Session/Memory/Prompt 三层作用域语义一致性。
   - 在默认 `main` 运行形态下完成完整闭环。
@@ -82,6 +100,7 @@
 
 ## 5. 边界
 - In:
+  - 运行时最小反漂移防护（guard + 风险分级 fail-closed）。
   - 会话外记忆写入、检索、策展闭环。
   - `dmScope` 作用域契约与验收口径（会话解析 + 记忆召回一致性）。
   - `SOUL.md` 的 AI-only 写入、eval gating、veto/rollback 与审计。
@@ -91,6 +110,7 @@
   - 不允许未评测、不可回滚的人格/行为变更直接生效。
 
 ## 6. 验收对齐（来自 roadmap）
+- guard 失败场景下，高风险工具调用被阻断；纯对话路径可降级继续并产生日志证据。
 - 用户已确认的偏好和事实，跨天可被稳定记起并用于后续任务。
 - 用户追问历史原因时，agent 可给出可追溯、可复用的信息。
 - agent 提出的 `SOUL.md` 更新仅在 eval 通过后生效，失败可回滚。
