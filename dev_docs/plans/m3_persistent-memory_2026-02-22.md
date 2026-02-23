@@ -1,13 +1,14 @@
 # M3 会话外持久记忆 实现计划
 
 > 状态：approved
-> 日期：2026-02-22（rev6 审批 2026-02-23）
-> 依据：`design_docs/m3_architecture.md`、`design_docs/memory_architecture.md`、`design_docs/roadmap_milestones_v3.md`、ADR 0006/0014/0027/0032/0034
+> 日期：2026-02-22（rev7 审批 2026-02-23）
+> 依据：`design_docs/m3_architecture.md`、`design_docs/memory_architecture.md`、`design_docs/roadmap_milestones_v3.md`、ADR 0006/0014/0027/0032/0034/0035
 > rev2 变更：修复 ToolContext 主链路、upsert 策略、Evolution 状态机、rollback 工具入口、dmScope 配置归属、recall 参数契约、Use Case E 分层验收
 > rev3 变更：修复 ToolContext 并发串话风险（改为局部参数传递）、定义 scope_resolver 落地模块、统一 flush scope 映射口径、补旧数据兼容规则、硬化 M3-E 验收措辞
 > rev4 变更：dm_scope M3 硬限制为 main（fail-fast）、SessionIdentity 补 channel_id 字段并修正 session key 语义、flush scope 改为显式 ResolvedFlushCandidate wrapper
 > rev5 变更：统一 ResolvedFlushCandidate 契约（MemoryWriter 签名 + 清除残留动态属性描述）、ResolvedFlushCandidate 归属 memory 领域 contracts 模块、SessionIdentity channel_id 来源标注、M3-E 验收口径完整化（接口契约测试 + fail-fast guardrail 测试）
 > rev6 变更：contracts.py 消除对 agent 层的反向依赖（ResolvedFlushCandidate 改为 memory 侧自有 DTO，AgentLoop 负责映射）、Phase 3 调用链示意修正为 SessionIdentity 签名
+> rev7 变更：引入 ADR 0035，M3 Phase 0 增加 runtime 最小防护 gate（Core Safety Contract + 工具级 risk_level + pre-tool fail-closed）；BaseTool 新增 RiskLevel 枚举替代 ToolGroup 分组判定；pre-LLM guard 仅检测+记录不阻断、阻断逻辑收敛到 pre-tool guard；guard_state 生命周期改为每轮 LLM 调用；contract 刷新策略统一为启动加载+惰性 hash 刷新；补充 Use Case F、guardrail 测试矩阵与文件位点；Out of Scope 精确化运行时漂移表述
 
 ## 1. 目标
 
@@ -19,6 +20,7 @@
 - **Prompt Memory Recall**：`_layer_memory_recall()` 注入检索结果，agent 每次 turn 可自动获取相关记忆。
 - **Memory Curation**：daily notes → MEMORY.md 策展流程，短期与长期记忆分层管理。
 - **Evolution Loop**：`SOUL.md` 提案 → eval → 生效 → 回滚完整管线，AI-only 写入 + 用户 veto/rollback。
+- **Runtime Guardrail Baseline**：Core Safety Contract 定义 + 工具级 `risk_level` 风险标签 + pre-LLM 检测预警 + pre-tool fail-closed 执行闸门（ADR 0035，Phase 0 交付）。
 
 ## 2. 当前基线（M2 输出）
 
@@ -42,6 +44,10 @@
 
 - **ToolContext 注入链路改造**：`BaseTool.execute` 签名扩展 + `_execute_tool` 构造 context + `PromptBuilder.build` scope_key 传入。
 - **dmScope 配置落地**：`SessionSettings` 新增 `dm_scope` 字段。
+- **Runtime Guardrail Baseline（ADR 0035，M2 风险回补）**：
+  - 锚点探针强度不足：现有 M2 锚点可见性检查为最小存在性探针，需升级为 Core Safety Contract 校验。
+  - guard 失败高风险仍 fail-open：M2 guard 失效时默认 fail-open，高风险工具执行无最后防线。
+  - 离线验收与运行时口径断层：M2 验收口径为离线证据，未落地为运行时执行门槛。
 - `memory_append` 工具：受控追加写入 `memory/YYYY-MM-DD.md`。
 - `memory_search` 实际检索逻辑（BM25）。
 - 自动加载"今天+昨天"daily notes 到 prompt。
@@ -67,26 +73,28 @@
 | dmScope 作用域契约 | session_resolver 产出 scope_key，注入 tool context 和 recall 层 | ADR 0034 + m3_architecture.md |
 | scope_key 配置 | M3 全局默认 `main`，`dm_scope` 归属 `SessionSettings`（非 MemorySettings）；M4 扩展 per-channel | ADR 0034 |
 | scope 传播路径 | session_resolver → tool_context.scope_key → memory 工具/recall 消费；禁止二次推导 | m3_architecture.md §3.1 |
+| Runtime anti-drift guardrail | Core Safety Contract + 工具级 risk_level（非 ToolGroup）+ pre-LLM 检测预警 + pre-tool fail-closed 执行闸门；guard_state 生命周期 = 每轮 LLM 调用；contract 启动加载 + 惰性 hash 刷新，Phase 0 交付 | ADR 0035 |
+| SOUL.md 版本存储 | DB 表（soul_versions）；git 依赖外部状态，DB 表自包含、可查询、可回滚 | Phase 4 落地 |
+| Evolution eval 策略 | 规则约束检查为基线（锚点可见性 + 约束不违反）；Probe 问答集作为可选增强（不阻塞 M3） | Phase 4 落地 |
+| Flush 候选落盘时机 | compaction 后立即写入（最简路径，无需额外基础设施） | Phase 1 落地 |
+| 记忆去重策略 | M3 不做精确去重，依赖 MEMORY.md 策展阶段合并 | Phase 3 落地 |
+| daily notes 自动加载范围 | 今天+昨天（与 system_prompt.md 对齐） | Phase 1 落地 |
+| Hybrid Search 时机 | M3 后单独迭代（BM25 已满足验收，Hybrid 是质量增强不是门槛） | Out of Scope |
+| memory_entries 索引幂等策略 | delete-reinsert by source_path（文件是源数据，DB 仅做索引） | Phase 2 落地 |
+| ToolContext 注入方式 | 改 execute 签名（显式参数比隐式属性更安全、可测试） | Phase 0 落地 |
 
 ### 3.2 待讨论
 
-| 决策项 | 候选方案 | 倾向 | 备注 |
-|--------|----------|------|------|
-| SOUL.md 版本存储 | A: DB 表（soul_versions） / B: git commit + DB 索引 | A: DB 表 | git 依赖外部状态，DB 表自包含、可查询、可回滚 |
-| Evolution eval 策略 | A: 固定 Probe 问答集 / B: LLM-as-judge / C: 规则约束检查 | C 为基线 + A 为可选 | 先做最简规则检查（锚点可见性 + 约束不违反），Probe 作为可选增强 |
-| Flush 候选落盘时机 | A: compaction 后立即写入 / B: 异步 worker / C: heartbeat 批量 | A | 最简路径，无需额外基础设施 |
-| 记忆去重策略 | A: 写入前 BM25 查重 / B: 定期合并 / C: 不做（依赖策展） | C 为 M3 基线 | M3 不做精确去重，依赖 MEMORY.md 策展阶段合并 |
-| daily notes 自动加载范围 | A: 今天+昨天 / B: 今天 only / C: 可配置天数 | A | 与 system_prompt.md 文档对齐 |
-| Hybrid Search 时机 | A: M3 内交付 / B: M3 完成后单独迭代 | B | Hybrid 是质量增强，不是功能门槛；BM25 已可满足验收 |
-| memory_entries 索引幂等策略 | A: (source_path, entry_offset) upsert / B: delete-reinsert by source_path | B | 文件是源数据，DB 仅做索引，重建是自然语义；消除偏移量漂移风险 |
-| ToolContext 注入方式 | A: 改 execute 签名 / B: 通过实例属性注入 | A | 显式参数比隐式属性更安全、可测试 |
+> 以下决策项在实施阶段可能需要根据实际情况调整，但当前无阻塞性分歧。
+
+（已清空：原 3.2 全部条目已在各 Phase 落地方案中收敛为已确定，移入 3.1。如后续实施中发现需要重新讨论，在此处新增条目。）
 
 ## 4. Phase 拆分
 
 ### 总览
 
 ```
-Phase 0: ToolContext + dmScope 基础设施（主链路改造，所有后续 Phase 的前置）
+Phase 0: ToolContext + dmScope + Runtime Guardrail 基础设施（主链路改造 + 最小防护，所有后续 Phase 的前置）
   ↓
 Phase 1: Memory Write Path（记忆写入 + 跨天可用）
   ↓
@@ -102,11 +110,11 @@ Phase 4: Evolution Loop（SOUL.md 自我进化治理）
 
 ---
 
-### Phase 0：ToolContext + dmScope 基础设施
+### Phase 0：ToolContext + dmScope + Runtime Guardrail 基础设施
 
 #### 4.0.1 目标
 
-改造工具执行主链路，使所有工具可通过 `ToolContext` 获取 `scope_key` 等运行时上下文。同时在 `SessionSettings` 落地 `dm_scope` 配置，在 `session` 领域落地 `scope_resolver` 模块。Phase 0 完成后，Phase 1 起的所有工具和 prompt 层可直接消费 `scope_key`。
+改造工具执行主链路，使所有工具可通过 `ToolContext` 获取 `scope_key` 等运行时上下文。同时在 `SessionSettings` 落地 `dm_scope` 配置，在 `session` 领域落地 `scope_resolver` 模块。**此外，落地最小运行时反漂移防护（ADR 0035）**：定义 Core Safety Contract（启动加载 + 惰性 hash 刷新）、LLM 调用前 guard 检测（仅检测记录，不阻断）、工具级 `risk_level` 属性 + pre-tool guard 执行闸门（`risk_level=high` 时 fail-closed）、结构化错误码与审计日志。Phase 0 完成后，Phase 1 起的所有工具和 prompt 层可直接消费 `scope_key`，且高风险执行路径受 guardrail 保护。
 
 #### 4.0.2 新增 `src/tools/context.py`
 
@@ -198,8 +206,29 @@ def resolve_session_key(identity: SessionIdentity, dm_scope: str = "main") -> st
 #### 4.0.4 修改 `src/tools/base.py`
 
 ```python
+class RiskLevel(StrEnum):
+    """Tool-level risk classification for guardrail gating (ADR 0035).
+
+    Guard only checks risk_level, NOT ToolGroup.
+    ToolGroup retains its original role as domain classification.
+    Undeclared tools default to 'high' (fail-closed).
+    """
+
+    low = "low"
+    high = "high"
+
+
 class BaseTool(ABC):
     # ... existing properties unchanged ...
+
+    @property
+    def risk_level(self) -> RiskLevel:
+        """Risk classification for guardrail gating (ADR 0035).
+
+        Fail-closed default: high. Tools that are read-only or have no
+        external side effects should explicitly declare low.
+        """
+        return RiskLevel.high
 
     @abstractmethod
     async def execute(self, arguments: dict, context: ToolContext | None = None) -> dict:
@@ -212,6 +241,23 @@ class BaseTool(ABC):
 ```
 
 **向后兼容**：`context` 参数默认为 `None`。现有工具（如占位 memory_search）无需立即改动签名，但 M3 新增/升级工具应声明 `context: ToolContext` 并使用。
+
+**risk_level 声明规则**（ADR 0035）：
+- `RiskLevel.high`：具有写入、执行或外部副作用的工具。
+- `RiskLevel.low`：只读或无副作用的工具。
+- **所有工具必须显式声明 `risk_level`**，不得依赖 `BaseTool` 的默认值。`BaseTool.risk_level` 保留 `high` 默认值仅作为安全网（防止第三方扩展遗漏），项目内工具禁止依赖。
+
+**强制 risk_level 映射表**（Phase 0 退出门槛之一，每个工具必须显式声明）：
+
+| 工具 | risk_level | 理由 |
+|------|-----------|------|
+| `memory_search` | **low** | 只读 BM25 检索，无副作用 |
+| `memory_append` | **high** | 写入 daily notes 文件 |
+| `soul_status` | **low** | 只读版本查询，无副作用 |
+| `soul_propose` | **high** | 链式 propose→eval→apply，写入 SOUL.md + DB |
+| `soul_rollback` | **high** | 回滚/否决 SOUL.md 版本，写入文件 + DB |
+
+> Phase 0 实施时须盘点 `src/tools/builtins/*.py` 全部工具，每个工具显式声明 `risk_level`。未出现在上表的 M1/M2 现有工具在 Phase 0 实施阶段逐一审查并补入此表。此表纳入 Phase 0 退出门槛检查。
 
 #### 4.0.5 修改 `src/agent/agent.py`：ToolContext 局部传递（并发安全）
 
@@ -310,7 +356,142 @@ def build(
 - **方案 A（推荐）**：统一更新所有现有工具签名为 `execute(arguments, context=None)`，一次性完成。工具数量少（M2 时 ≤ 5 个），改动量可控。
 - **方案 B**：`_execute_tool` 中做 `inspect.signature` 检查，有 context 参数才传。增加运行时复杂度，不推荐。
 
-#### 4.0.9 测试
+#### 4.0.9 Runtime Guardrail：Core Safety Contract 定义（ADR 0035）
+
+Core Safety Contract 是一组从 `AGENTS.md`/`USER.md`/`SOUL.md` 中提取的**不可退让约束**清单，用于运行时 guard 校验。
+
+```python
+# src/agent/guardrail.py
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class CoreSafetyContract:
+    """Immutable set of anchors that MUST remain visible in execution context.
+
+    Source: extracted from AGENTS.md / USER.md / SOUL.md.
+    Lifecycle: loaded at agent startup, lazily refreshed when source_hash changes.
+    """
+
+    anchors: tuple[str, ...]          # key phrases that must be visible
+    constraints: tuple[str, ...]      # rules that must not be violated
+    source_hash: str = ""             # content hash for cache invalidation
+
+
+@dataclass
+class GuardCheckResult:
+    """Result of a single guard checkpoint execution."""
+
+    passed: bool
+    missing_anchors: list[str] = field(default_factory=list)
+    violated_constraints: list[str] = field(default_factory=list)
+    error_code: str = ""              # structured error code for audit
+    detail: str = ""
+```
+
+**设计决策——Contract 刷新策略**：
+- **启动时加载**：agent 启动时从工作区文件（AGENTS.md / USER.md / SOUL.md）提取锚点和约束，构建 `CoreSafetyContract` 实例并缓存。
+- **惰性 hash 刷新**：每次 guard 检查前比对文件 content hash 与缓存的 `source_hash`，hash 变化时重新提取并替换缓存实例。不使用 file watcher，避免引入异步监听复杂度。
+- **刷新时机**：与 SOUL.md Evolution 生效（Phase 4 `apply()`）天然对齐——apply 写入新 SOUL.md 内容后，下一次 guard 检查发现 hash 变化即刷新。
+
+#### 4.0.10 Runtime Guardrail：LLM 调用前 guard 检测（ADR 0035）
+
+在 `AgentLoop` 的主循环中，**每次** LLM 调用前执行 guard 校验。pre-LLM guard **仅检测与记录，不阻断 LLM 调用**——阻断逻辑全部收敛到 pre-tool guard。
+
+```python
+# src/agent/guardrail.py (续)
+
+async def check_pre_llm_guard(
+    contract: CoreSafetyContract,
+    execution_context: str,  # system prompt + compacted context + effective history
+) -> GuardCheckResult:
+    """Verify all contract anchors are visible in the LLM execution context.
+
+    Called BEFORE every LLM API call (each iteration of the tool loop).
+    This is a DETECTION checkpoint, NOT a blocking gate:
+    - Always returns GuardCheckResult (passed or failed).
+    - On failure: logs guardrail_warning audit event, does NOT block LLM call.
+    - The returned guard_state is consumed by check_pre_tool_guard for
+      actual fail-closed gating on high-risk tools.
+
+    Rationale: at pre-LLM stage we cannot determine whether the LLM will
+    invoke high-risk tools, so blocking here would cause indiscriminate
+    denial of service for pure conversation paths.
+    """
+```
+
+**集成点**：
+- `_handle_request` 主循环中，每次 `prompt = prompt_builder.build(...)` 之后、LLM 调用之前执行。
+- **每轮 LLM 调用都重新执行**（非复用首轮结果），因为多轮 tool loop 中 context 会随工具结果追加而变化。
+- 返回的 `guard_state` 作为当轮所有 `_execute_tool` 调用的显式参数传入。
+
+#### 4.0.11 Runtime Guardrail：高风险工具执行前 guard 检查与错误码（ADR 0035）
+
+在 `AgentLoop._execute_tool()` 中，根据工具的 `risk_level` 属性决定是否阻断执行：
+
+```python
+# src/agent/guardrail.py (续)
+
+# 结构化错误码
+GUARDRAIL_ERROR_CODES = {
+    "GUARD_ANCHOR_MISSING": "Core anchor(s) not visible in execution context",
+    "GUARD_CONSTRAINT_VIOLATED": "Safety constraint violation detected",
+    "GUARD_CONTRACT_UNAVAILABLE": "Core Safety Contract could not be loaded",
+}
+
+
+async def check_pre_tool_guard(
+    guard_state: GuardCheckResult,  # from current iteration's pre-LLM check
+    tool_name: str,
+    tool_risk_level: RiskLevel,     # from tool.risk_level (NOT tool.group)
+) -> GuardCheckResult:
+    """Gate tool execution based on guard state and tool risk level.
+
+    guard_state comes from the CURRENT tool-loop iteration's
+    check_pre_llm_guard() call (refreshed each iteration, not carried
+    from a previous iteration).
+
+    If tool_risk_level is HIGH and guard_state.passed is False:
+    → Return fail-closed result with structured error code.
+    → Tool execution is BLOCKED. Error returned to LLM as tool result.
+
+    If tool_risk_level is LOW:
+    → Allow execution even if guard_state.passed is False (degraded mode).
+    → Log guardrail_degraded audit event.
+    """
+```
+
+**设计决策——risk_level 替代 ToolGroup 判定**：
+- Guard 判定只看 `tool.risk_level`（`RiskLevel.high` / `RiskLevel.low`），**不看 `ToolGroup`**。
+- `ToolGroup` 保持原有语义（领域分类：code / memory / world），不承担安全职责。
+- 这避免了同一 ToolGroup 内只读与写入工具混合导致的误伤/漏拦（如 `memory_search` vs `memory_append`）。
+
+**guard_state 生命周期**：
+- `guard_state` 的生命周期 = **一轮 LLM 调用**（而非整个请求）。
+- 每次 LLM 返回新的 tool_calls 批次时，已由当轮 `check_pre_llm_guard` 产生新的 `guard_state`。
+- 同一轮内多个工具共享当轮 `guard_state` 是安全的（上下文相同）。
+- 跨轮不复用，因为前一轮工具结果会追加到 context，改变锚点可见性。
+
+**集成点**：`_execute_tool` 在构造 `ToolContext` 之后、调用 `tool.execute()` 之前插入 guard 检查。`guard_state` 从当轮 `_handle_request` 主循环的 pre-LLM 检查结果透传（作为 `_execute_tool` 的显式参数，与 scope_key 相同模式）。
+
+#### 4.0.12 Phase 0 退出门槛（ADR 0035）
+
+Phase 0 退出（进入 Phase 1）的 **硬门槛**：
+
+1. **ToolContext + dmScope 主链路**：所有现有测试通过 + Phase 0 新增测试通过。
+2. **Core Safety Contract 可加载**：agent 启动时从工作区文件提取 contract，无异常；惰性 hash 刷新逻辑工作正常。
+3. **Pre-LLM guard 检测正确**：在正常启动条件下，pre-LLM guard 检查不产生 false negative（锚点可见时 passed=True）；检查失败时记录 `guardrail_warning` 审计日志但**不阻断 LLM 调用**。
+4. **高风险工具 guard 阻断验证**：`risk_level=high` 的工具在 guard_state.passed=False 时被阻断（测试覆盖）；`risk_level=low` 的工具在相同条件下可降级执行。
+5. **审计日志可查**：`guardrail_blocked` / `guardrail_degraded` / `guardrail_warning` 事件在 structlog 输出中可见。
+6. **guard_state 每轮刷新验证**：多轮 tool loop 场景下，每次 LLM 调用前都产生新的 guard_state（测试覆盖）。
+7. **risk_level 映射表完整**：`src/tools/builtins/*.py` 中每个工具都显式声明了 `risk_level`，与 4.0.4 强制映射表一致（无遗漏、无默认值依赖）。
+
+**不通过 Phase 0 退出门槛，不得进入 Phase 1。**
+
+#### 4.0.13 测试
 
 | 测试文件 | 覆盖范围 |
 |----------|----------|
@@ -320,19 +501,26 @@ def build(
 | `tests/test_agent_tool_context.py` | _execute_tool: 构造 ToolContext / scope_key 传播 / 现有工具兼容 / **并发隔离**（模拟两个并发请求，验证 scope_key 不串话） |
 | `tests/test_prompt_builder.py` | build(): scope_key 参数透传 / 默认 main 行为不变 |
 | `tests/test_settings.py` | SessionSettings: dm_scope 验证 / 默认值 / 非法值拒绝 |
+| `tests/test_guardrail.py` | CoreSafetyContract: 创建 / frozen 不可变 / 锚点提取 / 惰性 hash 刷新（文件变化后下次检查自动更新 contract） |
+| `tests/test_guardrail.py` | check_pre_llm_guard: 全部锚点可见 → passed / 锚点缺失 → failed + missing_anchors 列表 / 空 contract → GUARD_CONTRACT_UNAVAILABLE / **失败时不阻断（仅记录 guardrail_warning）** |
+| `tests/test_guardrail.py` | check_pre_tool_guard: `risk_level=high` + guard failed → 阻断 / `risk_level=low` + guard failed → 降级继续 / 结构化错误码正确 |
+| `tests/test_guardrail.py` | guardrail_blocked / guardrail_degraded / guardrail_warning 审计日志字段断言（structlog capture） |
+| `tests/test_guardrail.py` | guard_state 每轮刷新：模拟多轮 tool loop，验证每次 LLM 调用前产生新 guard_state（非复用前轮） |
+| `tests/test_base_tool.py` | RiskLevel: 枚举值 / BaseTool 默认 risk_level=high / 声明 low 的工具正确返回 |
 
-#### 4.0.10 涉及文件
+#### 4.0.14 涉及文件
 
 | 文件 | 变更类型 |
 |------|----------|
 | `src/session/scope_resolver.py` | 新增：SessionIdentity + resolve_scope_key + resolve_session_key |
 | `src/tools/context.py` | 新增：ToolContext dataclass |
-| `src/tools/base.py` | 修改：execute 签名扩展 |
-| `src/tools/builtins/*.py` | 修改：所有现有工具 execute 签名对齐（方案 A） |
-| `src/agent/agent.py` | 修改：_handle_request 调用 scope_resolver + _execute_tool 接收显式参数（无实例字段） |
+| `src/tools/base.py` | 修改：execute 签名扩展 + 新增 RiskLevel 枚举 + BaseTool.risk_level 属性 |
+| `src/tools/builtins/*.py` | 修改：所有现有工具 execute 签名对齐（方案 A）+ 每个工具显式声明 risk_level（禁止依赖默认值） |
+| `src/agent/agent.py` | 修改：_handle_request 主循环每轮调用 pre-LLM guard + _execute_tool 接收 guard_state 显式参数 + pre-tool guard |
+| `src/agent/guardrail.py` | 新增：CoreSafetyContract（惰性 hash 刷新）+ GuardCheckResult + check_pre_llm_guard（检测不阻断）+ check_pre_tool_guard（risk_level 闸门）+ GUARDRAIL_ERROR_CODES |
 | `src/agent/prompt_builder.py` | 修改：build() 签名扩展（scope_key + recent_messages） |
 | `src/config/settings.py` | 修改：SessionSettings 新增 dm_scope |
-| 测试文件（6 个） | 新增 / 修改 |
+| 测试文件（6 + 2 个） | 新增 / 修改（含 `tests/test_guardrail.py` + `tests/test_base_tool.py` RiskLevel 部分） |
 
 ---
 
@@ -437,6 +625,7 @@ class MemoryWriter:
 ```python
 class MemoryAppendTool(BaseTool):
     name = "memory_append"
+    risk_level = RiskLevel.high  # writes to daily notes files (ADR 0035)
     description = "Save a memory note to today's daily notes file"
     parameters = {
         "type": "object",
@@ -701,6 +890,8 @@ class MemorySearcher:
 ```python
 # src/tools/builtins/memory_search.py (升级)
 class MemorySearchTool(BaseTool):
+    risk_level = RiskLevel.low  # read-only, no side effects (ADR 0035)
+
     async def execute(self, arguments: dict, context: ToolContext) -> dict:
         """Upgraded: delegate to MemorySearcher for BM25 search.
 
@@ -735,8 +926,11 @@ class MemorySearchTool(BaseTool):
 ```python
 async def append_daily_note(self, text: str, *, scope_key: str = "main", ...) -> Path:
     path = await self._write_to_file(text, ...)
-    # Trigger incremental index with scope_key (fire-and-forget, failure non-blocking)
-    await self._index_entry(text, path, source_type="daily_note", scope_key=scope_key)
+    # Incremental index: best-effort, failure must not block write path
+    try:
+        await self._index_entry(text, path, source_type="daily_note", scope_key=scope_key)
+    except Exception:
+        logger.warning("memory_index_failed", path=str(path), scope_key=scope_key)
     return path
 ```
 
@@ -1046,6 +1240,7 @@ class SoulProposeTool(BaseTool):
     """
     name = "soul_propose"
     group = ToolGroup.memory  # 复用 memory 组
+    risk_level = RiskLevel.high  # propose→eval→apply writes SOUL.md + DB (ADR 0035)
     allowed_modes = frozenset({ToolMode.chat_safe, ToolMode.coding})
 
     async def execute(self, arguments: dict, context: ToolContext) -> dict:
@@ -1061,6 +1256,7 @@ class SoulStatusTool(BaseTool):
     """Query current SOUL.md version and pending proposals."""
     name = "soul_status"
     group = ToolGroup.memory
+    risk_level = RiskLevel.low  # read-only query, no side effects (ADR 0035)
     allowed_modes = frozenset({ToolMode.chat_safe, ToolMode.coding})
 
 # src/tools/builtins/soul_rollback.py
@@ -1072,6 +1268,7 @@ class SoulRollbackTool(BaseTool):
     """
     name = "soul_rollback"
     group = ToolGroup.memory
+    risk_level = RiskLevel.high  # rollback/veto writes SOUL.md + DB (ADR 0035)
     allowed_modes = frozenset({ToolMode.chat_safe, ToolMode.coding})
     parameters = {
         "type": "object",
@@ -1164,10 +1361,11 @@ async def ensure_bootstrap(self, workspace_path: Path) -> None:
 |------|-------|----------|------|
 | `src/session/scope_resolver.py` | 0 | 新增 | SessionIdentity + resolve_scope_key + resolve_session_key |
 | `src/tools/context.py` | 0 | 新增 | ToolContext dataclass |
-| `src/tools/base.py` | 0 | 修改 | execute 签名扩展（context 参数） |
-| `src/tools/builtins/*.py` | 0 | 修改 | 现有工具 execute 签名对齐 |
+| `src/tools/base.py` | 0 | 修改 | execute 签名扩展（context 参数）+ RiskLevel 枚举 + BaseTool.risk_level 属性（ADR 0035） |
+| `src/tools/builtins/*.py` | 0 | 修改 | 现有工具 execute 签名对齐 + 每个工具显式声明 risk_level（禁止依赖默认值，ADR 0035） |
 | `src/config/settings.py` | 0→3 | 修改 | SessionSettings 新增 dm_scope + MemorySettings (分 phase 追加字段) |
-| `src/agent/agent.py` | 0→4 | 修改 | scope_resolver 调用 + _execute_tool 局部参数传递（并发安全）+ flush 落盘 + build() 传参 + bootstrap |
+| `src/agent/agent.py` | 0→4 | 修改 | scope_resolver 调用 + _execute_tool 局部参数传递（并发安全）+ 主循环每轮 pre-LLM guard + pre-tool guard（risk_level 闸门）+ flush 落盘 + build() 传参 + bootstrap |
+| `src/agent/guardrail.py` | 0 | 新增 | CoreSafetyContract（惰性 hash 刷新）+ GuardCheckResult + check_pre_llm_guard（检测不阻断）+ check_pre_tool_guard（risk_level 闸门）+ GUARDRAIL_ERROR_CODES（ADR 0035） |
 | `src/agent/prompt_builder.py` | 0→3 | 修改 | build() 签名扩展 + daily notes 加载 + memory recall 注入 |
 | `src/memory/__init__.py` | 1 | 修改 | 导出 |
 | `src/memory/contracts.py` | 1 | 新增 | ResolvedFlushCandidate 共享契约（Agent 层构造、Memory 层消费） |
@@ -1184,7 +1382,8 @@ async def ensure_bootstrap(self, workspace_path: Path) -> None:
 | `src/tools/builtins/soul_rollback.py` | 4 | 新增 | SOUL rollback/veto 用户触发入口 |
 | `alembic/versions/xxx_create_memory_entries.py` | 2 | 新增 | memory_entries 表 + BM25 索引 |
 | `alembic/versions/xxx_create_soul_versions.py` | 4 | 新增 | soul_versions 表（status 含 superseded） |
-| 测试文件 (~22 个) | 0-4 | 新增 | 详见各 Phase |
+| `tests/test_guardrail.py` | 0 | 新增 | CoreSafetyContract（含惰性刷新）/ pre-LLM guard（检测不阻断）/ pre-tool guard（risk_level 闸门）/ guard_state 每轮刷新 / 审计日志断言 |
+| 测试文件 (~24 个) | 0-4 | 新增 | 详见各 Phase |
 
 ## 6. 不做什么（Out of Scope）
 
@@ -1194,7 +1393,7 @@ async def ensure_bootstrap(self, workspace_path: Path) -> None:
 - **多 session 记忆合并**：M3 运行时默认 scope_key='main'，不处理跨 scope 记忆迁移或合并（归 M4 渠道联调）。
 - **非 main 作用域激活**：M3 接口层已 scope-aware（ADR 0034），但运行时仅使用默认 `main`；非 `main` scope 的激活与联调归 M4。
 - **Scope-local 策展层**：M3 的 MEMORY.md 策展仅操作全局层（因为 M3 只激活 `main`）。目标模型为"分层策展"：全局层（MEMORY.md，跨 scope 通用）+ 作用域层（scope-local curated）。作用域层的落地归 M4 非 main scope 激活时实现。
-- **运行时漂移检测**：不做实时 Probe 评测（M5 触发式运营能力范畴）。
+- **运行时漂移检测（实时 Probe 评测平台）**：不做实时 Probe 评测平台（M5 触发式运营能力范畴）。但**做最小 runtime guardrail**（Core Safety Contract + 风险分级 fail-closed），以覆盖 M2 风险回补（ADR 0035）。
 - **SOUL.md 人类直接编辑路径**：ADR 0027 明确 AI-only 写入，人类通过 veto/rollback 控制。
 - **复杂权限 RBAC**：Evolution eval 使用规则检查，不引入多角色审批。
 
@@ -1229,6 +1428,14 @@ async def ensure_bootstrap(self, workspace_path: Path) -> None:
   - **完整口径**：M3 = scope 契约 + fail-fast 防护。M4 = 非 main 在真实渠道路径的激活与 E2E 隔离。
   - **M4-E（渠道级 E2E 验收，归 M4）**：非 main 激活与跨渠道映射仅在 M4-E 判定完成。Telegram/多渠道下 identity → scope 的真实映射和隔离行为端到端验证。M3 不做。
 
+- **用例 F（Runtime Guardrail 验收，ADR 0035）**：`risk_level=high` 的工具在 guard 失败时被阻断，`risk_level=low` 的工具可降级继续，审计日志可查。
+  - 验证路径：Phase 0 guardrail 实现 + Phase 0 退出门槛。
+  - **F-1 高风险阻断**：guard 失败时，`risk_level=high` 的工具（如 `memory_append`、`soul_propose`、`soul_rollback`）执行被阻断，返回结构化错误码 `GUARD_ANCHOR_MISSING` 或 `GUARD_CONTRACT_UNAVAILABLE`。
+  - **F-2 低风险降级**：guard 失败时，`risk_level=low` 的工具（如 `memory_search`、`soul_status`）及纯对话路径可降级继续，记录 `guardrail_degraded` 审计日志。
+  - **F-3 审计可查**：`guardrail_blocked`、`guardrail_degraded` 和 `guardrail_warning` 事件在 structlog 输出中可见，包含 error_code、missing_anchors、tool_name、risk_level 等关键字段。
+  - **F-4 每轮刷新**：多轮 tool loop 场景下，每次 LLM 调用前产生新 guard_state，不复用前轮结果。
+  - 测试：`tests/test_guardrail.py` 覆盖 F-1/F-2/F-3/F-4 全部场景。
+
 ## 8. 风险与缓解
 
 | 风险 | 影响 | 缓解 |
@@ -1243,6 +1450,8 @@ async def ensure_bootstrap(self, workspace_path: Path) -> None:
 | 并发场景下 scope_key 串话 | 会话 A 工具拿到会话 B 的 scope | scope_key 作为 _execute_tool 显式参数传递，不存实例字段；Phase 0 补并发隔离测试 |
 | scope_resolver 实现缺失导致集成断裂 | 全部依赖 scope_key 的模块无法闭合 | Phase 0 明确 scope_resolver 模块定义、文件位置、输入输出签名 |
 | Evolution 状态机复杂度（5 种状态） | 状态流转 bug | 严格测试状态流转矩阵 + audit trail 完整覆盖 |
+| Guardrail 误拦截（false positive） | 正常高风险工具被错误阻断，影响可用性 | 锚点清单从工作区文件动态提取（非硬编码），可随 SOUL.md 演进调整；risk_level 工具级声明避免按组一刀切误伤；Phase 0 退出门槛含 false positive 回归测试 |
+| Guardrail 漏拦截（false negative） | 高风险工具在 guard 失效时仍被执行 | 高风险路径 fail-closed（ADR 0035）；contract 不可用时直接阻断（GUARD_CONTRACT_UNAVAILABLE）；审计日志全量记录供事后追溯 |
 
 ## 9. 前置条件与 Spike 清单
 
