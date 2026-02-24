@@ -174,6 +174,47 @@ class TestProposeUpdates:
         assert proposal.new_content == expected
 
 
+class TestCurateEmptyLLMOutput:
+    @pytest.mark.asyncio
+    async def test_curate_empty_llm_output_preserves_memory(self, tmp_path: Path) -> None:
+        """Empty LLM output must NOT overwrite existing MEMORY.md."""
+        today = date.today()
+        _write_daily_note(tmp_path, today, "---\n[10:00] (source: user)\nSome note")
+
+        existing_content = "## Existing\nImportant curated content"
+        (tmp_path / "MEMORY.md").write_text(existing_content)
+
+        # LLM returns empty string
+        model_client = _make_mock_model_client("")
+        settings = _make_settings(tmp_path)
+        curator = MemoryCurator(model_client, settings)
+
+        result = await curator.curate(tmp_path)
+
+        assert result.status == "no_changes"
+        # MEMORY.md should be preserved
+        assert (tmp_path / "MEMORY.md").read_text() == existing_content
+
+    @pytest.mark.asyncio
+    async def test_curate_whitespace_llm_output_preserves_memory(self, tmp_path: Path) -> None:
+        """Whitespace-only LLM output must NOT overwrite existing MEMORY.md."""
+        today = date.today()
+        _write_daily_note(tmp_path, today, "---\n[10:00] (source: user)\nSome note")
+
+        existing_content = "## Existing\nImportant content"
+        (tmp_path / "MEMORY.md").write_text(existing_content)
+
+        # LLM returns whitespace only
+        model_client = _make_mock_model_client("   \n\n  ")
+        settings = _make_settings(tmp_path)
+        curator = MemoryCurator(model_client, settings)
+
+        result = await curator.curate(tmp_path)
+
+        assert result.status == "no_changes"
+        assert (tmp_path / "MEMORY.md").read_text() == existing_content
+
+
 class TestReadRecentDailyNotes:
     def test_reads_recent_files(self, tmp_path: Path) -> None:
         today = date.today()

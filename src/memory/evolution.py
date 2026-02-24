@@ -212,11 +212,13 @@ class EvolutionEngine:
         return EvalResult(passed=passed, checks=checks, summary=summary)
 
     async def apply(self, version: int) -> None:
-        """Apply a proposed version that passed eval.
+        """Apply a proposed version that passed eval (ADR 0036 compensation).
 
         1. Verify status == 'proposed' and eval passed
-        2. Write new content to workspace/SOUL.md
-        3. Update DB: new version → 'active', old active → 'superseded'
+        2. Save old SOUL.md content (for compensation)
+        3. Write new content to workspace/SOUL.md
+        4. Update DB: new version → 'active', old active → 'superseded'
+        5. On commit failure: restore old file content + raise
         """
         async with self._db_factory() as db:
             record = await self._get_version(db, version)
@@ -232,6 +234,15 @@ class EvolutionEngine:
                     code="EVAL_NOT_PASSED",
                 )
 
+            # ADR 0036: save old content for compensation
+            soul_path = self._workspace_path / "SOUL.md"
+            old_content: str | None = None
+            if soul_path.is_file():
+                old_content = soul_path.read_text(encoding="utf-8")
+
+            # Write new content to file BEFORE commit
+            soul_path.write_text(record.content, encoding="utf-8")
+
             # Supersede current active version
             await db.execute(
                 update(SoulVersionRecord)
@@ -246,16 +257,25 @@ class EvolutionEngine:
                 .values(status="active")
             )
 
-            await db.commit()
-
-        # Write to file
-        soul_path = self._workspace_path / "SOUL.md"
-        soul_path.write_text(record.content, encoding="utf-8")
+            try:
+                await db.commit()
+            except Exception:
+                # ADR 0036: compensate — restore old file content
+                logger.error(
+                    "soul_apply_commit_failed",
+                    version=version,
+                    msg="Commit failed, compensating file write",
+                )
+                if old_content is not None:
+                    soul_path.write_text(old_content, encoding="utf-8")
+                else:
+                    soul_path.unlink(missing_ok=True)
+                raise
 
         logger.info("soul_applied", version=version)
 
     async def rollback(self, *, to_version: int | None = None) -> int:
-        """Rollback to a previous version.
+        """Rollback to a previous version (ADR 0036 compensation).
 
         If to_version is None, rolls back to the most recent superseded version.
         Returns the new active version number.
@@ -278,6 +298,15 @@ class EvolutionEngine:
                         code="NO_ROLLBACK_TARGET",
                     )
 
+            # ADR 0036: save old content for compensation
+            soul_path = self._workspace_path / "SOUL.md"
+            old_content: str | None = None
+            if soul_path.is_file():
+                old_content = soul_path.read_text(encoding="utf-8")
+
+            # Write target content to file BEFORE commit
+            soul_path.write_text(target.content, encoding="utf-8")
+
             # Mark current active as rolled_back
             await db.execute(
                 update(SoulVersionRecord)
@@ -296,11 +325,21 @@ class EvolutionEngine:
                 created_by="system",
             )
             db.add(new_record)
-            await db.commit()
 
-        # Write to file
-        soul_path = self._workspace_path / "SOUL.md"
-        soul_path.write_text(target.content, encoding="utf-8")
+            try:
+                await db.commit()
+            except Exception:
+                # ADR 0036: compensate — restore old file content
+                logger.error(
+                    "soul_rollback_commit_failed",
+                    target_version=target.version,
+                    msg="Commit failed, compensating file write",
+                )
+                if old_content is not None:
+                    soul_path.write_text(old_content, encoding="utf-8")
+                else:
+                    soul_path.unlink(missing_ok=True)
+                raise
 
         logger.info("soul_rolled_back", new_version=next_version, target=target.version)
         return next_version
@@ -341,6 +380,33 @@ class EvolutionEngine:
                 .limit(limit)
             )
             return [self._to_soul_version(r) for r in result.scalars().all()]
+
+    async def reconcile_soul_projection(self) -> None:
+        """ADR 0036: startup reconciliation — DB is SSOT, SOUL.md is projection.
+
+        If DB active version content differs from SOUL.md, overwrite file with DB content.
+        If no active version exists, skip (bootstrap handles that case).
+        """
+        current = await self.get_current_version()
+        if current is None:
+            logger.info("soul_reconcile_skipped", reason="no_active_version")
+            return
+
+        soul_path = self._workspace_path / "SOUL.md"
+        file_content = ""
+        if soul_path.is_file():
+            file_content = soul_path.read_text(encoding="utf-8")
+
+        if file_content.strip() == current.content.strip():
+            return  # Already consistent
+
+        # DB is SSOT — overwrite file
+        soul_path.write_text(current.content, encoding="utf-8")
+        logger.warning(
+            "soul_projection_reconciled",
+            version=current.version,
+            msg="SOUL.md overwritten to match DB active version",
+        )
 
     async def ensure_bootstrap(self, workspace_path: Path) -> None:
         """Handle SOUL.md bootstrap (ADR 0027).

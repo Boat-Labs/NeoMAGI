@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import structlog
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 from src.constants import DB_SCHEMA
@@ -33,12 +34,37 @@ async def create_db_engine(settings: DatabaseSettings) -> AsyncEngine:
 
 
 async def ensure_schema(engine: AsyncEngine, schema: str = DB_SCHEMA) -> None:
-    """Ensure the target schema exists, then create all tables."""
+    """Ensure the target schema exists, then create all tables and search triggers."""
     async with engine.begin() as conn:
-        await conn.execute(
-            __import__("sqlalchemy").text(f"CREATE SCHEMA IF NOT EXISTS {schema}")
-        )
+        await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
         await conn.run_sync(Base.metadata.create_all)
+
+        # Search vector trigger: auto-populate search_vector on INSERT/UPDATE.
+        # Three separate execute() calls to avoid asyncpg multi-statement issues.
+        await conn.execute(text(f"""
+            CREATE OR REPLACE FUNCTION {schema}.memory_entries_search_vector_update()
+            RETURNS trigger AS $$
+            BEGIN
+                NEW.search_vector :=
+                    setweight(to_tsvector('simple', coalesce(NEW.title, '')), 'A') ||
+                    setweight(to_tsvector('simple', coalesce(NEW.content, '')), 'B');
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql
+        """))
+
+        await conn.execute(text(
+            f"DROP TRIGGER IF EXISTS trg_memory_entries_search_vector"
+            f" ON {schema}.memory_entries"
+        ))
+
+        await conn.execute(text(f"""
+            CREATE TRIGGER trg_memory_entries_search_vector
+            BEFORE INSERT OR UPDATE ON {schema}.memory_entries
+            FOR EACH ROW
+            EXECUTE FUNCTION {schema}.memory_entries_search_vector_update()
+        """))
+
     logger.info("db_schema_ensured", schema=schema)
 
 

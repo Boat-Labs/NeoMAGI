@@ -286,3 +286,78 @@ class TestAuditTrail:
         assert len(trail) == 2
         assert trail[0].version == 2
         assert trail[1].version == 1
+
+
+class TestApplyCommitCompensation:
+    """ADR 0036: commit failure must compensate file write."""
+
+    @pytest.mark.asyncio
+    async def test_apply_commit_failure_compensates_file(self, tmp_path: Path) -> None:
+        """apply() commit failure → old file content restored."""
+        soul_path = tmp_path / "SOUL.md"
+        old_content = "# Old Soul\nOriginal content."
+        soul_path.write_text(old_content, encoding="utf-8")
+
+        proposed = _make_mock_record(
+            version=2,
+            content="# New Soul\nUpdated content.",
+            status="proposed",
+            eval_result={"passed": True},
+        )
+
+        mock_db = AsyncMock()
+        mock_scalars = MagicMock()
+        mock_scalars.first.return_value = proposed
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock(side_effect=RuntimeError("DB commit failed"))
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+
+        factory = MagicMock(return_value=mock_db)
+        engine = EvolutionEngine(factory, tmp_path)
+
+        with pytest.raises(RuntimeError, match="DB commit failed"):
+            await engine.apply(2)
+
+        # File should be restored to old content
+        assert soul_path.read_text(encoding="utf-8") == old_content
+
+
+class TestReconcileSoulProjection:
+    """ADR 0036: startup reconciliation — DB is SSOT."""
+
+    @pytest.mark.asyncio
+    async def test_reconcile_soul_projection_fixes_drift(self, tmp_path: Path) -> None:
+        """File content differs from DB → file overwritten with DB content."""
+        soul_path = tmp_path / "SOUL.md"
+        soul_path.write_text("# Drifted content", encoding="utf-8")
+
+        db_content = "# Soul from DB\nDB is SSOT."
+        engine = EvolutionEngine(MagicMock(), tmp_path)
+        engine.get_current_version = AsyncMock(
+            return_value=SoulVersion(
+                id=1, version=1, content=db_content, status="active",
+                proposal=None, eval_result=None, created_by="agent",
+                created_at=None,
+            )
+        )
+
+        await engine.reconcile_soul_projection()
+
+        assert soul_path.read_text(encoding="utf-8") == db_content
+
+    @pytest.mark.asyncio
+    async def test_reconcile_no_active_skips(self, tmp_path: Path) -> None:
+        """No active version in DB → skip reconciliation."""
+        soul_path = tmp_path / "SOUL.md"
+        soul_path.write_text("# Whatever", encoding="utf-8")
+
+        engine = EvolutionEngine(MagicMock(), tmp_path)
+        engine.get_current_version = AsyncMock(return_value=None)
+
+        await engine.reconcile_soul_projection()
+
+        # File unchanged
+        assert soul_path.read_text(encoding="utf-8") == "# Whatever"

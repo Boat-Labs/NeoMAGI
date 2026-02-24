@@ -99,6 +99,11 @@ class MemoryCurator:
         # 3. Generate proposal via LLM
         proposal = await self.propose_updates(daily_content, current_curated)
 
+        # 3b. Empty output guard: LLM returned empty → preserve existing MEMORY.md
+        if not proposal.new_content or not proposal.new_content.strip():
+            logger.warning("curation_empty_proposal", workspace=str(workspace_path))
+            return CurationResult(status="no_changes")
+
         # 4. Check if content changed
         if proposal.new_content.strip() == current_curated.strip():
             logger.info("curation_no_changes")

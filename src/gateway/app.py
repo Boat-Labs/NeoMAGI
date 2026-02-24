@@ -28,6 +28,10 @@ from src.gateway.protocol import (
 )
 from src.infra.errors import NeoMAGIError
 from src.infra.logging import setup_logging
+from src.memory.evolution import EvolutionEngine
+from src.memory.indexer import MemoryIndexer
+from src.memory.searcher import MemorySearcher
+from src.memory.writer import MemoryWriter
 from src.session.database import create_db_engine, ensure_schema, make_session_factory
 from src.session.manager import SessionManager
 from src.tools.base import ToolMode
@@ -44,6 +48,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     settings = get_settings()
 
+    # [ADR 0037] workspace_path single source of truth: fail-fast if inconsistent
+    if settings.memory.workspace_path != settings.workspace_dir:
+        raise RuntimeError(
+            f"workspace_path mismatch: Settings.workspace_dir={settings.workspace_dir}, "
+            f"MemorySettings.workspace_path={settings.memory.workspace_path}. "
+            "See ADR 0037."
+        )
+
     # [Decision 0020] DB is mandatory; startup fails if DB/schema unavailable.
     engine = await create_db_engine(settings.database)
     await ensure_schema(engine, settings.database.schema_)
@@ -59,8 +71,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         base_url=settings.openai.base_url,
     )
 
+    # Build Memory dependency chain
+    memory_indexer = MemoryIndexer(db_session_factory, settings.memory)
+    memory_searcher = MemorySearcher(db_session_factory, settings.memory)
+    memory_writer = MemoryWriter(settings.workspace_dir, settings.memory, indexer=memory_indexer)
+    evolution_engine = EvolutionEngine(db_session_factory, settings.workspace_dir, settings.memory)
+
+    # [ADR 0036] Startup reconciliation: DB is SSOT, SOUL.md is projection
+    await evolution_engine.reconcile_soul_projection()
+
     tool_registry = ToolRegistry()
-    register_builtins(tool_registry, settings.workspace_dir)
+    register_builtins(
+        tool_registry,
+        settings.workspace_dir,
+        memory_searcher=memory_searcher,
+        memory_writer=memory_writer,
+        evolution_engine=evolution_engine,
+    )
 
     agent_loop = AgentLoop(
         model_client=model_client,
@@ -69,6 +96,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         model=settings.openai.model,
         tool_registry=tool_registry,
         compaction_settings=settings.compaction,
+        session_settings=settings.session,
+        memory_settings=settings.memory,
+        memory_searcher=memory_searcher,
+        evolution_engine=evolution_engine,
     )
 
     app.state.agent_loop = agent_loop

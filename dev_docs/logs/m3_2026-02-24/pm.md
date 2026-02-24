@@ -41,7 +41,7 @@ M3 Persistent Memory 五个 Phase 全部通过 Gate 验收，milestone 可关闭
 - `alembic/versions/d5e6f7a8b9c0_create_memory_entries.py` — memory_entries 表
 - `alembic/versions/e6f7a8b9c0d1_create_soul_versions.py` — soul_versions 表
 
-**测试（20 个）**
+**测试（22 个）**
 - `tests/test_agent_flush_persist.py` — flush candidate 持久化
 - `tests/test_agent_tool_context.py` — ToolContext 传递
 - `tests/test_base_tool.py` — BaseTool execute 签名
@@ -86,7 +86,7 @@ M3 Persistent Memory 五个 Phase 全部通过 Gate 验收，milestone 可关闭
 | ADR | 验证结果 |
 |-----|---------|
 | 0034 (dmScope session/memory scope alignment) | PASS — SessionIdentity + scope_resolver 完整实现，DM 与 group 范围隔离 |
-| 0035 (runtime guardrail hardening + risk-gated fail-closed) | PASS — CoreSafetyContract pre-LLM warn-only + pre-tool fail-closed，RiskLevel 三级分层 |
+| 0035 (runtime guardrail hardening + risk-gated fail-closed) | PASS — CoreSafetyContract pre-LLM warn-only + pre-tool fail-closed，RiskLevel 两级分层 (low/high) |
 
 ## 4. Gate 验收报告索引
 
