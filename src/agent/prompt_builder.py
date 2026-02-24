@@ -11,6 +11,7 @@ from src.tools.base import ToolMode
 
 if TYPE_CHECKING:
     from src.config.settings import MemorySettings
+    from src.memory.searcher import MemorySearchResult
     from src.tools.registry import ToolRegistry
 
 logger = structlog.get_logger()
@@ -52,6 +53,7 @@ class PromptBuilder:
         *,
         scope_key: str = "main",
         recent_messages: list[str] | None = None,
+        recall_results: list[MemorySearchResult] | None = None,
     ) -> str:
         """Build the complete system prompt by concatenating all non-empty layers.
 
@@ -60,7 +62,9 @@ class PromptBuilder:
 
         scope_key: from session_resolver (ADR 0034), consumed by workspace
                    and memory_recall layers.
-        recent_messages: Phase 3, for memory recall keyword extraction.
+        recent_messages: reserved for future use (keyword extraction happens
+                         in AgentLoop, results passed via recall_results).
+        recall_results: pre-fetched memory search results from AgentLoop.
         """
         layers = [
             self._layer_identity(),
@@ -69,9 +73,7 @@ class PromptBuilder:
             self._layer_skills(),
             self._layer_workspace(session_id, scope_key=scope_key),
             self._layer_compacted_context(compacted_context),
-            self._layer_memory_recall(
-                scope_key=scope_key, recent_messages=recent_messages
-            ),
+            self._layer_memory_recall(recall_results=recall_results),
             self._layer_datetime(),
         ]
         return "\n\n".join(layer for layer in layers if layer)
@@ -161,11 +163,68 @@ class PromptBuilder:
     def _layer_memory_recall(
         self,
         *,
-        scope_key: str = "main",
-        recent_messages: list[str] | None = None,
+        recall_results: list[MemorySearchResult] | None = None,
     ) -> str:
-        # Placeholder — Phase 3 implementation
-        return ""
+        """Format pre-fetched memory search results into prompt context.
+
+        Results are pre-fetched by AgentLoop using extract_recall_query()
+        + MemorySearcher.search(). This layer just formats them.
+
+        Format:
+        [Recalled Memories]
+        - (2026-02-21, daily_note) User prefers concise responses...
+        - (2026-02-20, curated) Project uses PostgreSQL 16...
+        """
+        if not recall_results:
+            return ""
+
+        max_tokens = 2000
+        if self._memory_settings:
+            max_tokens = self._memory_settings.memory_recall_max_tokens
+
+        max_chars = max_tokens * 4  # rough estimate
+
+        lines: list[str] = []
+        total_chars = 0
+
+        for r in recall_results:
+            date_str = (
+                r.created_at.strftime("%Y-%m-%d") if r.created_at else "unknown"
+            )
+            # Truncate individual content to avoid one entry dominating
+            content = r.content[:300] if len(r.content) > 300 else r.content
+            content = content.replace("\n", " ").strip()
+            line = f"- ({date_str}, {r.source_type}) {content}"
+
+            if total_chars + len(line) > max_chars:
+                break
+            lines.append(line)
+            total_chars += len(line)
+
+        if not lines:
+            return ""
+
+        logger.info("memory_recall_injected", result_count=len(lines))
+        return "[Recalled Memories]\n" + "\n".join(lines)
+
+    @staticmethod
+    def extract_recall_query(
+        recent_messages: list[str] | None,
+        *,
+        max_query_len: int = 200,
+    ) -> str:
+        """Extract search query from recent user messages for memory recall.
+
+        Simple rule-based extraction: concatenate recent messages, no LLM call.
+        PostgreSQL plainto_tsquery('simple', ...) handles tokenization.
+        """
+        if not recent_messages:
+            return ""
+        combined = " ".join(msg.strip() for msg in recent_messages if msg.strip())
+        if not combined:
+            return ""
+        # Truncate to reasonable length for search
+        return combined[:max_query_len]
 
     def _layer_datetime(self) -> str:
         now = datetime.now(UTC)

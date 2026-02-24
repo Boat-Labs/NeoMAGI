@@ -156,6 +156,14 @@ class MemorySettings(BaseSettings):
     search_default_limit: int = 10
     search_min_score: float = 0.0
     search_result_max_chars: int = 500  # truncation for tool results
+    # Memory recall settings (Phase 3)
+    memory_recall_max_tokens: int = 2000  # injection limit for recall layer
+    memory_recall_min_score: float = 1.0  # BM25/tsvector score threshold
+    memory_recall_max_results: int = 5
+    # Curation settings (Phase 3)
+    curated_max_tokens: int = 4000  # MEMORY.md size limit
+    curation_lookback_days: int = 7
+    curation_temperature: float = 0.1
 
 
 class Settings(BaseSettings):
