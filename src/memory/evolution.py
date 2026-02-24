@@ -218,7 +218,7 @@ class EvolutionEngine:
         2. Save old SOUL.md content (for compensation)
         3. Write new content to workspace/SOUL.md
         4. Update DB: new version → 'active', old active → 'superseded'
-        5. On commit failure: restore old file content + raise
+        5. On ANY failure after file write: restore old file content + raise
         """
         async with self._db_factory() as db:
             record = await self._get_version(db, version)
@@ -240,36 +240,43 @@ class EvolutionEngine:
             if soul_path.is_file():
                 old_content = soul_path.read_text(encoding="utf-8")
 
-            # Write new content to file BEFORE commit
+            # Write new content to file BEFORE DB mutation
             soul_path.write_text(record.content, encoding="utf-8")
 
-            # Supersede current active version
-            await db.execute(
-                update(SoulVersionRecord)
-                .where(SoulVersionRecord.status == "active")
-                .values(status="superseded")
-            )
-
-            # Activate proposed version
-            await db.execute(
-                update(SoulVersionRecord)
-                .where(SoulVersionRecord.version == version)
-                .values(status="active")
-            )
-
             try:
+                # Supersede current active version
+                await db.execute(
+                    update(SoulVersionRecord)
+                    .where(SoulVersionRecord.status == "active")
+                    .values(status="superseded")
+                )
+
+                # Activate proposed version
+                await db.execute(
+                    update(SoulVersionRecord)
+                    .where(SoulVersionRecord.version == version)
+                    .values(status="active")
+                )
+
                 await db.commit()
             except Exception:
                 # ADR 0036: compensate — restore old file content
-                logger.error(
-                    "soul_apply_commit_failed",
-                    version=version,
-                    msg="Commit failed, compensating file write",
-                )
-                if old_content is not None:
-                    soul_path.write_text(old_content, encoding="utf-8")
-                else:
-                    soul_path.unlink(missing_ok=True)
+                try:
+                    if old_content is not None:
+                        soul_path.write_text(old_content, encoding="utf-8")
+                    else:
+                        soul_path.unlink(missing_ok=True)
+                    logger.error(
+                        "soul_apply_db_failed_compensated",
+                        version=version,
+                        msg="DB operation failed, file write compensated",
+                    )
+                except Exception:
+                    logger.error(
+                        "soul_apply_compensation_failed",
+                        version=version,
+                        msg="DB failed AND file rollback failed; manual intervention required",
+                    )
                 raise
 
         logger.info("soul_applied", version=version)
@@ -304,41 +311,48 @@ class EvolutionEngine:
             if soul_path.is_file():
                 old_content = soul_path.read_text(encoding="utf-8")
 
-            # Write target content to file BEFORE commit
+            # Write target content to file BEFORE DB mutation
             soul_path.write_text(target.content, encoding="utf-8")
 
-            # Mark current active as rolled_back
-            await db.execute(
-                update(SoulVersionRecord)
-                .where(SoulVersionRecord.status == "active")
-                .values(status="rolled_back")
-            )
-
-            # Create new version with target content
-            next_version = await self._next_version(db)
-            new_record = SoulVersionRecord(
-                version=next_version,
-                content=target.content,
-                status="active",
-                proposal={"rollback_from": target.version},
-                eval_result=None,
-                created_by="system",
-            )
-            db.add(new_record)
-
             try:
+                # Mark current active as rolled_back
+                await db.execute(
+                    update(SoulVersionRecord)
+                    .where(SoulVersionRecord.status == "active")
+                    .values(status="rolled_back")
+                )
+
+                # Create new version with target content
+                next_version = await self._next_version(db)
+                new_record = SoulVersionRecord(
+                    version=next_version,
+                    content=target.content,
+                    status="active",
+                    proposal={"rollback_from": target.version},
+                    eval_result=None,
+                    created_by="system",
+                )
+                db.add(new_record)
+
                 await db.commit()
             except Exception:
                 # ADR 0036: compensate — restore old file content
-                logger.error(
-                    "soul_rollback_commit_failed",
-                    target_version=target.version,
-                    msg="Commit failed, compensating file write",
-                )
-                if old_content is not None:
-                    soul_path.write_text(old_content, encoding="utf-8")
-                else:
-                    soul_path.unlink(missing_ok=True)
+                try:
+                    if old_content is not None:
+                        soul_path.write_text(old_content, encoding="utf-8")
+                    else:
+                        soul_path.unlink(missing_ok=True)
+                    logger.error(
+                        "soul_rollback_db_failed_compensated",
+                        target_version=target.version,
+                        msg="DB operation failed, file write compensated",
+                    )
+                except Exception:
+                    logger.error(
+                        "soul_rollback_compensation_failed",
+                        target_version=target.version,
+                        msg="DB failed AND file rollback failed; manual intervention required",
+                    )
                 raise
 
         logger.info("soul_rolled_back", new_version=next_version, target=target.version)

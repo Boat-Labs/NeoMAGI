@@ -49,7 +49,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
 
     # [ADR 0037] workspace_path single source of truth: fail-fast if inconsistent
-    if settings.memory.workspace_path != settings.workspace_dir:
+    # Use .resolve() to normalize symlinks, .., etc. before comparison
+    if settings.memory.workspace_path.resolve() != settings.workspace_dir.resolve():
         raise RuntimeError(
             f"workspace_path mismatch: Settings.workspace_dir={settings.workspace_dir}, "
             f"MemorySettings.workspace_path={settings.memory.workspace_path}. "

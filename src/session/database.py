@@ -8,6 +8,7 @@ import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
+import src.memory.models  # noqa: F401 — register memory tables in Base.metadata
 from src.constants import DB_SCHEMA
 from src.session.models import Base
 

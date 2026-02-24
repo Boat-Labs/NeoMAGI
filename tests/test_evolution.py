@@ -288,8 +288,8 @@ class TestAuditTrail:
         assert trail[1].version == 1
 
 
-class TestApplyCommitCompensation:
-    """ADR 0036: commit failure must compensate file write."""
+class TestApplyCompensation:
+    """ADR 0036: any DB failure after file write must compensate."""
 
     @pytest.mark.asyncio
     async def test_apply_commit_failure_compensates_file(self, tmp_path: Path) -> None:
@@ -323,6 +323,94 @@ class TestApplyCommitCompensation:
 
         # File should be restored to old content
         assert soul_path.read_text(encoding="utf-8") == old_content
+
+    @pytest.mark.asyncio
+    async def test_apply_execute_failure_compensates_file(self, tmp_path: Path) -> None:
+        """apply() execute failure (pre-commit) → old file content restored."""
+        soul_path = tmp_path / "SOUL.md"
+        old_content = "# Old Soul\nOriginal."
+        soul_path.write_text(old_content, encoding="utf-8")
+
+        proposed = _make_mock_record(
+            version=2,
+            content="# New Soul\nNew.",
+            status="proposed",
+            eval_result={"passed": True},
+        )
+
+        call_count = 0
+
+        async def execute_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # First call: _get_version (inside context manager)
+            if call_count == 1:
+                result = MagicMock()
+                scalars = MagicMock()
+                scalars.first.return_value = proposed
+                result.scalars.return_value = scalars
+                return result
+            # Second call: supersede — raise to simulate DB execute failure
+            raise RuntimeError("DB execute failed")
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(side_effect=execute_side_effect)
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+
+        factory = MagicMock(return_value=mock_db)
+        engine = EvolutionEngine(factory, tmp_path)
+
+        with pytest.raises(RuntimeError, match="DB execute failed"):
+            await engine.apply(2)
+
+        # File should be restored to old content
+        assert soul_path.read_text(encoding="utf-8") == old_content
+
+    @pytest.mark.asyncio
+    async def test_apply_compensation_failure_logs_and_raises(self, tmp_path: Path) -> None:
+        """Compensation write failure → structured log + original error re-raised."""
+        from unittest.mock import patch as _patch
+
+        soul_path = tmp_path / "SOUL.md"
+        soul_path.write_text("# Old", encoding="utf-8")
+
+        proposed = _make_mock_record(
+            version=2,
+            content="# New",
+            status="proposed",
+            eval_result={"passed": True},
+        )
+
+        mock_db = AsyncMock()
+        mock_scalars = MagicMock()
+        mock_scalars.first.return_value = proposed
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = mock_scalars
+        mock_db.execute = AsyncMock(return_value=mock_result)
+        mock_db.commit = AsyncMock(side_effect=RuntimeError("DB commit failed"))
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+
+        factory = MagicMock(return_value=mock_db)
+        engine = EvolutionEngine(factory, tmp_path)
+
+        # Make compensation write_text fail by patching Path.write_text
+        # to raise on the second call (first call writes new content, second is compensation)
+        original_write = Path.write_text
+        call_count = 0
+
+        def write_text_side_effect(self_path, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                raise OSError("Disk full")
+            return original_write(self_path, *args, **kwargs)
+
+        with _patch.object(Path, "write_text", write_text_side_effect):
+            # Original DB error should still be raised despite compensation failure
+            with pytest.raises(RuntimeError, match="DB commit failed"):
+                await engine.apply(2)
 
 
 class TestReconcileSoulProjection:
