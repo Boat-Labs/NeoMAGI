@@ -57,9 +57,12 @@ class TestExecuteToolDictValidation:
     """Test _execute_tool rejects non-dict JSON with INVALID_ARGS."""
 
     @pytest.fixture()
-    def agent_loop(self):
-        tool = MagicMock()
+    def agent_loop(self, tmp_path):
+        from src.tools.base import BaseTool, RiskLevel
+
+        tool = MagicMock(spec=BaseTool)
         tool.execute = AsyncMock(return_value={"ok": True})
+        tool.risk_level = RiskLevel.low
 
         registry = MagicMock()
         registry.get.return_value = tool
@@ -69,23 +72,37 @@ class TestExecuteToolDictValidation:
         return AgentLoop(
             model_client=MagicMock(),
             session_manager=MagicMock(),
-            workspace_dir=MagicMock(),
+            workspace_dir=tmp_path,
             tool_registry=registry,
         )
 
+    def _guard_passed(self):
+        from src.agent.guardrail import GuardCheckResult
+
+        return GuardCheckResult(passed=True)
+
     @pytest.mark.asyncio
     async def test_int_returns_invalid_args(self, agent_loop):
-        result = await agent_loop._execute_tool("some_tool", "123")
+        result = await agent_loop._execute_tool(
+            "some_tool", "123",
+            scope_key="main", session_id="s1", guard_state=self._guard_passed(),
+        )
         assert result["error_code"] == "INVALID_ARGS"
 
     @pytest.mark.asyncio
     async def test_list_returns_invalid_args(self, agent_loop):
-        result = await agent_loop._execute_tool("some_tool", "[]")
+        result = await agent_loop._execute_tool(
+            "some_tool", "[]",
+            scope_key="main", session_id="s1", guard_state=self._guard_passed(),
+        )
         assert result["error_code"] == "INVALID_ARGS"
 
     @pytest.mark.asyncio
     async def test_bad_json_returns_invalid_args(self, agent_loop):
-        result = await agent_loop._execute_tool("some_tool", "{bad}")
+        result = await agent_loop._execute_tool(
+            "some_tool", "{bad}",
+            scope_key="main", session_id="s1", guard_state=self._guard_passed(),
+        )
         assert result["error_code"] == "INVALID_ARGS"
 
 

@@ -64,6 +64,13 @@ class ToolModeError(ToolError):
         super().__init__(message, code="MODE_DENIED")
 
 
+class MemoryWriteError(NeoMAGIError):
+    """Errors during memory write operations (daily notes, flush)."""
+
+    def __init__(self, message: str, *, code: str = "MEMORY_WRITE_ERROR") -> None:
+        super().__init__(message, code=code)
+
+
 class SessionFencingError(GatewayError):
     """Raised when a stale worker tries to write after lock takeover."""
 

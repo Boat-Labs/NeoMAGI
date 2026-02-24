@@ -66,6 +66,7 @@ class SessionSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SESSION_")
 
     default_mode: str = "chat_safe"
+    dm_scope: str = "main"
 
     @field_validator("default_mode")
     @classmethod
@@ -74,6 +75,16 @@ class SessionSettings(BaseSettings):
             raise ValueError(
                 f"SESSION_DEFAULT_MODE must be 'chat_safe' in M1.5 "
                 f"(got '{v}'). See ADR 0025."
+            )
+        return v
+
+    @field_validator("dm_scope")
+    @classmethod
+    def _validate_dm_scope(cls, v: str) -> str:
+        if v != "main":
+            raise ValueError(
+                f"SESSION_DM_SCOPE must be 'main' in M3 (got '{v}'). "
+                "Non-main scopes will be enabled in M4. See ADR 0034."
             )
         return v
 
@@ -131,6 +142,30 @@ class CompactionSettings(BaseSettings):
         return self
 
 
+class MemorySettings(BaseSettings):
+    """Memory write and retrieval settings. Env vars prefixed with MEMORY_."""
+
+    model_config = SettingsConfigDict(env_prefix="MEMORY_")
+
+    workspace_path: Path = Path("workspace")
+    max_daily_note_bytes: int = 32_768  # 32KB per daily note
+    daily_notes_load_days: int = 2  # today + yesterday
+    daily_notes_max_tokens: int = 4000  # per file injection limit
+    flush_min_confidence: float = 0.5  # filter low-confidence candidates
+    # Search settings (Phase 2)
+    search_default_limit: int = 10
+    search_min_score: float = 0.0
+    search_result_max_chars: int = 500  # truncation for tool results
+    # Memory recall settings (Phase 3)
+    memory_recall_max_tokens: int = 2000  # injection limit for recall layer
+    memory_recall_min_score: float = 1.0  # BM25/tsvector score threshold
+    memory_recall_max_results: int = 5
+    # Curation settings (Phase 3)
+    curated_max_tokens: int = 4000  # MEMORY.md size limit
+    curation_lookback_days: int = 7
+    curation_temperature: float = 0.1
+
+
 class Settings(BaseSettings):
     """Root settings composing all sub-configurations."""
 
@@ -141,6 +176,7 @@ class Settings(BaseSettings):
     gateway: GatewaySettings = Field(default_factory=GatewaySettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
     compaction: CompactionSettings = Field(default_factory=CompactionSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
     workspace_dir: Path = Path("workspace")
 
 
