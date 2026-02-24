@@ -29,7 +29,9 @@ def _make_settings(workspace: Path) -> MemorySettings:
     )
 
 
-def _make_proposal(content: str = "# Soul\nI am Magi.", intent: str = "Update identity") -> SoulProposal:
+def _make_proposal(
+    content: str = "# Soul\nI am Magi.", intent: str = "Update identity"
+) -> SoulProposal:
     return SoulProposal(
         intent=intent,
         risk_notes="None",
@@ -286,9 +288,7 @@ class TestAuditTrailE2E:
         await engine.rollback()
 
         trail = await engine.get_audit_trail(limit=20)
-        statuses = [(v.version, v.status) for v in trail]
-
-        # Should have: v0(superseded), v1(superseded→rolled_back or similar), rollback version(active)
+        # Should have: v0(superseded), v1(rolled_back), rollback version(active)
         assert len(trail) >= 3
         # Latest should be active
         assert trail[0].status == "active"
