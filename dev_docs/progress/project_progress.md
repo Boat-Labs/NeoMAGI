@@ -167,17 +167,40 @@
 
 ## 2026-02-23 (local) | M3
 - Status: in_progress (Phase 0 guardrail hardening gate)
-- Done: 启动 M2 风险回补并形成决议草案 ADR 0035（运行时最小反漂移防护）；同步更新 roadmap + m2/m3 architecture，将“Core Safety Contract guard + 风险分级 fail-closed”设为 M3 Phase 0 前置门槛
+- Done: 启动 M2 风险回补并形成决议草案 ADR 0035（运行时最小反漂移防护）；同步更新 roadmap + m2/m3 architecture，将”Core Safety Contract guard + 风险分级 fail-closed”设为 M3 Phase 0 前置门槛
 - Reopened:
   - R1(P1): 现有 compaction 锚点校验强度不足（首行探针级），无法覆盖关键约束失真场景；从 M2 结项残余风险重新开放，转入 M3 Phase 0 必修
   - R2(P1): guard 失败后高风险路径仍可能沿 fail-open 继续执行；重新开放为执行闸门问题（高风险工具需 fail-closed）
-  - R3(P2): 反漂移证据以离线评估为主，缺少运行时强制防护；重新开放为“验收口径与运行时口径对齐”任务
+  - R3(P2): 反漂移证据以离线评估为主，缺少运行时强制防护；重新开放为”验收口径与运行时口径对齐”任务
 - Evidence: working tree updates — `decisions/0035-runtime-anti-drift-guardrail-hardening-and-risk-gated-fail-closed.md`, `decisions/INDEX.md`, `design_docs/roadmap_milestones_v3.md`, `design_docs/m2_architecture.md`, `design_docs/m3_architecture.md`
 - Plan: dev_docs/plans/m3_persistent-memory_2026-02-22.md（Phase 0 增补 ADR 0035 最小防护任务）
 - Decisions: ADR 0035 (proposed)
-- Next:
-  - 在 Phase 0 定义 Core Safety Contract 抽取与版本策略（来源：AGENTS/USER/SOUL）
-  - 在 AgentLoop 增加双检查点（LLM 调用前 + 高风险工具执行前）与统一 guard 状态传递
-  - 增加风险分级执行闸门：低风险可降级继续，高风险 fail-closed + 结构化错误码
-  - 补齐测试与验收：guard 缺失阻断、高风险工具拦截、审计日志可追溯
+- Next: 按 Phase 0~4 推进 M3 实现
 - Risk: 若 Phase 0 未先完成该防护，M3 后续记忆写入/召回链会放大误执行风险并增加返工成本
+
+## 2026-02-24 (local) | M3
+- Status: in_progress
+- Done: M3 持久记忆 5 Phase 全部通过 Gate 验收（Agent Teams PM 协调）
+- Detail:
+  - Phase 0: ToolContext + dmScope + Guardrail — CoreSafetyContract, RiskLevel enum, pre-LLM/pre-tool 检查
+  - Phase 1: Memory Write Path — MemoryWriter, MemoryAppendTool, daily notes auto-load, flush persist
+  - Phase 2: Memory Index & Search — Alembic migration, tsvector + GIN index, MemoryIndexer, MemorySearcher
+  - Phase 3: Memory Curation + Prompt Recall — MemoryCurator (LLM-assisted), recall layer, keyword extraction
+  - Phase 4: Evolution Loop — soul_versions table, EvolutionEngine (propose/evaluate/apply/rollback/veto/bootstrap/audit), Soul tools
+- Evidence: 468 tests passed, ruff clean; PM 报告 `dev_docs/logs/m3_2026-02-24/pm.md`
+- Decisions: ADR 0034, 0035
+- Next: 用户审阅后进入 post-review 修正
+- Risk: 网关接线、搜索触发器、Evolution 一致性等审阅发现待修
+
+## 2026-02-24 (local) | M3
+- Status: done
+- Done: M3 post-review 3 轮修正全部闭合，milestone 关闭
+- Detail:
+  - Round 1 (28d54f1): P0 网关接线（7 工具注册 + 依赖注入）、P1 搜索触发器 DDL、P1 Evolution commit 失败补偿、P1 Curator 空输出防护、P2 装配测试、P3 PM 报告修正
+  - Round 2 (7836a50): P1 ensure_schema 显式导入 memory models、P1 补偿覆盖全部 DB 异常、P2 双层 try/except 结构化日志、P3 路径 .resolve() 规范化
+  - Round 3 (8585be2): P2 补偿日志断言（mock logger 验证）、P2 rollback 对称失败路径测试
+- Evidence: 481 tests passed, ruff clean; commit 2cbd3c4 (closure)
+- Plan: dev_docs/plans/m3_post-review-fix_2026-02-24.md (approved + executed)
+- Decisions: ADR 0036 (Evolution DB-SSOT + 投影对账), 0037 (workspace_path 单一真源)
+- Next: 进入 M6（模型迁移验证）
+- Risk: 无；ParadeDB pg_search BM25 为已知 R1 风险，当前 tsvector + GIN fallback 功能等价
