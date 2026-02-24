@@ -137,7 +137,7 @@ async def _integration_cleanup(request):
         await db_session.execute(
             text(
                 f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions,"
-                f" {DB_SCHEMA}.memory_entries CASCADE"
+                f" {DB_SCHEMA}.memory_entries, {DB_SCHEMA}.soul_versions CASCADE"
             )
         )
         await db_session.commit()

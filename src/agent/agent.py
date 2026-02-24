@@ -21,6 +21,7 @@ from src.agent.prompt_builder import PromptBuilder
 from src.agent.token_budget import BudgetTracker
 from src.config.settings import CompactionSettings, MemorySettings, SessionSettings
 from src.memory.contracts import ResolvedFlushCandidate
+from src.memory.evolution import EvolutionEngine
 from src.memory.searcher import MemorySearcher
 from src.memory.writer import MemoryWriter
 from src.session.manager import MessageWithSeq, SessionManager
@@ -85,6 +86,7 @@ class AgentLoop:
         session_settings: SessionSettings | None = None,
         memory_settings: MemorySettings | None = None,
         memory_searcher: MemorySearcher | None = None,
+        evolution_engine: EvolutionEngine | None = None,
     ) -> None:
         self._model_client = model_client
         self._session_manager = session_manager
@@ -103,6 +105,8 @@ class AgentLoop:
         self._budget_tracker: BudgetTracker | None = None
         self._compaction_engine: CompactionEngine | None = None
         self._memory_writer: MemoryWriter | None = None
+        self._evolution_engine = evolution_engine
+        self._bootstrap_done = False
         self._contract = load_contract(workspace_dir)
         if memory_settings is not None:
             self._memory_writer = MemoryWriter(workspace_dir, memory_settings)
@@ -127,6 +131,14 @@ class AgentLoop:
         When lock_token is provided, all append_message calls include atomic
         fencing to reject stale writes after lock takeover.
         """
+        # 0. Lazy bootstrap: ensure SOUL.md v0-seed exists (once per loop lifetime)
+        if not self._bootstrap_done and self._evolution_engine is not None:
+            try:
+                await self._evolution_engine.ensure_bootstrap(self._workspace_dir)
+            except Exception:
+                logger.exception("soul_bootstrap_failed")
+            self._bootstrap_done = True
+
         # 1. Append user message
         user_msg = await self._session_manager.append_message(
             session_id, "user", content, lock_token=lock_token
