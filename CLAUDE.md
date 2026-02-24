@@ -13,9 +13,9 @@
 
 ## 项目状态
 
-**当前阶段：M1（M1.1~M1.4）已完成，正在进入 M1.5（Tool Modes）规划。**
+**当前阶段：M3 已完成（含 post-review 修正），下一阶段 M6（模型迁移验证）。**
 
-当前基线：后端单元/集成测试通过，前端测试通过，CI 已落地。
+当前基线：481 tests 全绿，ruff clean，CI 已落地。
 下一阶段优先级以 `design_docs/roadmap_milestones_v3.md` 为准。
 
 ## 项目结构

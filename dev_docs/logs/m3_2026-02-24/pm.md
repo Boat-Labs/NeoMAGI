@@ -99,13 +99,27 @@ M3 Persistent Memory 五个 Phase 全部通过 Gate 验收，milestone 可关闭
 | G-M3-P4 | `dev_docs/reviews/m3_phase4_2026-02-24.md` | PASS (10/10) → supplemental FAIL (lint) | PASS |
 | G-M3-FINAL | PM 自检 | PASS | PASS (468 tests, ruff clean) |
 
-## 5. 未完成项
+## 5. Post-Review 修正
 
-无。所有 plan 交付物已完成。
+M3 交付物审阅后发现 4 类缺陷，经 3 轮修正全部闭合：
+
+| 轮次 | Commit | 修正内容 |
+|------|--------|---------|
+| Round 1 | `28d54f1` | P0 网关接线（7 工具注册 + 依赖注入）、P1 搜索触发器 DDL、P1 Evolution commit 失败补偿、P1 Curator 空输出防护、P2 装配测试、P3 PM 报告修正 |
+| Round 2 | `7836a50` | P1 ensure_schema 显式导入 memory models（消除隐式顺序依赖）、P1 Evolution 补偿覆盖全部 DB 异常（execute+commit）、P2 补偿失败双层 try/except + 结构化日志、P3 路径比较 .resolve() 规范化 |
+| Round 3 | `8585be2` | P2 补偿日志断言完善（mock logger 验证 compensation_failed）、P2 rollback 对称失败路径测试（3 用例） |
+
+最终测试总数：481 tests，0 failures，ruff clean。
+ADR 新增：0036（Evolution DB-SSOT + 投影对账）、0037（workspace_path 单一真源）。
+计划正稿：`dev_docs/plans/m3_post-review-fix_2026-02-24.md`。
+
+## 6. 未完成项
+
+无。所有 plan 交付物 + post-review 修正已完成。M3 关闭。
 
 ParadeDB `pg_search` BM25 索引为计划中的 R1 已知风险，当前使用 tsvector + GIN 作为 fallback，功能等价。后续 ParadeDB 就绪后可无缝切换（代码已预留接口）。
 
-## 6. 过程经验
+## 7. 过程经验
 
 | 事件 | 影响 | 改进 |
 |------|------|------|
@@ -116,11 +130,11 @@ ParadeDB `pg_search` BM25 索引为计划中的 R1 已知风险，当前使用 t
 | G-M3-FINAL 在 supplemental re-review 前过早关闭 | 需要重新打开 FINAL 验证 | 规则：FINAL gate 必须等待所有 supplemental commit 的 review 结果返回后才能关闭 |
 | 合并 tester 分支时 test_evolution_e2e.py 冲突 | Tester 分支同步了 backend 代码导致 add/add 冲突 | 规则：Tester 分支只包含 review 报告，不应同步实现代码；或合并前明确以 backend 为准 |
 
-## 7. 心跳日志
+## 8. 心跳日志
 
 `dev_docs/logs/m3_2026-02-24/heartbeat_events.jsonl` — 47 条事件，覆盖完整生命周期。
 
-## 8. Git 合并记录
+## 9. Git 合并记录
 
 | 操作 | Commit |
 |------|--------|
