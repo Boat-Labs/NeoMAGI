@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from src.tools.base import BaseTool, ToolGroup, ToolMode
+from typing import TYPE_CHECKING
+
+from src.tools.base import BaseTool, RiskLevel, ToolGroup, ToolMode
+
+if TYPE_CHECKING:
+    from src.tools.context import ToolContext
 
 
 class MemorySearchTool(BaseTool):
@@ -23,6 +28,10 @@ class MemorySearchTool(BaseTool):
         return frozenset({ToolMode.chat_safe, ToolMode.coding})
 
     @property
+    def risk_level(self) -> RiskLevel:
+        return RiskLevel.low
+
+    @property
     def parameters(self) -> dict:
         return {
             "type": "object",
@@ -35,5 +44,7 @@ class MemorySearchTool(BaseTool):
             "required": ["query"],
         }
 
-    async def execute(self, arguments: dict) -> dict:
+    async def execute(
+        self, arguments: dict, context: ToolContext | None = None
+    ) -> dict:
         return {"results": [], "message": "Memory search not yet implemented"}

@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from src.tools.base import BaseTool, ToolGroup, ToolMode
+from src.tools.base import BaseTool, RiskLevel, ToolGroup, ToolMode
+
+if TYPE_CHECKING:
+    from src.tools.context import ToolContext
 
 
 class CurrentTimeTool(BaseTool):
@@ -26,6 +30,10 @@ class CurrentTimeTool(BaseTool):
         return frozenset({ToolMode.chat_safe, ToolMode.coding})
 
     @property
+    def risk_level(self) -> RiskLevel:
+        return RiskLevel.low
+
+    @property
     def parameters(self) -> dict:
         return {
             "type": "object",
@@ -41,7 +49,9 @@ class CurrentTimeTool(BaseTool):
             "required": [],
         }
 
-    async def execute(self, arguments: dict) -> dict:
+    async def execute(
+        self, arguments: dict, context: ToolContext | None = None
+    ) -> dict:
         tz_name = arguments.get("timezone", "UTC")
         try:
             if tz_name == "UTC":

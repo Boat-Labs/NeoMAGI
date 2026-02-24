@@ -45,20 +45,29 @@ class PromptBuilder:
         session_id: str,
         mode: ToolMode,
         compacted_context: str | None = None,
+        *,
+        scope_key: str = "main",
+        recent_messages: list[str] | None = None,
     ) -> str:
         """Build the complete system prompt by concatenating all non-empty layers.
 
         When compacted_context is provided (after compaction), it is injected
         between workspace context and memory recall as a [会话摘要] block.
+
+        scope_key: from session_resolver (ADR 0034), consumed by workspace
+                   and memory_recall layers.
+        recent_messages: Phase 3, for memory recall keyword extraction.
         """
         layers = [
             self._layer_identity(),
             self._layer_tooling(mode),
             self._layer_safety(mode),
             self._layer_skills(),
-            self._layer_workspace(session_id),
+            self._layer_workspace(session_id, scope_key=scope_key),
             self._layer_compacted_context(compacted_context),
-            self._layer_memory_recall(),
+            self._layer_memory_recall(
+                scope_key=scope_key, recent_messages=recent_messages
+            ),
             self._layer_datetime(),
         ]
         return "\n\n".join(layer for layer in layers if layer)
@@ -109,7 +118,9 @@ class PromptBuilder:
         # Placeholder — no skills in M1.2
         return ""
 
-    def _layer_workspace(self, session_id: str) -> str:
+    def _layer_workspace(
+        self, session_id: str, *, scope_key: str = "main"
+    ) -> str:
         """Load workspace bootstrap files and concatenate their contents."""
         parts: list[str] = []
 
@@ -119,8 +130,8 @@ class PromptBuilder:
                 parts.append(content)
                 logger.info("prompt_file_injected", file=filename, layer="workspace")
 
-        # MEMORY.md only for main session
-        if session_id == "main":
+        # MEMORY.md only for main scope
+        if scope_key == "main":
             for filename in MAIN_SESSION_ONLY:
                 content = self._read_workspace_file(filename)
                 if content:
@@ -138,8 +149,13 @@ class PromptBuilder:
             return ""
         return f"## 会话摘要\n\n{compacted_context}"
 
-    def _layer_memory_recall(self) -> str:
-        # Placeholder — no memory search in M1.2
+    def _layer_memory_recall(
+        self,
+        *,
+        scope_key: str = "main",
+        recent_messages: list[str] | None = None,
+    ) -> str:
+        # Placeholder — Phase 3 implementation
         return ""
 
     def _layer_datetime(self) -> str:

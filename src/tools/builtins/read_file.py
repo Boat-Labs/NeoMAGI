@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import structlog
 
-from src.tools.base import BaseTool, ToolGroup, ToolMode
+from src.tools.base import BaseTool, RiskLevel, ToolGroup, ToolMode
+
+if TYPE_CHECKING:
+    from src.tools.context import ToolContext
 
 logger = structlog.get_logger()
 
@@ -22,6 +26,10 @@ class ReadFileTool(BaseTool):
     @property
     def allowed_modes(self) -> frozenset[ToolMode]:
         return frozenset({ToolMode.coding})
+
+    @property
+    def risk_level(self) -> RiskLevel:
+        return RiskLevel.low
 
     @property
     def name(self) -> str:
@@ -47,7 +55,9 @@ class ReadFileTool(BaseTool):
             "required": ["path"],
         }
 
-    async def execute(self, arguments: dict) -> dict:
+    async def execute(
+        self, arguments: dict, context: ToolContext | None = None
+    ) -> dict:
         raw_path = arguments.get("path", "")
 
         # Reject non-string or empty path

@@ -66,6 +66,7 @@ class SessionSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SESSION_")
 
     default_mode: str = "chat_safe"
+    dm_scope: str = "main"
 
     @field_validator("default_mode")
     @classmethod
@@ -74,6 +75,16 @@ class SessionSettings(BaseSettings):
             raise ValueError(
                 f"SESSION_DEFAULT_MODE must be 'chat_safe' in M1.5 "
                 f"(got '{v}'). See ADR 0025."
+            )
+        return v
+
+    @field_validator("dm_scope")
+    @classmethod
+    def _validate_dm_scope(cls, v: str) -> str:
+        if v != "main":
+            raise ValueError(
+                f"SESSION_DM_SCOPE must be 'main' in M3 (got '{v}'). "
+                "Non-main scopes will be enabled in M4. See ADR 0034."
             )
         return v
 

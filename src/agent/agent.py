@@ -9,11 +9,20 @@ import structlog
 
 from src.agent.compaction import CompactionEngine, CompactionResult
 from src.agent.events import AgentEvent, TextChunk, ToolCallInfo, ToolDenied
+from src.agent.guardrail import (
+    GuardCheckResult,
+    check_pre_llm_guard,
+    check_pre_tool_guard,
+    load_contract,
+    maybe_refresh_contract,
+)
 from src.agent.model_client import ContentDelta, ModelClient, ToolCallsComplete
 from src.agent.prompt_builder import PromptBuilder
 from src.agent.token_budget import BudgetTracker
-from src.config.settings import CompactionSettings
+from src.config.settings import CompactionSettings, SessionSettings
 from src.session.manager import MessageWithSeq, SessionManager
+from src.session.scope_resolver import SessionIdentity, resolve_scope_key
+from src.tools.context import ToolContext
 from src.tools.registry import ToolRegistry
 
 logger = structlog.get_logger()
@@ -70,15 +79,19 @@ class AgentLoop:
         model: str = "gpt-4o-mini",
         tool_registry: ToolRegistry | None = None,
         compaction_settings: CompactionSettings | None = None,
+        session_settings: SessionSettings | None = None,
     ) -> None:
         self._model_client = model_client
         self._session_manager = session_manager
+        self._workspace_dir = workspace_dir
         self._prompt_builder = PromptBuilder(workspace_dir, tool_registry=tool_registry)
         self._tool_registry = tool_registry
         self._model = model
         self._settings = compaction_settings
+        self._session_settings = session_settings or SessionSettings()
         self._budget_tracker: BudgetTracker | None = None
         self._compaction_engine: CompactionEngine | None = None
+        self._contract = load_contract(workspace_dir)
         if compaction_settings is not None:
             self._budget_tracker = BudgetTracker(compaction_settings, model)
             self._compaction_engine = CompactionEngine(
@@ -106,6 +119,12 @@ class AgentLoop:
         )
         current_user_seq = user_msg.seq
 
+        # Resolve scope_key ONCE as local variable (concurrency-safe, ADR 0034)
+        identity = SessionIdentity(session_id=session_id, channel_type="dm")
+        scope_key = resolve_scope_key(
+            identity, dm_scope=self._session_settings.dm_scope
+        )
+
         # Resolve effective mode (fail-closed to chat_safe on error)
         mode = await self._session_manager.get_mode(session_id)
 
@@ -132,7 +151,13 @@ class AgentLoop:
         )
 
         system_prompt = self._prompt_builder.build(
-            session_id, mode, compacted_context=compacted_context
+            session_id, mode, compacted_context=compacted_context,
+            scope_key=scope_key,
+        )
+
+        # Lazily refresh guardrail contract (hash-based, ADR 0035)
+        self._contract = maybe_refresh_contract(
+            self._contract, self._workspace_dir
         )
 
         # 4. Streaming tool call loop
@@ -194,7 +219,8 @@ class AgentLoop:
 
                         # Rebuild system prompt with new compacted context
                         system_prompt = self._prompt_builder.build(
-                            session_id, mode, compacted_context=compacted_context
+                            session_id, mode, compacted_context=compacted_context,
+                            scope_key=scope_key,
                         )
 
                         # Rebuild effective history with new watermark
@@ -265,6 +291,7 @@ class AgentLoop:
                                     session_id,
                                     mode,
                                     compacted_context=compacted_context,
+                                    scope_key=scope_key,
                                 )
                                 effective_msgs = (
                                     self._session_manager.get_effective_history(
@@ -310,6 +337,12 @@ class AgentLoop:
                                     "请开始新会话继续对话。"
                                 )
                                 return
+
+            # Pre-LLM guard check (ADR 0035): detection only, no blocking
+            execution_context = "\n".join(
+                m.get("content", "") for m in messages if m.get("content")
+            )
+            guard_state = check_pre_llm_guard(self._contract, execution_context)
 
             # Stream the LLM response — content tokens arrive immediately,
             # tool calls are accumulated and yielded at the end of the stream.
@@ -398,7 +431,13 @@ class AgentLoop:
                             "next_action": denial_next,
                         }
                     else:
-                        result = await self._execute_tool(tc["name"], tc["arguments"])
+                        result = await self._execute_tool(
+                            tc["name"],
+                            tc["arguments"],
+                            scope_key=scope_key,
+                            session_id=session_id,
+                            guard_state=guard_state,
+                        )
 
                     await self._session_manager.append_message(
                         session_id,
@@ -559,8 +598,20 @@ class AgentLoop:
             new_compaction_seq=new_seq,
         )
 
-    async def _execute_tool(self, tool_name: str, arguments_json: str) -> dict:
-        """Execute a tool by name. Returns result dict or error dict."""
+    async def _execute_tool(
+        self,
+        tool_name: str,
+        arguments_json: str,
+        *,
+        scope_key: str,
+        session_id: str,
+        guard_state: GuardCheckResult,
+    ) -> dict:
+        """Execute a tool by name. Returns result dict or error dict.
+
+        scope_key, session_id, guard_state are explicit parameters (NOT from
+        self) for concurrency safety (ADR 0034/0035).
+        """
         if not self._tool_registry:
             return {"error_code": "NO_REGISTRY", "message": "Tool registry not available"}
 
@@ -568,6 +619,18 @@ class AgentLoop:
         if not tool:
             logger.warning("unknown_tool", tool_name=tool_name)
             return {"error_code": "UNKNOWN_TOOL", "message": f"Unknown tool: {tool_name}"}
+
+        # Pre-tool guard check (ADR 0035)
+        guard_block = check_pre_tool_guard(
+            guard_state, tool_name, tool.risk_level
+        )
+        if guard_block is not None:
+            return {
+                "ok": False,
+                "error_code": guard_block.error_code,
+                "tool_name": tool_name,
+                "message": guard_block.detail,
+            }
 
         try:
             arguments = json.loads(arguments_json)
@@ -579,8 +642,10 @@ class AgentLoop:
                 "message": f"Expected dict arguments, got {type(arguments).__name__}",
             }
 
+        context = ToolContext(scope_key=scope_key, session_id=session_id)
+
         try:
-            result = await tool.execute(arguments)
+            result = await tool.execute(arguments, context)
             logger.info("tool_executed", tool_name=tool_name)
             return result
         except Exception:
