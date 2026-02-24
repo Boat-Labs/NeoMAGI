@@ -21,6 +21,7 @@ from src.agent.prompt_builder import PromptBuilder
 from src.agent.token_budget import BudgetTracker
 from src.config.settings import CompactionSettings, MemorySettings, SessionSettings
 from src.memory.contracts import ResolvedFlushCandidate
+from src.memory.searcher import MemorySearcher
 from src.memory.writer import MemoryWriter
 from src.session.manager import MessageWithSeq, SessionManager
 from src.session.scope_resolver import SessionIdentity, resolve_scope_key
@@ -83,11 +84,13 @@ class AgentLoop:
         compaction_settings: CompactionSettings | None = None,
         session_settings: SessionSettings | None = None,
         memory_settings: MemorySettings | None = None,
+        memory_searcher: MemorySearcher | None = None,
     ) -> None:
         self._model_client = model_client
         self._session_manager = session_manager
         self._workspace_dir = workspace_dir
         self._memory_settings = memory_settings
+        self._memory_searcher = memory_searcher
         self._prompt_builder = PromptBuilder(
             workspace_dir,
             tool_registry=tool_registry,
@@ -161,9 +164,15 @@ class AgentLoop:
             compaction_state.compacted_context if compaction_state else None
         )
 
+        # Memory recall: extract recent user messages and search memory
+        recall_results = await self._fetch_memory_recall(
+            session_id, scope_key=scope_key
+        )
+
         system_prompt = self._prompt_builder.build(
             session_id, mode, compacted_context=compacted_context,
             scope_key=scope_key,
+            recall_results=recall_results,
         )
 
         # Lazily refresh guardrail contract (hash-based, ADR 0035)
@@ -232,6 +241,7 @@ class AgentLoop:
                         system_prompt = self._prompt_builder.build(
                             session_id, mode, compacted_context=compacted_context,
                             scope_key=scope_key,
+                            recall_results=recall_results,
                         )
 
                         # Rebuild effective history with new watermark
@@ -303,6 +313,7 @@ class AgentLoop:
                                     mode,
                                     compacted_context=compacted_context,
                                     scope_key=scope_key,
+                                    recall_results=recall_results,
                                 )
                                 effective_msgs = (
                                     self._session_manager.get_effective_history(
@@ -614,6 +625,59 @@ class AgentLoop:
             },
             new_compaction_seq=new_seq,
         )
+
+    async def _fetch_memory_recall(
+        self,
+        session_id: str,
+        *,
+        scope_key: str,
+    ) -> list:
+        """Fetch memory recall results for prompt injection.
+
+        Extracts query from recent user messages (last 3 turns),
+        searches memory index, and returns results for PromptBuilder.
+
+        Failure is logged but returns empty list (non-blocking).
+        """
+        if not self._memory_searcher:
+            return []
+
+        try:
+            # Extract recent user messages from history
+            all_msgs = self._session_manager.get_history_with_seq(session_id)
+            recent_user = [
+                m.content
+                for m in all_msgs
+                if m.role == "user" and m.content
+            ][-3:]
+
+            query = PromptBuilder.extract_recall_query(recent_user)
+            if not query:
+                return []
+
+            max_results = 5
+            min_score = 1.0
+            if self._memory_settings:
+                max_results = self._memory_settings.memory_recall_max_results
+                min_score = self._memory_settings.memory_recall_min_score
+
+            results = await self._memory_searcher.search(
+                query,
+                scope_key=scope_key,
+                limit=max_results,
+                min_score=min_score,
+            )
+            if results:
+                logger.info(
+                    "memory_recall_fetched",
+                    session_id=session_id,
+                    query=query[:50],
+                    results=len(results),
+                )
+            return results
+        except Exception:
+            logger.exception("memory_recall_fetch_failed", session_id=session_id)
+            return []
 
     async def _persist_flush_candidates(
         self,
