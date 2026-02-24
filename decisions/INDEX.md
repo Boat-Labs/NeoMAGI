@@ -39,6 +39,8 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0033 | M2 anti-drift Probe baseline adjustment: 6 in M2, 20+ moved to M3 | accepted | 2026-02-22 | `decisions/0033-m2-anti-drift-probe-baseline-adjustment-to-6.md` |
 | 0034 | OpenClaw dmScope session and memory scope alignment | accepted | 2026-02-22 | `decisions/0034-openclaw-dmscope-session-and-memory-scope-alignment.md` |
 | 0035 | Runtime anti-drift guardrail hardening and risk-gated fail-closed | accepted | 2026-02-23 | `decisions/0035-runtime-anti-drift-guardrail-hardening-and-risk-gated-fail-closed.md` |
+| 0036 | Evolution consistency: DB as SSOT, SOUL.md as projection | accepted | 2026-02-24 | `decisions/0036-evolution-consistency-db-as-ssot-and-soulmd-as-projection.md` |
+| 0037 | Workspace path single source of truth with startup validation | accepted | 2026-02-24 | `decisions/0037-workspace-path-single-source-of-truth-and-startup-validation.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。
