@@ -369,7 +369,7 @@ class TestApplyCompensation:
 
     @pytest.mark.asyncio
     async def test_apply_compensation_failure_logs_and_raises(self, tmp_path: Path) -> None:
-        """Compensation write failure → structured log + original error re-raised."""
+        """Compensation write failure → compensation_failed log + original error re-raised."""
         from unittest.mock import patch as _patch
 
         soul_path = tmp_path / "SOUL.md"
@@ -395,8 +395,6 @@ class TestApplyCompensation:
         factory = MagicMock(return_value=mock_db)
         engine = EvolutionEngine(factory, tmp_path)
 
-        # Make compensation write_text fail by patching Path.write_text
-        # to raise on the second call (first call writes new content, second is compensation)
         original_write = Path.write_text
         call_count = 0
 
@@ -407,10 +405,154 @@ class TestApplyCompensation:
                 raise OSError("Disk full")
             return original_write(self_path, *args, **kwargs)
 
-        with _patch.object(Path, "write_text", write_text_side_effect):
-            # Original DB error should still be raised despite compensation failure
+        with (
+            _patch.object(Path, "write_text", write_text_side_effect),
+            _patch("src.memory.evolution.logger") as mock_logger,
+        ):
             with pytest.raises(RuntimeError, match="DB commit failed"):
                 await engine.apply(2)
+
+            # Verify compensation_failed structured log was emitted
+            mock_logger.error.assert_any_call(
+                "soul_apply_compensation_failed",
+                version=2,
+                msg="DB failed AND file rollback failed; manual intervention required",
+            )
+
+
+class TestRollbackCompensation:
+    """ADR 0036: rollback DB failure must compensate file write."""
+
+    @pytest.mark.asyncio
+    async def test_rollback_commit_failure_compensates_file(self, tmp_path: Path) -> None:
+        """rollback() commit failure → old file content restored."""
+        soul_path = tmp_path / "SOUL.md"
+        old_content = "# Current Active\nActive content."
+        soul_path.write_text(old_content, encoding="utf-8")
+
+        superseded = _make_mock_record(
+            version=1, content="# Previous\nOld content.", status="superseded",
+        )
+
+        call_count = 0
+
+        async def execute_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Calls 1-2: _get_version / find superseded (return mock result)
+            result = MagicMock()
+            scalars = MagicMock()
+            scalars.first.return_value = superseded
+            result.scalars.return_value = scalars
+            result.scalar.return_value = 1  # for _next_version
+            return result
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(side_effect=execute_side_effect)
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock(side_effect=RuntimeError("DB commit failed"))
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+
+        factory = MagicMock(return_value=mock_db)
+        engine = EvolutionEngine(factory, tmp_path)
+
+        with pytest.raises(RuntimeError, match="DB commit failed"):
+            await engine.rollback(to_version=1)
+
+        assert soul_path.read_text(encoding="utf-8") == old_content
+
+    @pytest.mark.asyncio
+    async def test_rollback_execute_failure_compensates_file(self, tmp_path: Path) -> None:
+        """rollback() execute failure (pre-commit) → old file content restored."""
+        soul_path = tmp_path / "SOUL.md"
+        old_content = "# Current Active"
+        soul_path.write_text(old_content, encoding="utf-8")
+
+        superseded = _make_mock_record(
+            version=1, content="# Previous", status="superseded",
+        )
+
+        call_count = 0
+
+        async def execute_side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call: find target version
+                result = MagicMock()
+                scalars = MagicMock()
+                scalars.first.return_value = superseded
+                result.scalars.return_value = scalars
+                return result
+            # Second call: UPDATE rolled_back — raise
+            raise RuntimeError("DB execute failed")
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(side_effect=execute_side_effect)
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+
+        factory = MagicMock(return_value=mock_db)
+        engine = EvolutionEngine(factory, tmp_path)
+
+        with pytest.raises(RuntimeError, match="DB execute failed"):
+            await engine.rollback(to_version=1)
+
+        assert soul_path.read_text(encoding="utf-8") == old_content
+
+    @pytest.mark.asyncio
+    async def test_rollback_compensation_failure_logs(self, tmp_path: Path) -> None:
+        """rollback() compensation write failure → structured log emitted."""
+        from unittest.mock import patch as _patch
+
+        soul_path = tmp_path / "SOUL.md"
+        soul_path.write_text("# Current", encoding="utf-8")
+
+        superseded = _make_mock_record(
+            version=1, content="# Previous", status="superseded",
+        )
+
+        async def execute_side_effect(*args, **kwargs):
+            result = MagicMock()
+            scalars = MagicMock()
+            scalars.first.return_value = superseded
+            result.scalars.return_value = scalars
+            result.scalar.return_value = 1
+            return result
+
+        mock_db = AsyncMock()
+        mock_db.execute = AsyncMock(side_effect=execute_side_effect)
+        mock_db.add = MagicMock()
+        mock_db.commit = AsyncMock(side_effect=RuntimeError("DB commit failed"))
+        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+        mock_db.__aexit__ = AsyncMock(return_value=False)
+
+        factory = MagicMock(return_value=mock_db)
+        engine = EvolutionEngine(factory, tmp_path)
+
+        original_write = Path.write_text
+        call_count = 0
+
+        def write_text_side_effect(self_path, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                raise OSError("Disk full")
+            return original_write(self_path, *args, **kwargs)
+
+        with (
+            _patch.object(Path, "write_text", write_text_side_effect),
+            _patch("src.memory.evolution.logger") as mock_logger,
+        ):
+            with pytest.raises(RuntimeError, match="DB commit failed"):
+                await engine.rollback(to_version=1)
+
+            mock_logger.error.assert_any_call(
+                "soul_rollback_compensation_failed",
+                target_version=1,
+                msg="DB failed AND file rollback failed; manual intervention required",
+            )
 
 
 class TestReconcileSoulProjection:
