@@ -27,7 +27,8 @@ from src.agent.model_client import ContentDelta, ModelClient, StreamEvent, ToolC
 from src.constants import DB_SCHEMA
 from src.session.manager import SessionManager
 from src.session.models import Base
-from src.tools.base import BaseTool, ToolGroup, ToolMode
+from src.tools.base import BaseTool, RiskLevel, ToolGroup, ToolMode
+from src.tools.context import ToolContext
 from src.tools.registry import ToolRegistry
 
 pytestmark = pytest.mark.integration
@@ -87,10 +88,14 @@ class EchoTool(BaseTool):
         return frozenset({ToolMode.chat_safe, ToolMode.coding})
 
     @property
+    def risk_level(self) -> RiskLevel:
+        return RiskLevel.low
+
+    @property
     def parameters(self) -> dict:
         return {"type": "object", "properties": {"text": {"type": "string"}}}
 
-    async def execute(self, arguments: dict) -> dict:
+    async def execute(self, arguments: dict, context: ToolContext | None = None) -> dict:
         return {"echoed": arguments.get("text", "")}
 
 
@@ -114,10 +119,14 @@ class FailingTool(BaseTool):
         return frozenset({ToolMode.chat_safe, ToolMode.coding})
 
     @property
+    def risk_level(self) -> RiskLevel:
+        return RiskLevel.low
+
+    @property
     def parameters(self) -> dict:
         return {"type": "object", "properties": {}}
 
-    async def execute(self, arguments: dict) -> dict:
+    async def execute(self, arguments: dict, context: ToolContext | None = None) -> dict:
         raise RuntimeError("Tool execution failed!")
 
 
@@ -336,7 +345,7 @@ class TestFencingMidLoop:
         # Store original execute and create a version that steals the lock
         original_execute = EchoTool.execute
 
-        async def stealing_execute(self_tool, arguments):
+        async def stealing_execute(self_tool, arguments, context=None):
             # Steal the lock mid-execution by updating lock_token directly
             db_factory = app.state.db_session_factory
             async with db_factory() as db:
@@ -347,7 +356,7 @@ class TestFencingMidLoop:
                     )
                 )
                 await db.commit()
-            return await original_execute(self_tool, arguments)
+            return await original_execute(self_tool, arguments, context)
 
         EchoTool.execute = stealing_execute
 
