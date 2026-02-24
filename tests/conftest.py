@@ -128,10 +128,17 @@ async def _integration_cleanup(request):
     if not asyncio.iscoroutinefunction(request.node.obj):
         return
 
-    factory = request.getfixturevalue("db_session_factory")
+    try:
+        factory = request.getfixturevalue("db_session_factory")
+    except Exception:
+        return  # This test doesn't use the shared db fixture
+
     async with factory() as db_session:
         await db_session.execute(
-            text(f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions CASCADE")
+            text(
+                f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions,"
+                f" {DB_SCHEMA}.memory_entries CASCADE"
+            )
         )
         await db_session.commit()
 

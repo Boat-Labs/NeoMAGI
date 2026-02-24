@@ -10,15 +10,14 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.config.settings import MemorySettings
 from src.constants import DB_SCHEMA
 from src.memory.indexer import MemoryIndexer
 from src.memory.searcher import MemorySearcher
 from src.memory.writer import MemoryWriter
-from src.session.models import Base
 
 pytestmark = pytest.mark.integration
 
@@ -33,16 +32,15 @@ def _make_settings(workspace: Path) -> MemorySettings:
     )
 
 
-@pytest.fixture()
-async def memory_db(pg_url, tmp_path):
-    """Set up memory_entries table for this test."""
-    engine = create_async_engine(pg_url, echo=False)
+@pytest_asyncio.fixture()
+async def memory_db(db_engine, db_session_factory):
+    """Set up memory_entries trigger and provide shared session factory.
 
-    async with engine.begin() as conn:
-        await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA}"))
-        await conn.run_sync(Base.metadata.create_all)
-
-        # Create the search trigger
+    Reuses the session-scoped db_engine/db_session_factory from conftest
+    to avoid creating separate engines that corrupt the event loop.
+    """
+    async with db_engine.begin() as conn:
+        # Create the search trigger (idempotent via CREATE OR REPLACE)
         await conn.execute(text(f"""
             CREATE OR REPLACE FUNCTION {DB_SCHEMA}.memory_entries_search_trigger()
             RETURNS trigger AS $$
@@ -70,14 +68,11 @@ async def memory_db(pg_url, tmp_path):
                 EXECUTE FUNCTION {DB_SCHEMA}.memory_entries_search_trigger();
             """))
 
-    db_factory = async_sessionmaker(engine, expire_on_commit=False)
+    yield db_session_factory
 
-    yield db_factory
-
-    async with engine.begin() as conn:
-        await conn.execute(text(f"TRUNCATE {DB_SCHEMA}.memory_entries CASCADE"))
-
-    await engine.dispose()
+    async with db_session_factory() as db:
+        await db.execute(text(f"TRUNCATE {DB_SCHEMA}.memory_entries CASCADE"))
+        await db.commit()
 
 
 class TestWriteIndexSearchCycle:
