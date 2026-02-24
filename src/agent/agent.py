@@ -19,7 +19,9 @@ from src.agent.guardrail import (
 from src.agent.model_client import ContentDelta, ModelClient, ToolCallsComplete
 from src.agent.prompt_builder import PromptBuilder
 from src.agent.token_budget import BudgetTracker
-from src.config.settings import CompactionSettings, SessionSettings
+from src.config.settings import CompactionSettings, MemorySettings, SessionSettings
+from src.memory.contracts import ResolvedFlushCandidate
+from src.memory.writer import MemoryWriter
 from src.session.manager import MessageWithSeq, SessionManager
 from src.session.scope_resolver import SessionIdentity, resolve_scope_key
 from src.tools.context import ToolContext
@@ -80,18 +82,27 @@ class AgentLoop:
         tool_registry: ToolRegistry | None = None,
         compaction_settings: CompactionSettings | None = None,
         session_settings: SessionSettings | None = None,
+        memory_settings: MemorySettings | None = None,
     ) -> None:
         self._model_client = model_client
         self._session_manager = session_manager
         self._workspace_dir = workspace_dir
-        self._prompt_builder = PromptBuilder(workspace_dir, tool_registry=tool_registry)
+        self._memory_settings = memory_settings
+        self._prompt_builder = PromptBuilder(
+            workspace_dir,
+            tool_registry=tool_registry,
+            memory_settings=memory_settings,
+        )
         self._tool_registry = tool_registry
         self._model = model
         self._settings = compaction_settings
         self._session_settings = session_settings or SessionSettings()
         self._budget_tracker: BudgetTracker | None = None
         self._compaction_engine: CompactionEngine | None = None
+        self._memory_writer: MemoryWriter | None = None
         self._contract = load_contract(workspace_dir)
+        if memory_settings is not None:
+            self._memory_writer = MemoryWriter(workspace_dir, memory_settings)
         if compaction_settings is not None:
             self._budget_tracker = BudgetTracker(compaction_settings, model)
             self._compaction_engine = CompactionEngine(
@@ -514,6 +525,12 @@ class AgentLoop:
                 session_id, result, lock_token=lock_token
             )
 
+            # Flush candidate persist (Phase 1, M3)
+            if result.memory_flush_candidates and self._memory_writer:
+                await self._persist_flush_candidates(
+                    result.memory_flush_candidates, session_id
+                )
+
             logger.info(
                 "compaction_complete",
                 session_id=session_id,
@@ -597,6 +614,50 @@ class AgentLoop:
             },
             new_compaction_seq=new_seq,
         )
+
+    async def _persist_flush_candidates(
+        self,
+        candidates: list[Any],
+        session_id: str,
+    ) -> None:
+        """Persist flush candidates to daily notes via MemoryWriter.
+
+        Boundary mapping: agent-layer MemoryFlushCandidate → memory-side
+        ResolvedFlushCandidate. scope_key resolved per candidate using
+        candidate.source_session_id (NOT current session_id).
+
+        Failure is logged but does not block the main flow.
+        """
+        try:
+            resolved = [
+                ResolvedFlushCandidate(
+                    candidate_text=c.candidate_text,
+                    scope_key=resolve_scope_key(
+                        SessionIdentity(session_id=c.source_session_id),
+                        dm_scope=self._session_settings.dm_scope,
+                    ),
+                    source_session_id=c.source_session_id,
+                    confidence=c.confidence,
+                    constraint_tags=tuple(c.constraint_tags),
+                )
+                for c in candidates
+            ]
+            min_confidence = (
+                self._memory_settings.flush_min_confidence
+                if self._memory_settings
+                else 0.5
+            )
+            written = await self._memory_writer.process_flush_candidates(
+                resolved, min_confidence=min_confidence
+            )
+            logger.info(
+                "memory_flush_persisted",
+                count=written,
+                total=len(candidates),
+                session_id=session_id,
+            )
+        except Exception:
+            logger.exception("memory_flush_persist_failed", session_id=session_id)
 
     async def _execute_tool(
         self,

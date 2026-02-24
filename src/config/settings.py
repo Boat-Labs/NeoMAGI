@@ -142,6 +142,18 @@ class CompactionSettings(BaseSettings):
         return self
 
 
+class MemorySettings(BaseSettings):
+    """Memory write and retrieval settings. Env vars prefixed with MEMORY_."""
+
+    model_config = SettingsConfigDict(env_prefix="MEMORY_")
+
+    workspace_path: Path = Path("workspace")
+    max_daily_note_bytes: int = 32_768  # 32KB per daily note
+    daily_notes_load_days: int = 2  # today + yesterday
+    daily_notes_max_tokens: int = 4000  # per file injection limit
+    flush_min_confidence: float = 0.5  # filter low-confidence candidates
+
+
 class Settings(BaseSettings):
     """Root settings composing all sub-configurations."""
 
@@ -152,6 +164,7 @@ class Settings(BaseSettings):
     gateway: GatewaySettings = Field(default_factory=GatewaySettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
     compaction: CompactionSettings = Field(default_factory=CompactionSettings)
+    memory: MemorySettings = Field(default_factory=MemorySettings)
     workspace_dir: Path = Path("workspace")
 
 
