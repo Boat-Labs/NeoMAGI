@@ -6,6 +6,7 @@ Responsibilities:
 - Enforce file size limits
 - UTF-8 safe writes (CJK compatible)
 - Carry scope_key metadata on every write (ADR 0034)
+- Trigger incremental index after write (best-effort)
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from src.memory.contracts import ResolvedFlushCandidate
 
 if TYPE_CHECKING:
     from src.config.settings import MemorySettings
+    from src.memory.indexer import MemoryIndexer
 
 logger = structlog.get_logger()
 
@@ -28,9 +30,15 @@ logger = structlog.get_logger()
 class MemoryWriter:
     """Write memory entries to workspace daily notes files."""
 
-    def __init__(self, workspace_path: Path, settings: MemorySettings) -> None:
+    def __init__(
+        self,
+        workspace_path: Path,
+        settings: MemorySettings,
+        indexer: MemoryIndexer | None = None,
+    ) -> None:
         self._workspace_path = workspace_path
         self._settings = settings
+        self._indexer = indexer
 
     async def append_daily_note(
         self,
@@ -90,6 +98,25 @@ class MemoryWriter:
             source=source,
             bytes_written=len(entry_bytes),
         )
+
+        # Incremental index: best-effort, failure must not block write path
+        if self._indexer:
+            try:
+                rel_path = str(filepath.relative_to(self._workspace_path))
+                await self._indexer.index_entry_direct(
+                    content=text,
+                    scope_key=scope_key,
+                    source_type="daily_note",
+                    source_path=rel_path,
+                    source_date=today,
+                )
+            except Exception:
+                logger.warning(
+                    "memory_index_after_write_failed",
+                    path=str(filepath),
+                    scope_key=scope_key,
+                )
+
         return filepath
 
     async def process_flush_candidates(
