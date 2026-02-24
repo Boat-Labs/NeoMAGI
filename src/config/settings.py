@@ -152,6 +152,10 @@ class MemorySettings(BaseSettings):
     daily_notes_load_days: int = 2  # today + yesterday
     daily_notes_max_tokens: int = 4000  # per file injection limit
     flush_min_confidence: float = 0.5  # filter low-confidence candidates
+    # Search settings (Phase 2)
+    search_default_limit: int = 10
+    search_min_score: float = 0.0
+    search_result_max_chars: int = 500  # truncation for tool results
 
 
 class Settings(BaseSettings):

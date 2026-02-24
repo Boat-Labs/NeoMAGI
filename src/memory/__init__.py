@@ -1,6 +1,16 @@
-"""Memory module: persistent memory write and retrieval."""
+"""Memory module: persistent memory write, indexing, and retrieval."""
 
 from src.memory.contracts import ResolvedFlushCandidate
+from src.memory.indexer import MemoryIndexer
+from src.memory.models import MemoryEntry
+from src.memory.searcher import MemorySearcher, MemorySearchResult
 from src.memory.writer import MemoryWriter
 
-__all__ = ["MemoryWriter", "ResolvedFlushCandidate"]
+__all__ = [
+    "MemoryEntry",
+    "MemoryIndexer",
+    "MemorySearchResult",
+    "MemorySearcher",
+    "MemoryWriter",
+    "ResolvedFlushCandidate",
+]
