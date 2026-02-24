@@ -231,6 +231,30 @@ tail -n 40 workspace/memory/$(date +%F).md
 - 确认 `workspace/AGENTS.md`、`workspace/USER.md`、`workspace/SOUL.md` 存在且非空
 - 可重新执行：`just init-workspace`
 
+### 6.5 报错：`column "mode" of relation "sessions" does not exist`
+
+- 现象：
+  - 后端启动或首轮请求时出现 `sqlalchemy.exc.ProgrammingError`，提示 `sessions.mode` 不存在。
+- 原因：
+  - 历史数据库为旧 schema（缺少 `sessions.mode/next_seq/lock_token/...` 列）。
+- 处理：
+  - 确认代码已更新到包含 M3 收尾紧急修补版本（`src/session/database.py` 的 `ensure_schema`）。
+  - 重启后端：`just dev`。
+  - 正常情况下会自动执行列回填（`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`），无需手工改表。
+
+### 6.6 报错：`LLM API error 400 ... tool_calls must be followed by tool messages`
+
+- 现象：
+  - 对话中出现 400，错误包含：`An assistant message with 'tool_calls' must be followed by tool messages...`
+- 原因：
+  - 会话历史中存在断裂的 tool 调用链（`assistant.tool_calls` 与后续 `tool_call_id` 响应未完整配对）。
+  - 常见触发点是长会话压缩/裁剪后历史边界不完整（旧实现）。
+- 处理：
+  - 确认代码已更新到包含 M3 收尾紧急修补版本（`src/agent/agent.py`）。
+  - 重启后端：`just dev`。
+  - 新版本会在发送模型前自动清洗不完整 tool 链，并将 emergency trim 改为按 turn 边界裁剪，避免再次切断。
+  - 如仍复现，先开新会话复测并保留该轮输入与时间点用于排查。
+
 ## 7. 退出与清理
 
 - 停止前后端：对应终端 `Ctrl+C`

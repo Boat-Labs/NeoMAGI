@@ -107,3 +107,16 @@
 - `src/config/settings.py`
 - `decisions/0013-backend-configuration-pydantic-settings.md`
 - `decisions/0016-model-sdk-strategy-openai-sdk-unified-v1.md`
+
+## 8. 运行稳定性补丁记录（M3 收尾后）
+- 状态：已落地（2026-02-25）
+- 修补点：
+  - Session schema 兼容回填：`ensure_schema` 增加 `sessions` 关键列 `ADD COLUMN IF NOT EXISTS`（覆盖 legacy DB 缺列场景，避免 `sessions.mode` 启动失败）。
+  - Tool 调用链防断裂：模型请求前增加历史清洗，丢弃不完整 `assistant(tool_calls)`/`tool` 链；同时 emergency trim 改为按 turn 边界裁剪，避免再切断链路触发 OpenAI 400。
+- 相关实现：
+  - `src/session/database.py`
+  - `src/agent/agent.py`
+- 相关测试：
+  - `tests/test_ensure_schema.py`
+  - `tests/test_agent_tool_parse.py`
+  - `tests/test_compaction_degradation.py`

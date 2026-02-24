@@ -204,3 +204,10 @@
 - Decisions: ADR 0036 (Evolution DB-SSOT + 投影对账), 0037 (workspace_path 单一真源)
 - Next: 进入 M6（模型迁移验证）
 - Risk: 无；ParadeDB pg_search BM25 为已知 R1 风险，当前 tsvector + GIN fallback 功能等价
+
+## 2026-02-25 00:40 (local) | M3
+- Status: done
+- Done: M3 收尾后完成两项紧急稳定性修补——修复 legacy DB `sessions` 缺列导致启动失败、修复历史中断裂 tool_call 链导致 OpenAI 400（`tool_calls must be followed by tool messages`）
+- Evidence: `src/session/database.py`, `src/agent/agent.py`, `tests/test_ensure_schema.py`, `tests/test_agent_tool_parse.py`, `tests/test_compaction_degradation.py`, `uv run pytest tests/test_agent_tool_parse.py tests/test_compaction_degradation.py -q` (23 passed), `uv run pytest tests/test_ensure_schema.py -q -m integration` (2 passed)
+- Next: 复测 M3 用户测试指导中的 T03/T04/T05 长链路并确认不再复现 400
+- Risk: 历史污染会话在旧版本残留场景下仍可能需要新会话复测一次；新版本已在发送前做 tool_call 历史清洗兜底

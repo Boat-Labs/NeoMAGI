@@ -40,6 +40,42 @@ async def ensure_schema(engine: AsyncEngine, schema: str = DB_SCHEMA) -> None:
         await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
         await conn.run_sync(Base.metadata.create_all)
 
+        # Legacy compatibility: older DBs may have sessions table without
+        # M1.3/M1.5/M2 columns because create_all does not ALTER existing tables.
+        # Keep startup self-healing for additive columns.
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.sessions "
+            "ADD COLUMN IF NOT EXISTS next_seq INTEGER NOT NULL DEFAULT 0"
+        ))
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.sessions "
+            "ADD COLUMN IF NOT EXISTS lock_token VARCHAR(36)"
+        ))
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.sessions "
+            "ADD COLUMN IF NOT EXISTS processing_since TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.sessions "
+            "ADD COLUMN IF NOT EXISTS mode VARCHAR(16) NOT NULL DEFAULT 'chat_safe'"
+        ))
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.sessions "
+            "ADD COLUMN IF NOT EXISTS compacted_context TEXT"
+        ))
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.sessions "
+            "ADD COLUMN IF NOT EXISTS compaction_metadata JSONB"
+        ))
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.sessions "
+            "ADD COLUMN IF NOT EXISTS last_compaction_seq INTEGER"
+        ))
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.sessions "
+            "ADD COLUMN IF NOT EXISTS memory_flush_candidates JSONB"
+        ))
+
         # Search vector trigger: auto-populate search_vector on INSERT/UPDATE.
         # Three separate execute() calls to avoid asyncpg multi-statement issues.
         await conn.execute(text(f"""

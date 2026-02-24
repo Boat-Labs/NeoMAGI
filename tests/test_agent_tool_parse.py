@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agent.agent import AgentLoop, _safe_parse_args
+from src.agent.agent import AgentLoop, _safe_parse_args, _sanitize_tool_call_history
 from src.agent.events import ToolCallInfo
 from src.agent.model_client import ContentDelta, ToolCallsComplete
 from src.tools.base import ToolMode
@@ -51,6 +51,55 @@ class TestSafeParseArgs:
         assert result == {}
         assert err is not None
         assert "JSON parse error" in err
+
+
+class TestSanitizeToolCallHistory:
+    """Unit tests for repairing malformed tool call history."""
+
+    def test_keeps_valid_tool_call_chain(self):
+        messages = [
+            {"role": "user", "content": "u1"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1", "type": "function", "function": {}}],
+            },
+            {"role": "tool", "content": "{\"ok\":true}", "tool_call_id": "call_1"},
+            {"role": "assistant", "content": "done"},
+        ]
+
+        sanitized = _sanitize_tool_call_history(messages)
+        assert sanitized == messages
+
+    def test_drops_incomplete_tool_call_chain(self):
+        messages = [
+            {"role": "user", "content": "u1"},
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1", "type": "function", "function": {}}],
+            },
+            {"role": "assistant", "content": "next"},
+        ]
+
+        sanitized = _sanitize_tool_call_history(messages)
+        assert sanitized == [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "next"},
+        ]
+
+    def test_drops_orphan_tool_messages(self):
+        messages = [
+            {"role": "user", "content": "u1"},
+            {"role": "tool", "content": "{\"ok\":true}", "tool_call_id": "call_x"},
+            {"role": "assistant", "content": "next"},
+        ]
+
+        sanitized = _sanitize_tool_call_history(messages)
+        assert sanitized == [
+            {"role": "user", "content": "u1"},
+            {"role": "assistant", "content": "next"},
+        ]
 
 
 class TestExecuteToolDictValidation:

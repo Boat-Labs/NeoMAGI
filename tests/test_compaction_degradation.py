@@ -35,9 +35,20 @@ def _make_stream_response(text: str = "Hello!"):
     return stream
 
 
-def _msg_with_seq(seq: int, role: str, content: str = "test") -> MessageWithSeq:
+def _msg_with_seq(
+    seq: int,
+    role: str,
+    content: str = "test",
+    *,
+    tool_calls=None,
+    tool_call_id=None,
+) -> MessageWithSeq:
     return MessageWithSeq(
-        seq=seq, role=role, content=content, tool_calls=None, tool_call_id=None
+        seq=seq,
+        role=role,
+        content=content,
+        tool_calls=tool_calls,
+        tool_call_id=tool_call_id,
     )
 
 
@@ -179,6 +190,53 @@ class TestCompactionDegradation:
         assert "triggered_at" in meta
         assert result.new_compaction_seq < 40  # Must be before current turn
 
+    async def test_emergency_trim_trims_by_turn_boundary_with_tool_calls(self, tmp_path):
+        """Emergency trim watermark must not split tool-call chains."""
+        model_client = MagicMock()
+        model_client.chat_stream_with_tools = MagicMock(
+            side_effect=[_make_stream_response()()]
+        )
+
+        history = [
+            # Turn 1
+            _msg_with_seq(0, "user", "u1"),
+            _msg_with_seq(
+                1,
+                "assistant",
+                "",
+                tool_calls=[{"id": "call_1", "type": "function", "function": {}}],
+            ),
+            _msg_with_seq(2, "tool", '{"ok":true}', tool_call_id="call_1"),
+            _msg_with_seq(3, "assistant", "a1"),
+            # Turn 2
+            _msg_with_seq(4, "user", "u2"),
+            _msg_with_seq(
+                5,
+                "assistant",
+                "",
+                tool_calls=[{"id": "call_2", "type": "function", "function": {}}],
+            ),
+            _msg_with_seq(6, "tool", '{"ok":true}', tool_call_id="call_2"),
+            _msg_with_seq(7, "assistant", "a2"),
+            # Turn 3 (preserved)
+            _msg_with_seq(8, "user", "u3"),
+            _msg_with_seq(9, "assistant", "a3"),
+        ]
+        sm = _make_session_manager(history, user_seq=10)
+        settings = _make_settings(min_preserved_turns=2)
+
+        agent = AgentLoop(
+            model_client=model_client,
+            session_manager=sm,
+            workspace_dir=tmp_path,
+            compaction_settings=settings,
+        )
+
+        result = agent._emergency_trim(session_id="test", current_user_seq=10)
+        assert result is not None
+        # With 3 completed turns and preserve=2, watermark must end at Turn 1 end_seq=3.
+        assert result.new_compaction_seq == 3
+
     async def test_emergency_trim_with_few_messages_returns_none(self, tmp_path):
         """Emergency trim with insufficient messages returns None."""
         model_client = MagicMock()
@@ -186,7 +244,7 @@ class TestCompactionDegradation:
             side_effect=[_make_stream_response()()]
         )
 
-        # Very few messages, less than keep_count
+        # Very few completed turns, not enough to trim.
         history = _make_long_history(2, start_seq=0)
         sm = _make_session_manager(history, user_seq=4)
         settings = _make_settings()

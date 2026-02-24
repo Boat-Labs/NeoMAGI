@@ -7,7 +7,7 @@ from typing import Any
 
 import structlog
 
-from src.agent.compaction import CompactionEngine, CompactionResult
+from src.agent.compaction import CompactionEngine, CompactionResult, split_turns
 from src.agent.events import AgentEvent, TextChunk, ToolCallInfo, ToolDenied
 from src.agent.guardrail import (
     GuardCheckResult,
@@ -59,6 +59,107 @@ def _messages_with_seq_to_openai(messages: list[MessageWithSeq]) -> list[dict[st
             msg_dict["tool_call_id"] = m.tool_call_id
         result.append(msg_dict)
     return result
+
+
+def _sanitize_tool_call_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop malformed tool-call fragments before sending history to LLM.
+
+    OpenAI-compatible APIs require:
+    - assistant(tool_calls) must be followed by tool messages for each call id
+    - orphan tool messages are invalid
+    """
+    sanitized: list[dict[str, Any]] = []
+    pending_ids: set[str] | None = None
+    chain_start_idx: int | None = None
+    pending_assistant: dict[str, Any] | None = None
+
+    def rollback_incomplete_chain(reason: str) -> None:
+        nonlocal pending_ids, chain_start_idx, pending_assistant, sanitized
+        if chain_start_idx is None:
+            pending_ids = None
+            pending_assistant = None
+            return
+
+        fallback_text = (
+            pending_assistant.get("content", "")
+            if isinstance(pending_assistant, dict)
+            else ""
+        )
+        sanitized = sanitized[:chain_start_idx]
+        if isinstance(fallback_text, str) and fallback_text.strip():
+            sanitized.append({"role": "assistant", "content": fallback_text})
+
+        logger.warning(reason)
+        pending_ids = None
+        chain_start_idx = None
+        pending_assistant = None
+
+    i = 0
+    while i < len(messages):
+        msg = messages[i]
+        role = msg.get("role")
+
+        if pending_ids is None:
+            if role == "tool":
+                logger.warning(
+                    "dropping_orphan_tool_message",
+                    tool_call_id=msg.get("tool_call_id"),
+                )
+                i += 1
+                continue
+
+            tool_calls = msg.get("tool_calls")
+            if role == "assistant" and tool_calls:
+                call_ids = {
+                    tc.get("id")
+                    for tc in tool_calls
+                    if isinstance(tc, dict) and isinstance(tc.get("id"), str)
+                }
+                if not call_ids:
+                    content = msg.get("content", "")
+                    if isinstance(content, str) and content.strip():
+                        sanitized.append({"role": "assistant", "content": content})
+                    logger.warning("dropping_malformed_tool_calls_payload")
+                    i += 1
+                    continue
+
+                chain_start_idx = len(sanitized)
+                pending_assistant = msg
+                pending_ids = set(call_ids)
+                sanitized.append(msg)
+                i += 1
+                continue
+
+            sanitized.append(msg)
+            i += 1
+            continue
+
+        # Pending tool responses: only tool role is valid until all ids resolved.
+        if role == "tool":
+            tool_call_id = msg.get("tool_call_id")
+            if isinstance(tool_call_id, str) and tool_call_id in pending_ids:
+                sanitized.append(msg)
+                pending_ids.remove(tool_call_id)
+                if not pending_ids:
+                    pending_ids = None
+                    chain_start_idx = None
+                    pending_assistant = None
+            else:
+                logger.warning(
+                    "dropping_unexpected_tool_message",
+                    tool_call_id=tool_call_id,
+                )
+            i += 1
+            continue
+
+        # Non-tool message arrived before all pending tool ids were satisfied.
+        rollback_incomplete_chain("dropping_incomplete_tool_call_chain")
+        # Re-process current message from clean state.
+
+    if pending_ids:
+        rollback_incomplete_chain("dropping_trailing_incomplete_tool_call_chain")
+
+    return sanitized
 
 
 class AgentLoop:
@@ -198,9 +299,12 @@ class AgentLoop:
             effective_msgs = self._session_manager.get_effective_history(
                 session_id, last_compaction_seq
             )
+            history_msgs = _sanitize_tool_call_history(
+                _messages_with_seq_to_openai(effective_msgs)
+            )
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
-                *_messages_with_seq_to_openai(effective_msgs),
+                *history_msgs,
             ]
 
             # Budget check + compaction trigger
@@ -260,9 +364,12 @@ class AgentLoop:
                         effective_msgs = self._session_manager.get_effective_history(
                             session_id, last_compaction_seq
                         )
+                        history_msgs = _sanitize_tool_call_history(
+                            _messages_with_seq_to_openai(effective_msgs)
+                        )
                         messages = [
                             {"role": "system", "content": system_prompt},
-                            *_messages_with_seq_to_openai(effective_msgs),
+                            *history_msgs,
                         ]
 
                         # F2: Post-compaction budget recheck
@@ -332,9 +439,12 @@ class AgentLoop:
                                         session_id, last_compaction_seq
                                     )
                                 )
+                                history_msgs = _sanitize_tool_call_history(
+                                    _messages_with_seq_to_openai(effective_msgs)
+                                )
                                 messages = [
                                     {"role": "system", "content": system_prompt},
-                                    *_messages_with_seq_to_openai(effective_msgs),
+                                    *history_msgs,
                                 ]
                                 final_tokens = (
                                     self._budget_tracker.counter.count_messages(
@@ -607,14 +717,21 @@ class AgentLoop:
         if not all_msgs:
             return None
 
-        # Find a watermark that leaves roughly min_preserved turns worth of messages
-        # Each turn is approximately 2 messages (user + assistant)
-        keep_count = min_preserved * 2
-        if len(all_msgs) <= keep_count:
+        # Keep recent completed turns, trim only at turn boundaries to avoid
+        # splitting assistant(tool_calls) and tool response chains.
+        completed_turns = [
+            t for t in split_turns(all_msgs) if t.start_seq < current_user_seq
+        ]
+        if len(completed_turns) <= min_preserved:
             return None
 
-        trim_point = all_msgs[-(keep_count + 1)]
-        new_seq = min(trim_point.seq, current_user_seq - 1)
+        trim_turns = completed_turns[:-min_preserved]
+        if not trim_turns:
+            return None
+
+        new_seq = min(trim_turns[-1].end_seq, current_user_seq - 1)
+        trimmed_count = sum(1 for m in all_msgs if m.seq <= new_seq)
+        preserved_turns_count = len(completed_turns) - len(trim_turns)
 
         from datetime import UTC, datetime
 
@@ -626,9 +743,9 @@ class AgentLoop:
                 "status": "failed",
                 "emergency_trim": True,
                 "triggered_at": datetime.now(UTC).isoformat(),
-                "preserved_count": min_preserved,
+                "preserved_count": preserved_turns_count,
                 "summarized_count": 0,
-                "trimmed_count": len(all_msgs) - keep_count,
+                "trimmed_count": trimmed_count,
                 "flush_skipped": True,
                 "anchor_validation_passed": True,
                 "anchor_retry_used": False,
