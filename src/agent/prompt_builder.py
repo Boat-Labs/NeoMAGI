@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import re
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -9,6 +10,7 @@ import structlog
 from src.tools.base import ToolMode
 
 if TYPE_CHECKING:
+    from src.config.settings import MemorySettings
     from src.tools.registry import ToolRegistry
 
 logger = structlog.get_logger()
@@ -36,9 +38,11 @@ class PromptBuilder:
         self,
         workspace_dir: Path,
         tool_registry: ToolRegistry | None = None,
+        memory_settings: MemorySettings | None = None,
     ) -> None:
         self._workspace_dir = workspace_dir
         self._tool_registry = tool_registry
+        self._memory_settings = memory_settings
 
     def build(
         self,
@@ -138,6 +142,11 @@ class PromptBuilder:
                     parts.append(content)
                     logger.info("prompt_file_injected", file=filename, layer="workspace")
 
+        # Daily notes auto-load (Phase 1)
+        daily_notes = self._load_daily_notes(scope_key=scope_key)
+        if daily_notes:
+            parts.append(daily_notes)
+
         if not parts:
             return ""
 
@@ -161,6 +170,96 @@ class PromptBuilder:
     def _layer_datetime(self) -> str:
         now = datetime.now(UTC)
         return f"Current date and time (UTC): {now.strftime('%Y-%m-%d %H:%M:%S')}"
+
+    def _load_daily_notes(self, *, scope_key: str = "main") -> str:
+        """Load today + yesterday daily notes, filtered by scope_key.
+
+        scope_key comes from session_resolver (ADR 0034).
+        Only entries matching the current scope_key are included.
+
+        Old data compatibility: entries without scope metadata are treated as
+        scope_key='main' (all pre-M3 daily notes were written in main session).
+
+        Format injected:
+        [Recent Daily Notes]
+        === 2026-02-22 ===
+        {content of memory/2026-02-22.md, filtered by scope}
+        """
+        load_days = 2
+        max_tokens = 4000
+        if self._memory_settings:
+            load_days = self._memory_settings.daily_notes_load_days
+            max_tokens = self._memory_settings.daily_notes_max_tokens
+
+        memory_dir = self._workspace_dir / "memory"
+        if not memory_dir.is_dir():
+            return ""
+
+        today = date.today()
+        parts: list[str] = []
+
+        for offset in range(load_days):
+            target_date = today - timedelta(days=offset)
+            filepath = memory_dir / f"{target_date.isoformat()}.md"
+            if not filepath.is_file():
+                continue
+            try:
+                raw = filepath.read_text(encoding="utf-8").strip()
+                if not raw:
+                    continue
+                filtered = self._filter_entries_by_scope(raw, scope_key)
+                if not filtered:
+                    continue
+                # Rough truncation: ~4 chars per token estimate
+                max_chars = max_tokens * 4
+                if len(filtered) > max_chars:
+                    filtered = filtered[:max_chars] + "\n...(truncated)"
+                parts.append(f"=== {target_date.isoformat()} ===\n{filtered}")
+                logger.info(
+                    "daily_notes_loaded",
+                    date=target_date.isoformat(),
+                    scope_key=scope_key,
+                    chars=len(filtered),
+                )
+            except OSError:
+                logger.exception("daily_notes_read_error", path=str(filepath))
+
+        if not parts:
+            return ""
+
+        return "[Recent Daily Notes]\n" + "\n\n".join(parts)
+
+    @staticmethod
+    def _filter_entries_by_scope(content: str, scope_key: str) -> str:
+        """Filter daily note entries by scope_key.
+
+        Each entry starts with '---'. Entries with 'scope: X' metadata
+        are filtered. Entries without scope metadata are treated as
+        scope_key='main' (old data compatibility).
+        """
+        # Split by entry separator
+        entries = re.split(r"^---$", content, flags=re.MULTILINE)
+        filtered: list[str] = []
+
+        for entry in entries:
+            stripped = entry.strip()
+            if not stripped:
+                continue
+
+            # Check if entry has scope metadata
+            scope_match = re.search(r"scope:\s*(\S+)", stripped)
+            if scope_match:
+                entry_scope = scope_match.group(1).rstrip(")")
+                if entry_scope != scope_key:
+                    continue
+            else:
+                # No scope metadata → treat as 'main' (old data compatibility)
+                if scope_key != "main":
+                    continue
+
+            filtered.append(stripped)
+
+        return "\n\n".join(filtered)
 
     def _read_workspace_file(self, filename: str) -> str:
         """Read a file from workspace. Returns empty string if not found."""
