@@ -42,6 +42,7 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0036 | Evolution consistency: DB as SSOT, SOUL.md as projection | accepted | 2026-02-24 | `decisions/0036-evolution-consistency-db-as-ssot-and-soulmd-as-projection.md` |
 | 0037 | Workspace path single source of truth with startup validation | accepted | 2026-02-24 | `decisions/0037-workspace-path-single-source-of-truth-and-startup-validation.md` |
 | 0038 | M6 primary Gemini validation model and budget guardrail | accepted | 2026-02-24 | `decisions/0038-m6-primary-gemini-validation-model-and-budget-guardrail.md` |
+| 0039 | OpenAI primary development test model: gpt-5-mini | accepted | 2026-02-24 | `decisions/0039-openai-primary-development-test-model-gpt-5-mini.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。

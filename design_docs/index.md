@@ -35,6 +35,10 @@
   - `design_docs/system_prompt.md`
   - 适用：AGENTS/SOUL/USER/IDENTITY/TOOLS 等注入策略讨论
 
+- 用户验收与手工测试相关：
+  - `design_docs/m3_user_test_guide.md`
+  - 适用：M3 完成态下的启动步骤、功能测试脚本、预期结果对照
+
 ## 4. 历史文档（默认不作为当前依据）
 
 - `design_docs/roadmap_milestones.md`（v1）
