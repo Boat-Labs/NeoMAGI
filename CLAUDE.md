@@ -84,20 +84,18 @@ neomagi/
 
 > Agent Teams 协作控制规则以 `AGENTTEAMS.md` 为 SSOT。`CLAUDE.md`（Claude Code）与 `AGENTS.md`（其他系统）为一致性镜像入口，三者必须保持一致。PM 角色 spawn teammate 时加载 `AGENTTEAMS.md`。
 
-## 核心设计决策
+## 架构信息分层
 
-### 与 OpenClaw 的关键差异
-- Python 而非 TypeScript（架构概念借鉴，实现完全重写）
-- PostgreSQL 16 + pgvector + pg_search 而非 SQLite
-- TOML + Pydantic 而非 JSON5 + Zod
-- Podman 而非 Docker
-
-> 架构详情按需查阅：System Prompt 组装 → `design_docs/system_prompt.md`，Memory 架构 → `design_docs/memory_architecture.md`，Session/模块边界 → `design_docs/modules.md`
-
-## 参考项目
-
-- [OpenClaw](https://github.com/openclaw/openclaw) — 主要架构参考（`src/agents/`, `src/memory/`, `src/gateway/`）
-- [pi-mono](https://github.com/badlogic/pi-mono) — Pi agent 精简实现 · [OpenClaw DeepWiki](https://deepwiki.com/openclaw/openclaw) — 架构图
+- 全局强制基线（所有 agent 默认遵守）只保留在本文件：
+  - Python 实现（非 TypeScript）
+  - PostgreSQL 16（非 SQLite）
+  - `pydantic-settings` + `.env` 配置
+  - Podman 容器命令（非 Docker）
+- 设计细节与外部参考按需读取，不在本文件展开：
+  - 统一入口：`design_docs/index.md`
+  - Prompt 组装：`design_docs/system_prompt.md`
+  - Memory 架构：`design_docs/memory_architecture.md`
+  - Session/模块边界：`design_docs/modules.md`
 
 ## 开发约定
 

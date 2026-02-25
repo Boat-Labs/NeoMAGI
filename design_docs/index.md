@@ -54,5 +54,12 @@
 - 计划执行细节：`dev_docs/plans/`
 - 关键技术取舍：`decisions/`（含 `decisions/INDEX.md`）
 
+## 6. 外部参考（按需）
+
+- `OpenClaw`: [https://github.com/openclaw/openclaw](https://github.com/openclaw/openclaw)
+  - 主要架构参考方向：`src/agents/`、`src/memory/`、`src/gateway/`
+- `pi-mono`: [https://github.com/badlogic/pi-mono](https://github.com/badlogic/pi-mono)
+- `OpenClaw DeepWiki`: [https://deepwiki.com/openclaw/openclaw](https://deepwiki.com/openclaw/openclaw)
+
 建议读取策略：
 - 先看本索引 -> 再按默认顺序读取 -> 遇到具体主题再加载场景文档 -> 需要取舍依据时查 ADR。
