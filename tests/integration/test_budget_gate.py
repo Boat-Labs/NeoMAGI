@@ -19,10 +19,12 @@ pytestmark = pytest.mark.integration
 
 
 @pytest_asyncio.fixture
-async def budget_gate(db_engine: AsyncEngine) -> BudgetGate:
+async def budget_gate(db_engine: AsyncEngine, db_session_factory) -> BudgetGate:
     """Create budget tables and return a BudgetGate instance.
 
     Budget tables are migration-managed (not ORM), so create via raw SQL.
+    Depends on db_session_factory to force eager session-fixture setup
+    (prevents event loop scope mismatch with autouse _integration_cleanup).
     """
     async with db_engine.begin() as conn:
         await conn.execute(text(f"""
@@ -307,6 +309,7 @@ class TestSettle:
 
 
 class TestConcurrency:
+    @pytest.mark.pg_required
     async def test_concurrent_reserves_no_oversell(
         self, budget_gate: BudgetGate, db_engine: AsyncEngine,
     ) -> None:
@@ -332,6 +335,7 @@ class TestConcurrency:
         assert len(granted) == 1
         assert len(denied) == 1
 
+    @pytest.mark.pg_required
     async def test_multi_worker_concurrent_reserves(
         self, budget_gate: BudgetGate, db_engine: AsyncEngine,
     ) -> None:

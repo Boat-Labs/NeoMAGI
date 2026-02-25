@@ -134,9 +134,12 @@ async def _integration_cleanup(request):
         return  # This test doesn't use the shared db fixture
 
     async with factory() as db_session:
-        # Dynamically truncate all tables that exist in the test schema.
-        # Some integration tests only create a subset of tables, so we
-        # query information_schema to avoid "relation does not exist" errors.
+        # Dynamically truncate only tables that exist in the test schema.
+        # Some integration tests create only a subset of tables (e.g.
+        # budget_gate tests don't create memory_entries/soul_versions).
+        # A failed TRUNCATE on a missing table corrupts the session-scoped
+        # event loop, causing "Runner.run() cannot be called" in subsequent
+        # async tests.
         result = await db_session.execute(text(
             "SELECT table_name FROM information_schema.tables"
             f" WHERE table_schema = '{DB_SCHEMA}'"
