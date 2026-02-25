@@ -19,6 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.constants import DB_SCHEMA
+from src.gateway.budget_gate import Reservation
 from src.session.models import Base
 
 
@@ -165,6 +166,20 @@ async def _integration_cleanup(request):
             ))
 
         await db_session.commit()
+
+
+class StubBudgetGate:
+    """Always-approve stub for tests that don't exercise budget behavior."""
+
+    async def try_reserve(self, **kwargs: object) -> Reservation:
+        return Reservation(
+            denied=False,
+            reservation_id="stub-00000000-0000-0000-0000-000000000000",
+            reserved_eur=float(kwargs.get("estimated_cost_eur", 0.05)),
+        )
+
+    async def settle(self, **kwargs: object) -> None:
+        pass
 
 
 @pytest_asyncio.fixture

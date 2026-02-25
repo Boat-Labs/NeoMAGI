@@ -45,6 +45,10 @@ logger = structlog.get_logger()
 
 _EVAL_SESSION_PREFIX = "m6_eval_"
 
+# [ADR 0041] Phase 1: fixed per-request cost estimate.
+# Accurate per-model pricing + usage-based settle deferred to a future milestone.
+DEFAULT_RESERVE_EUR: float = 0.05
+
 
 def _extract_eval_run_id(session_id: str) -> str:
     """Derive eval_run_id from session_id prefix convention.
@@ -295,10 +299,24 @@ async def _handle_chat_send(
         await websocket.send_text(error.model_dump_json())
         return
 
+    budget_gate: BudgetGate = websocket.app.state.budget_gate
+    reservation = None
     try:
         # [Decision 0021] Force-reload session from DB before building prompt.
         # Ensures cross-worker handoff has complete history, not stale local cache.
         await session_manager.load_session_from_db(parsed.session_id, force=True)
+
+        # [ADR 0041] Budget gate: reserve before model invocation.
+        # Denied → raise immediately; handle_message is never called.
+        reservation = await budget_gate.try_reserve(
+            provider=entry.name,
+            model=entry.model,
+            estimated_cost_eur=DEFAULT_RESERVE_EUR,
+            session_id=parsed.session_id,
+            eval_run_id=_extract_eval_run_id(parsed.session_id),
+        )
+        if reservation.denied:
+            raise GatewayError(reservation.message, code="BUDGET_EXCEEDED")
 
         async for event in agent_loop.handle_message(
             session_id=parsed.session_id,
@@ -341,6 +359,22 @@ async def _handle_chat_send(
         )
         await websocket.send_text(done_chunk.model_dump_json())
     finally:
+        # [ADR 0041] Budget settle: best-effort reconciliation.
+        # Only settle if reservation was created and not denied.
+        if reservation is not None and not reservation.denied:
+            try:
+                await budget_gate.settle(
+                    reservation_id=reservation.reservation_id,
+                    actual_cost_eur=DEFAULT_RESERVE_EUR,
+                )
+            except Exception:
+                logger.exception(
+                    "budget_settle_failed",
+                    reservation_id=reservation.reservation_id,
+                    session_id=parsed.session_id,
+                    provider=entry.name,
+                    model=entry.model,
+                )
         try:
             await session_manager.release_session(parsed.session_id, lock_token)
         except Exception:

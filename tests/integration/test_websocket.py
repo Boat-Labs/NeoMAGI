@@ -108,9 +108,12 @@ def _make_app(
         registry = AgentLoopRegistry(default_provider="openai")
         registry.register("openai", agent_loop, "test-model")
 
+        from tests.conftest import StubBudgetGate
+
         app.state.agent_loop_registry = registry
         app.state.agent_loop = agent_loop
         app.state.session_manager = session_manager
+        app.state.budget_gate = StubBudgetGate()
         app.state.fake_model = model
         app.state.db_session_factory = db_session_factory
 

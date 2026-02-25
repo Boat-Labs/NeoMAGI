@@ -236,9 +236,9 @@ async def run_t11(ws: ClientConnection, provider: str) -> TaskResult:
             r.status = "PASS"
             r.detail = f"current_time tool triggered, response len={len(resp['text'])}"
         elif resp["text"]:
-            # Model might answer directly without tool call — mark as PASS with note
-            r.status = "PASS"
-            r.detail = f"Got response (no tool_call event seen), len={len(resp['text'])}"
+            # Tool task: model must trigger current_time; direct answer is a FAIL.
+            r.status = "FAIL"
+            r.detail = f"Model responded without triggering current_time tool, len={len(resp['text'])}"
         else:
             r.status = "FAIL"
             r.detail = "No tool call and no text response"
@@ -278,9 +278,9 @@ async def run_t12(ws: ClientConnection, provider: str) -> TaskResult:
                 f"response len={len(resp['text'])}"
             )
         elif resp["text"]:
-            # Model might skip tool — still functional
-            r.status = "PASS"
-            r.detail = f"Response without tool call (model chose direct answer), len={len(resp['text'])}"
+            # Tool task: model must trigger memory_search; direct answer is a FAIL.
+            r.status = "FAIL"
+            r.detail = f"Model responded without triggering memory_search tool, len={len(resp['text'])}"
         else:
             r.status = "FAIL"
             r.detail = "No tool call and no text response"
