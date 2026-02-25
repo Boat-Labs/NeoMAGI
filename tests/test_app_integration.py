@@ -19,13 +19,15 @@ from src.gateway.app import lifespan
 
 def _make_mock_settings(tmp_path: Path) -> MagicMock:
     """Create mock settings with consistent workspace paths."""
-    from src.config.settings import CompactionSettings, MemorySettings
+    from src.config.settings import CompactionSettings, GeminiSettings, MemorySettings, ProviderSettings
 
     settings = MagicMock()
     settings.workspace_dir = tmp_path
     settings.openai.api_key = "test-key"
     settings.openai.base_url = None
     settings.openai.model = "gpt-4o-mini"
+    settings.gemini = GeminiSettings()  # api_key="" → not registered
+    settings.provider = ProviderSettings()  # active="openai"
     settings.database = MagicMock()
     settings.database.schema_ = "neomagi"
     settings.gateway.host = "0.0.0.0"

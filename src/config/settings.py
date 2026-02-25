@@ -164,6 +164,7 @@ class MemorySettings(BaseSettings):
     curated_max_tokens: int = 4000  # MEMORY.md size limit
     curation_lookback_days: int = 7
     curation_temperature: float = 0.1
+    curation_model: str = "gpt-4o-mini"  # offline curation model, independent of provider routing
 
 
 class GeminiSettings(BaseSettings):

@@ -134,12 +134,33 @@ async def _integration_cleanup(request):
         return  # This test doesn't use the shared db fixture
 
     async with factory() as db_session:
-        await db_session.execute(
-            text(
-                f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions,"
-                f" {DB_SCHEMA}.memory_entries, {DB_SCHEMA}.soul_versions CASCADE"
-            )
-        )
+        # Dynamically truncate all tables that exist in the test schema.
+        # Some integration tests only create a subset of tables, so we
+        # query information_schema to avoid "relation does not exist" errors.
+        result = await db_session.execute(text(
+            "SELECT table_name FROM information_schema.tables"
+            f" WHERE table_schema = '{DB_SCHEMA}'"
+        ))
+        existing = {row[0] for row in result.fetchall()}
+
+        truncatable = [
+            t for t in [
+                "messages", "sessions", "memory_entries", "soul_versions",
+                "budget_reservations",
+            ]
+            if t in existing
+        ]
+        if truncatable:
+            qualified = ", ".join(f"{DB_SCHEMA}.{t}" for t in truncatable)
+            await db_session.execute(text(f"TRUNCATE {qualified} CASCADE"))
+
+        if "budget_state" in existing:
+            await db_session.execute(text(
+                f"UPDATE {DB_SCHEMA}.budget_state"
+                " SET cumulative_eur = 0, updated_at = NOW()"
+                " WHERE id = 'global'"
+            ))
+
         await db_session.commit()
 
 
