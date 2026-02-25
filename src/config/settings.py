@@ -166,6 +166,33 @@ class MemorySettings(BaseSettings):
     curation_temperature: float = 0.1
 
 
+class GeminiSettings(BaseSettings):
+    """Gemini API settings via OpenAI-compatible endpoint."""
+
+    model_config = SettingsConfigDict(env_prefix="GEMINI_")
+
+    api_key: str = ""  # empty = provider disabled
+    model: str = "gemini-2.5-flash"
+    base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+
+class ProviderSettings(BaseSettings):
+    """Provider routing settings."""
+
+    model_config = SettingsConfigDict(env_prefix="PROVIDER_")
+
+    active: str = "openai"  # fallback when ChatSendParams.provider is not specified
+
+    @field_validator("active")
+    @classmethod
+    def _validate_active(cls, v: str) -> str:
+        allowed = {"openai", "gemini"}
+        if v not in allowed:
+            msg = f"PROVIDER_ACTIVE must be one of {allowed} (got '{v}')"
+            raise ValueError(msg)
+        return v
+
+
 class Settings(BaseSettings):
     """Root settings composing all sub-configurations."""
 
@@ -173,6 +200,8 @@ class Settings(BaseSettings):
 
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
+    gemini: GeminiSettings = Field(default_factory=GeminiSettings)
+    provider: ProviderSettings = Field(default_factory=ProviderSettings)
     gateway: GatewaySettings = Field(default_factory=GatewaySettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
     compaction: CompactionSettings = Field(default_factory=CompactionSettings)
