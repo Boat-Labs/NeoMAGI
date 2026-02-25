@@ -1,6 +1,6 @@
 # 0040-m6-provider-routing-granularity-agent-run-boundary
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-02-25
 
 ## 选了什么
