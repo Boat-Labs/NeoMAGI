@@ -1,0 +1,109 @@
+{
+  "meta": {
+    "provider": "openai",
+    "timestamp": 1772058667,
+    "gateway_url": "ws://localhost:19789/ws",
+    "total_tasks": 7
+  },
+  "summary": {
+    "passed": 7,
+    "failed": 0,
+    "skipped": 0,
+    "errored": 0,
+    "total_tokens_est": 1328,
+    "total_latency_ms": 74532.4
+  },
+  "tasks": [
+    {
+      "task_id": "T10",
+      "category": "basic_conversation",
+      "description": "Multi-turn bilingual conversation (5 rounds)",
+      "status": "PASS",
+      "latency_ms": 14828.2,
+      "tokens_est": 257,
+      "detail": "All 5 rounds replied, language switching OK",
+      "tool_calls": [],
+      "rounds": 5
+    },
+    {
+      "task_id": "T11",
+      "category": "tool_call",
+      "description": "Single tool call (current_time)",
+      "status": "PASS",
+      "latency_ms": 2364.5,
+      "tokens_est": 14,
+      "detail": "current_time tool triggered, response len=56",
+      "tool_calls": [
+        {
+          "tool_name": "current_time",
+          "arguments": {},
+          "call_id": "call_JnITD79vRke7bUmB3Z4GrHCp"
+        }
+      ],
+      "rounds": 1
+    },
+    {
+      "task_id": "T12",
+      "category": "tool_chain",
+      "description": "Multi-step tool chain (memory_search → answer)",
+      "status": "PASS",
+      "latency_ms": 2559.0,
+      "tokens_est": 38,
+      "detail": "memory_search triggered, tool_calls=1, response len=153",
+      "tool_calls": [
+        {
+          "tool_name": "memory_search",
+          "arguments": {
+            "query": "project goals"
+          },
+          "call_id": "call_LUBHFo6qVVw4uzQMhbFwH9F8"
+        }
+      ],
+      "rounds": 1
+    },
+    {
+      "task_id": "T13",
+      "category": "long_context",
+      "description": "12-round context retention test",
+      "status": "PASS",
+      "latency_ms": 35057.1,
+      "tokens_est": 483,
+      "detail": "Context checks: {'name': True, 'city': True, 'cat': True, 'book': True}, 4/4 passed",
+      "tool_calls": [],
+      "rounds": 12
+    },
+    {
+      "task_id": "T14",
+      "category": "cjk_processing",
+      "description": "Complex Chinese input with quotes, punctuation, code",
+      "status": "PASS",
+      "latency_ms": 9582.0,
+      "tokens_est": 169,
+      "detail": "CJK output OK, len=678, has_cjk=True",
+      "tool_calls": [],
+      "rounds": 1
+    },
+    {
+      "task_id": "T15",
+      "category": "role_adherence",
+      "description": "System prompt constraint adherence across turns",
+      "status": "PASS",
+      "latency_ms": 8099.5,
+      "tokens_est": 332,
+      "detail": "All 4 rounds replied, role stable (pirate_indicators=0)",
+      "tool_calls": [],
+      "rounds": 4
+    },
+    {
+      "task_id": "T16",
+      "category": "error_recovery",
+      "description": "Graceful recovery after tool error",
+      "status": "PASS",
+      "latency_ms": 2042.2,
+      "tokens_est": 35,
+      "detail": "Recovered after tool error, answered follow-up correctly",
+      "tool_calls": [],
+      "rounds": 2
+    }
+  ]
+}
