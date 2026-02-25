@@ -211,3 +211,17 @@
 - Evidence: `src/session/database.py`, `src/agent/agent.py`, `tests/test_ensure_schema.py`, `tests/test_agent_tool_parse.py`, `tests/test_compaction_degradation.py`, `uv run pytest tests/test_agent_tool_parse.py tests/test_compaction_degradation.py -q` (23 passed), `uv run pytest tests/test_ensure_schema.py -q -m integration` (2 passed)
 - Next: 复测 M3 用户测试指导中的 T03/T04/T05 长链路并确认不再复现 400
 - Risk: 历史污染会话在旧版本残留场景下仍可能需要新会话复测一次；新版本已在发送前做 tool_call 历史清洗兜底
+
+## 2026-02-25 13:56 (local) | M3
+- Status: done
+- Done: 进度口径消歧义完成——M3 修复项已完成并验证；T03/T04/T05 复测定义为收尾验收任务，不阻塞 M6 规划启动
+- Evidence: commit 0935834, commit 178882c, `dev_docs/plans/m3_post-review-fix_2026-02-24.md`, `dev_docs/cases/runtime_casebook.md`
+- Next: 启动 M6 规划，同时并行完成 T03/T04/T05 手工复测并回填结果
+- Risk: 若复测出现回归，需先完成 M3 hotfix 闭环再进入 M6 实施
+
+## 2026-02-25 14:04 (local) | M3
+- Status: done
+- Done: 用户手工复测完成——T03/T04/T05 全部通过；仅保留 1 条已知检索未命中 case（记忆数据存在但自然语句词法检索 miss）
+- Evidence: `design_docs/m3_user_test_guide.md` (T03/T04/T05), `dev_docs/cases/runtime_casebook.md` (RC-2026-02-25-001, status=deferred), 用户手工验证结果
+- Next: 启动 M6 规划（模型迁移验证），并在后续统一检索能力优化中处理 RC-2026-02-25-001
+- Risk: 已知 case RC-2026-02-25-001 当前为 deferred，不影响 M6 规划启动
