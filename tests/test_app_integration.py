@@ -19,7 +19,12 @@ from src.gateway.app import lifespan
 
 def _make_mock_settings(tmp_path: Path) -> MagicMock:
     """Create mock settings with consistent workspace paths."""
-    from src.config.settings import CompactionSettings, GeminiSettings, MemorySettings, ProviderSettings
+    from src.config.settings import (
+        CompactionSettings,
+        GeminiSettings,
+        MemorySettings,
+        ProviderSettings,
+    )
 
     settings = MagicMock()
     settings.workspace_dir = tmp_path

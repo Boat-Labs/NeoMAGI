@@ -13,7 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.constants import DB_SCHEMA
-from src.gateway.budget_gate import BUDGET_STOP_EUR, BUDGET_WARN_EUR, BudgetGate
+from src.gateway.budget_gate import BudgetGate
 
 pytestmark = pytest.mark.integration
 

@@ -14,7 +14,6 @@ import pytest
 from src.gateway.app import DEFAULT_RESERVE_EUR, _handle_chat_send
 from src.gateway.budget_gate import Reservation
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -113,12 +112,8 @@ class TestBudgetDenied:
         with pytest.raises(GatewayError):
             await _handle_chat_send(ws, "req-1", {"content": "hi", "session_id": "s1"})
 
-        # handle_message should never be called
-        entry = ws.app.state.agent_loop_registry.get()
-        # _noop_handle_message is a function, not a mock, so we check via
-        # the mock registry entry — if denied, the code raises before reaching
-        # handle_message. The agent_loop.handle_message is our _noop_handle_message
-        # which would only show up if iterated. Instead, verify no stream chunks sent.
+        # _noop_handle_message is a function, not a mock. Verify deny path
+        # by checking no stream chunks are sent.
         sent = _sent_messages(ws)
         stream_chunks = [m for m in sent if m.get("type") == "stream_chunk"]
         assert stream_chunks == []

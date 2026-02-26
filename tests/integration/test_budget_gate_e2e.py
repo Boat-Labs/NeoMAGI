@@ -42,7 +42,9 @@ class _FakeModel(ModelClient):
     async def chat_completion(self, messages, model, *, tools=None):
         raise NotImplementedError
 
-    async def chat_stream_with_tools(self, messages, model, *, tools=None) -> AsyncIterator[StreamEvent]:
+    async def chat_stream_with_tools(
+        self, messages, model, *, tools=None
+    ) -> AsyncIterator[StreamEvent]:
         yield ContentDelta(text="OK from model")
 
 
