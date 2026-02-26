@@ -208,6 +208,7 @@ __marimo__/
 
 .claude/worktree
 dev_docs/prompts/
+dev_docs/reports/
 
 # Workspace (user-specific agent files)
 workspace/
@@ -215,5 +216,4 @@ workspace/
 # Frontend
 node_modules/
 *.local
-
 

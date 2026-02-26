@@ -225,3 +225,31 @@
 - Evidence: `design_docs/m3_user_test_guide.md` (T03/T04/T05), `dev_docs/cases/runtime_casebook.md` (RC-2026-02-25-001, status=deferred), 用户手工验证结果
 - Next: 启动 M6 规划（模型迁移验证），并在后续统一检索能力优化中处理 RC-2026-02-25-001
 - Risk: 已知 case RC-2026-02-25-001 当前为 deferred，不影响 M6 规划启动
+
+## 2026-02-25 (local) | M6
+- Status: in_progress
+- Done: M6 模型迁移验证主体实现交付（Agent Teams PM 协调，4 Phase Gate 全通过）— GeminiSettings + ProviderSettings 配置体系、AgentLoopRegistry per-provider 预建、BudgetGate PG atomic reserve/settle、per-run provider routing (ChatSendParams.provider)、Curator model 参数化、eval 脚本 WebSocket 全链路验证
+- Detail:
+  - Phase 0: 配置 + ADR — GeminiSettings, ProviderSettings (pydantic-settings), ADR 0038/0040/0041
+  - Phase 1: AgentLoopRegistry + provider routing — 启动时预建 per-provider AgentLoop, params.provider > PROVIDER_ACTIVE
+  - Phase 2: BudgetGate + Gemini smoke test — PG atomic reserve/settle, CAS idempotent, Gemini API 端到端验证
+  - Phase 3: Eval 脚本 + 迁移结论 — WebSocket 客户端走 Gateway 全链路, T10-T16 双 provider 评测
+- Evidence: commit fbae58d..d76d0d0, 540 tests passed, ruff clean; eval results: OpenAI 7/7 PASS, Gemini 6/7 PASS (T13 长上下文 FAIL)
+- Plan: `dev_docs/plans/m6_model-migration-validation_2026-02-25.md`
+- Decisions: ADR 0038, 0040, 0041
+- Next: 用户审阅发现 2 项 P1 问题待修
+- Risk: P1-1 BudgetGate 未接入 chat.send 主链路; P1-2 eval T11/T12 判定过宽（false positive）
+
+## 2026-02-26 (local) | M6
+- Status: done
+- Done: M6 P1 修复完成并合入 main — 2 项 P1 问题修复 + eval 全量重跑 + 迁移结论更新
+- Detail:
+  - P1-1: ADR 0041 BudgetGate 接入 chat.send 主链路 — try_reserve (固定 €0.05) after session claim, settle in finally block, BUDGET_EXCEEDED error code, settle 失败结构化日志
+  - P1-2: eval T11/T12 判定口径收紧 — 未触发目标工具即 FAIL（消除 false positive）
+  - 测试基础设施: StubBudgetGate 适配 3 个现有集成测试 fixture; 新增 17 unit tests (test_budget_gate_wiring.py) + 5 E2E tests (test_budget_gate_e2e.py) + 6 eval judgment tests (test_eval_judgment.py)
+  - Eval 全量重跑: OpenAI 7/7 PASS, Gemini 6/7 PASS (T13 不变); 预算审计 52 reservations, 全部 settled, €2.60 cumulative
+- Evidence: PR #4 (feat/m6-p1-fix) merged to main, commit bc303e7; 562 tests passed, ruff clean
+- Plan: `dev_docs/plans/m6_p1-fix-budget-gate-and-eval_2026-02-25.md`
+- Reports: `dev_docs/reports/m6_eval_openai_1772064537.json`, `dev_docs/reports/m6_eval_gemini_1772064602.json`, `dev_docs/reports/m6_migration_conclusion.md`
+- Next: M6 关闭，参考 roadmap_milestones_v3.md 确定下一阶段
+- Risk: Gemini T13 长上下文 + 工具历史场景 400 INVALID_ARGUMENT 为已知限制，可通过 compaction 阈值调优缓解

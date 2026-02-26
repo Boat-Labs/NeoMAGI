@@ -276,8 +276,13 @@ class OpenAICompatModelClient(ModelClient):
             context="chat_stream_with_tools",
         )
 
-        # Accumulate tool_calls delta fragments, keyed by index
-        pending_tool_calls: dict[int, dict[str, str]] = {}
+        # Accumulate tool_calls delta fragments.
+        # Prefer index (OpenAI format), fallback to id (Gemini may emit index=None).
+        # Keep insertion order explicitly; dict key sort is not meaningful across key types.
+        pending_tool_calls: dict[str, dict[str, str]] = {}
+        pending_order: list[str] = []
+        fallback_seq = 0
+        last_key: str | None = None
 
         async for chunk in stream:
             if not chunk.choices:
@@ -291,10 +296,26 @@ class OpenAICompatModelClient(ModelClient):
             # Tool calls path: accumulate delta fragments
             if delta.tool_calls:
                 for tc_delta in delta.tool_calls:
-                    idx = tc_delta.index
-                    if idx not in pending_tool_calls:
-                        pending_tool_calls[idx] = {"id": "", "name": "", "arguments": ""}
-                    entry = pending_tool_calls[idx]
+                    if tc_delta.index is not None:
+                        key = f"idx:{tc_delta.index}"
+                    elif tc_delta.id:
+                        key = f"id:{tc_delta.id}"
+                    elif tc_delta.function and tc_delta.function.name:
+                        key = f"fallback:{fallback_seq}"
+                        fallback_seq += 1
+                    elif last_key is not None:
+                        # Best-effort continuation when provider omits both index and id.
+                        key = last_key
+                    else:
+                        key = f"fallback:{fallback_seq}"
+                        fallback_seq += 1
+
+                    if key not in pending_tool_calls:
+                        pending_tool_calls[key] = {"id": "", "name": "", "arguments": ""}
+                        pending_order.append(key)
+                    entry = pending_tool_calls[key]
+                    last_key = key
+
                     if tc_delta.id:
                         entry["id"] = tc_delta.id
                     if tc_delta.function:
@@ -306,5 +327,5 @@ class OpenAICompatModelClient(ModelClient):
         # After stream ends: yield accumulated tool calls if any
         if pending_tool_calls:
             yield ToolCallsComplete(
-                tool_calls=[pending_tool_calls[i] for i in sorted(pending_tool_calls)]
+                tool_calls=[pending_tool_calls[k] for k in pending_order]
             )
