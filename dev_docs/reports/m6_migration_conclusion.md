@@ -1,27 +1,38 @@
 # M6 迁移结论
 
+> **P1 修复后重跑版本** (2026-02-26)
+>
+> 本版本基于 P1 修复后的全量重跑结果，替代初版评测结论。
+> 修复内容：(1) ADR 0041 BudgetGate 接入 chat.send 主链路；
+> (2) T11/T12 判定口径收紧——未触发目标工具即 FAIL。
+>
+> 报告文件：
+> - OpenAI: `m6_eval_openai_1772064537.json`
+> - Gemini: `m6_eval_gemini_1772064602.json`
+
 ## 评测摘要
 
 | Provider | 通过 | 失败 | 跳过 | 总数 | 总延迟(ms) | 估算 Tokens |
 |----------|------|------|------|------|-----------|------------|
-| OpenAI   | 7    | 0    | 0    | 7    | 74,532    | ~1,328     |
-| Gemini   | 6    | 1    | 0    | 7    | 55,926    | ~992       |
+| OpenAI   | 7    | 0    | 0    | 7    | 67,642    | ~1,273     |
+| Gemini   | 6    | 1    | 0    | 7    | 59,949    | ~1,125     |
 
 ### 分项结果
 
 | Task ID | 类别 | OpenAI | Gemini | 备注 |
 |---------|------|--------|--------|------|
-| T10 | 多轮双语对话 | PASS (14.8s) | PASS (8.3s) | Gemini 响应更快 |
-| T11 | 单工具调用 (current_time) | PASS (2.4s) | PASS (1.8s) | 双方均正确触发 |
-| T12 | 工具链 (memory_search→回答) | PASS (2.6s) | PASS (1.9s) | 双方均正确触发 |
-| T13 | 长上下文 (12 轮) | PASS (35.1s) | **FAIL** (27.7s) | Gemini 在第 12 轮返回 400 INVALID_ARGUMENT |
-| T14 | CJK 复杂处理 | PASS (9.6s) | PASS (6.6s) | 中文、引号、代码均正常 |
-| T15 | 角色遵循 | PASS (8.1s) | PASS (7.0s) | 注入尝试后角色稳定 |
-| T16 | 错误恢复 | PASS (2.0s) | PASS (2.6s) | 工具错误后优雅恢复 |
+| T10 | 多轮双语对话 | PASS (11.9s) | PASS (9.7s) | Gemini 响应更快 |
+| T11 | 单工具调用 (current_time) | PASS (2.5s) | PASS (1.8s) | 严格判定：均触发 current_time |
+| T12 | 工具链 (memory_search→回答) | PASS (2.0s) | PASS (2.6s) | 严格判定：均触发 memory_search |
+| T13 | 长上下文 (12 轮) | PASS (31.3s) | **FAIL** (30.9s) | Gemini 在第 12 轮返回 400 INVALID_ARGUMENT |
+| T14 | CJK 复杂处理 | PASS (8.7s) | PASS (5.8s) | 中文、引号、代码均正常 |
+| T15 | 角色遵循 | PASS (9.1s) | PASS (6.5s) | 注入尝试后角色稳定 |
+| T16 | 错误恢复 | PASS (2.3s) | PASS (2.6s) | 工具错误后优雅恢复 |
 
 ### 预算使用
 
-本次评测为轻量级任务评测（Layer 2），token 消耗极低（~2,320 tokens 合计），远低于 €30 上限。
+本次评测经由 BudgetGate 全链路（ADR 0041），每次请求预占 €0.05。
+实际预算消耗：€2.60（52 次预占，全部 settled），远低于 €25 hard stop。
 
 ## 兼容性发现
 
@@ -69,4 +80,6 @@
 - [x] Gemini 可作为 OpenAI 的可行备选（6/7 任务通过）
 - [x] 建议默认路线维持 OpenAI（长上下文稳定性更好）
 - [x] 支持 per-request provider 切换，无需重启即可使用 Gemini
+- [x] ADR 0041 BudgetGate 已接入 chat.send 主链路，预算闸门生效
+- [x] T11/T12 判定口径已收紧（未触发目标工具 = FAIL），评测证据可信
 - [ ] 长对话场景使用 Gemini 时需注意 compaction 阈值调优
