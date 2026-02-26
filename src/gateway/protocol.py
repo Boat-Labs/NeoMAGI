@@ -4,12 +4,26 @@ import json
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ChatSendParams(BaseModel):
     content: str
     session_id: str = "main"
+    provider: str | None = None  # optional: route to specific provider
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def _normalize_provider(cls, v: Any) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str):
+            msg = f"provider must be a string (got {type(v).__name__})"
+            raise ValueError(msg)
+        v = v.strip().lower()
+        if not v:
+            return None  # empty string → use default
+        return v
 
 
 class ChatHistoryParams(BaseModel):

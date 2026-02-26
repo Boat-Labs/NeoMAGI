@@ -6,11 +6,14 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
 from src.agent.agent import AgentLoop
 from src.agent.events import TextChunk, ToolCallInfo, ToolDenied
 from src.agent.model_client import OpenAICompatModelClient
+from src.agent.provider_registry import AgentLoopRegistry
 from src.config.settings import get_settings
+from src.gateway.budget_gate import BudgetGate
 from src.gateway.protocol import (
     ChatHistoryParams,
     ChatSendParams,
@@ -26,7 +29,7 @@ from src.gateway.protocol import (
     ToolDeniedData,
     parse_rpc_request,
 )
-from src.infra.errors import NeoMAGIError
+from src.infra.errors import GatewayError, NeoMAGIError
 from src.infra.logging import setup_logging
 from src.memory.evolution import EvolutionEngine
 from src.memory.indexer import MemoryIndexer
@@ -39,6 +42,31 @@ from src.tools.builtins import register_builtins
 from src.tools.registry import ToolRegistry
 
 logger = structlog.get_logger()
+
+_EVAL_SESSION_PREFIX = "m6_eval_"
+
+# [ADR 0041] Phase 1: fixed per-request cost estimate.
+# Accurate per-model pricing + usage-based settle deferred to a future milestone.
+DEFAULT_RESERVE_EUR: float = 0.05
+
+
+def _extract_eval_run_id(session_id: str) -> str:
+    """Derive eval_run_id from session_id prefix convention.
+
+    Eval script uses session_id = "m6_eval_{provider}_{task}_{timestamp}".
+    Timestamp is always the last '_'-separated segment (numeric epoch).
+    Provider is always the 3rd segment (index 2).
+    Extract "m6_eval_{provider}_{timestamp}" as eval_run_id.
+    Online requests (session_id = "main" or other) return empty string.
+    """
+    if not session_id.startswith(_EVAL_SESSION_PREFIX):
+        return ""
+    parts = session_id.split("_")
+    if len(parts) >= 5:
+        provider = parts[2]
+        timestamp = parts[-1]
+        return f"m6_eval_{provider}_{timestamp}"
+    return session_id  # fallback: use full session_id as run_id
 
 
 @asynccontextmanager
@@ -63,13 +91,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     db_session_factory = make_session_factory(engine)
     logger.info("db_connected")
 
+    # Provider-agnostic shared deps
     session_manager = SessionManager(
         db_session_factory=db_session_factory,
         default_mode=ToolMode(settings.session.default_mode),
-    )
-    model_client = OpenAICompatModelClient(
-        api_key=settings.openai.api_key,
-        base_url=settings.openai.base_url,
     )
 
     # Build Memory dependency chain
@@ -90,22 +115,70 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         evolution_engine=evolution_engine,
     )
 
-    agent_loop = AgentLoop(
-        model_client=model_client,
-        session_manager=session_manager,
-        workspace_dir=settings.workspace_dir,
-        model=settings.openai.model,
-        tool_registry=tool_registry,
-        compaction_settings=settings.compaction,
-        session_settings=settings.session,
-        memory_settings=settings.memory,
-        memory_searcher=memory_searcher,
-        evolution_engine=evolution_engine,
+    # Helper: create AgentLoop for a given provider
+    def _make_agent_loop(client: OpenAICompatModelClient, model: str) -> AgentLoop:
+        return AgentLoop(
+            model_client=client,
+            session_manager=session_manager,
+            workspace_dir=settings.workspace_dir,
+            model=model,
+            tool_registry=tool_registry,
+            compaction_settings=settings.compaction,
+            session_settings=settings.session,
+            memory_settings=settings.memory,
+            memory_searcher=memory_searcher,
+            evolution_engine=evolution_engine,
+        )
+
+    # Build registry
+    registry = AgentLoopRegistry(default_provider=settings.provider.active)
+
+    # OpenAI (always registered, api_key is required)
+    openai_client = OpenAICompatModelClient(
+        api_key=settings.openai.api_key,
+        base_url=settings.openai.base_url,
+    )
+    registry.register(
+        "openai", _make_agent_loop(openai_client, settings.openai.model), settings.openai.model,
     )
 
-    app.state.agent_loop = agent_loop
+    # Gemini (only when api_key is non-empty)
+    if settings.gemini.api_key:
+        gemini_client = OpenAICompatModelClient(
+            api_key=settings.gemini.api_key,
+            base_url=settings.gemini.base_url,
+        )
+        registry.register(
+            "gemini",
+            _make_agent_loop(gemini_client, settings.gemini.model),
+            settings.gemini.model,
+        )
+        logger.info("gemini_provider_registered", model=settings.gemini.model)
+
+    # Validate active provider is registered (fail-fast)
+    try:
+        registry.get()
+    except KeyError as e:
+        raise RuntimeError(
+            f"Active provider '{settings.provider.active}' is not configured. "
+            "Check API key settings."
+        ) from e
+
+    # Budget gate (ADR 0041)
+    budget_gate = BudgetGate(engine, schema=settings.database.schema_)
+
+    app.state.agent_loop_registry = registry
+    # Backward compat: keep agent_loop for any code that references it directly
+    app.state.agent_loop = registry.get().agent_loop
     app.state.session_manager = session_manager
-    logger.info("gateway_started", host=settings.gateway.host, port=settings.gateway.port)
+    app.state.budget_gate = budget_gate
+    logger.info(
+        "gateway_started",
+        host=settings.gateway.host,
+        port=settings.gateway.port,
+        providers=registry.available_providers(),
+        default_provider=registry.default_name,
+    )
 
     yield
 
@@ -182,7 +255,31 @@ async def _handle_chat_send(
     websocket: WebSocket, request_id: str, params: dict
 ) -> None:
     """Handle chat.send: claim session, invoke agent loop, stream events, release."""
-    parsed = ChatSendParams.model_validate(params)
+    # 1. Params validation — ValidationError → GatewayError(INVALID_PARAMS)
+    try:
+        parsed = ChatSendParams.model_validate(params)
+    except ValidationError as e:
+        raise GatewayError(str(e), code="INVALID_PARAMS") from e
+
+    # 2. Agent-run level provider routing — KeyError → GatewayError(PROVIDER_NOT_AVAILABLE)
+    registry: AgentLoopRegistry = websocket.app.state.agent_loop_registry
+    try:
+        entry = registry.get(parsed.provider)
+    except KeyError:
+        raise GatewayError(
+            f"Provider '{parsed.provider}' is not available. "
+            f"Configured: {registry.available_providers()}",
+            code="PROVIDER_NOT_AVAILABLE",
+        )
+
+    agent_loop = entry.agent_loop
+    logger.info(
+        "agent_run_provider_bound",
+        provider=entry.name,
+        model=entry.model,
+        source="request" if parsed.provider else "default",
+    )
+
     session_manager: SessionManager = websocket.app.state.session_manager
     settings = get_settings()
 
@@ -202,12 +299,25 @@ async def _handle_chat_send(
         await websocket.send_text(error.model_dump_json())
         return
 
+    budget_gate: BudgetGate = websocket.app.state.budget_gate
+    reservation = None
     try:
         # [Decision 0021] Force-reload session from DB before building prompt.
         # Ensures cross-worker handoff has complete history, not stale local cache.
         await session_manager.load_session_from_db(parsed.session_id, force=True)
 
-        agent_loop: AgentLoop = websocket.app.state.agent_loop
+        # [ADR 0041] Budget gate: reserve before model invocation.
+        # Denied → raise immediately; handle_message is never called.
+        reservation = await budget_gate.try_reserve(
+            provider=entry.name,
+            model=entry.model,
+            estimated_cost_eur=DEFAULT_RESERVE_EUR,
+            session_id=parsed.session_id,
+            eval_run_id=_extract_eval_run_id(parsed.session_id),
+        )
+        if reservation.denied:
+            raise GatewayError(reservation.message, code="BUDGET_EXCEEDED")
+
         async for event in agent_loop.handle_message(
             session_id=parsed.session_id,
             content=parsed.content,
@@ -249,6 +359,22 @@ async def _handle_chat_send(
         )
         await websocket.send_text(done_chunk.model_dump_json())
     finally:
+        # [ADR 0041] Budget settle: best-effort reconciliation.
+        # Only settle if reservation was created and not denied.
+        if reservation is not None and not reservation.denied:
+            try:
+                await budget_gate.settle(
+                    reservation_id=reservation.reservation_id,
+                    actual_cost_eur=DEFAULT_RESERVE_EUR,
+                )
+            except Exception:
+                logger.exception(
+                    "budget_settle_failed",
+                    reservation_id=reservation.reservation_id,
+                    session_id=parsed.session_id,
+                    provider=entry.name,
+                    model=entry.model,
+                )
         try:
             await session_manager.release_session(parsed.session_id, lock_token)
         except Exception:

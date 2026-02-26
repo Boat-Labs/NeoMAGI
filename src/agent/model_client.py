@@ -64,6 +64,7 @@ class ModelClient(ABC):
         model: str,
         *,
         tools: list[dict] | None = None,
+        temperature: float | None = None,
     ) -> AsyncIterator[str]:
         """Send messages and yield response content chunks as they arrive."""
         ...
@@ -75,6 +76,7 @@ class ModelClient(ABC):
         model: str,
         *,
         tools: list[dict] | None = None,
+        temperature: float | None = None,
     ) -> ChatCompletionMessage:
         """Non-streaming call. Returns full message (may contain content or tool_calls)."""
         ...
@@ -86,6 +88,7 @@ class ModelClient(ABC):
         model: str,
         *,
         tools: list[dict] | None = None,
+        temperature: float | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Stream response with tool call support.
 
@@ -184,6 +187,7 @@ class OpenAICompatModelClient(ModelClient):
         model: str,
         *,
         tools: list[dict] | None = None,
+        temperature: float | None = None,
     ) -> AsyncIterator[str]:
         """Send messages and yield response content chunks."""
         logger.debug("chat_stream_request", model=model, message_count=len(messages))
@@ -193,6 +197,7 @@ class OpenAICompatModelClient(ModelClient):
                 messages=messages,
                 tools=tools if tools else NOT_GIVEN,
                 stream=True,
+                **({"temperature": temperature} if temperature is not None else {}),
             ),
             context="chat_stream",
         )
@@ -209,6 +214,7 @@ class OpenAICompatModelClient(ModelClient):
         model: str,
         *,
         tools: list[dict] | None = None,
+        temperature: float | None = None,
     ) -> ChatCompletionMessage:
         """Non-streaming call returning full message with potential tool_calls."""
         logger.debug(
@@ -222,6 +228,7 @@ class OpenAICompatModelClient(ModelClient):
                 model=model,
                 messages=messages,
                 tools=tools if tools else NOT_GIVEN,
+                **({"temperature": temperature} if temperature is not None else {}),
             ),
             context="chat_completion",
         )
@@ -239,6 +246,7 @@ class OpenAICompatModelClient(ModelClient):
         model: str,
         *,
         tools: list[dict] | None = None,
+        temperature: float | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Stream LLM response, yielding content deltas and accumulated tool calls.
 
@@ -263,6 +271,7 @@ class OpenAICompatModelClient(ModelClient):
                 messages=messages,
                 tools=tools if tools else NOT_GIVEN,
                 stream=True,
+                **({"temperature": temperature} if temperature is not None else {}),
             ),
             context="chat_stream_with_tools",
         )

@@ -19,6 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.constants import DB_SCHEMA
+from src.gateway.budget_gate import Reservation
 from src.session.models import Base
 
 
@@ -134,13 +135,51 @@ async def _integration_cleanup(request):
         return  # This test doesn't use the shared db fixture
 
     async with factory() as db_session:
-        await db_session.execute(
-            text(
-                f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions,"
-                f" {DB_SCHEMA}.memory_entries, {DB_SCHEMA}.soul_versions CASCADE"
-            )
-        )
+        # Dynamically truncate only tables that exist in the test schema.
+        # Some integration tests create only a subset of tables (e.g.
+        # budget_gate tests don't create memory_entries/soul_versions).
+        # A failed TRUNCATE on a missing table corrupts the session-scoped
+        # event loop, causing "Runner.run() cannot be called" in subsequent
+        # async tests.
+        result = await db_session.execute(text(
+            "SELECT table_name FROM information_schema.tables"
+            f" WHERE table_schema = '{DB_SCHEMA}'"
+        ))
+        existing = {row[0] for row in result.fetchall()}
+
+        truncatable = [
+            t for t in [
+                "messages", "sessions", "memory_entries", "soul_versions",
+                "budget_reservations",
+            ]
+            if t in existing
+        ]
+        if truncatable:
+            qualified = ", ".join(f"{DB_SCHEMA}.{t}" for t in truncatable)
+            await db_session.execute(text(f"TRUNCATE {qualified} CASCADE"))
+
+        if "budget_state" in existing:
+            await db_session.execute(text(
+                f"UPDATE {DB_SCHEMA}.budget_state"
+                " SET cumulative_eur = 0, updated_at = NOW()"
+                " WHERE id = 'global'"
+            ))
+
         await db_session.commit()
+
+
+class StubBudgetGate:
+    """Always-approve stub for tests that don't exercise budget behavior."""
+
+    async def try_reserve(self, **kwargs: object) -> Reservation:
+        return Reservation(
+            denied=False,
+            reservation_id="stub-00000000-0000-0000-0000-000000000000",
+            reserved_eur=float(kwargs.get("estimated_cost_eur", 0.05)),
+        )
+
+    async def settle(self, **kwargs: object) -> None:
+        pass
 
 
 @pytest_asyncio.fixture

@@ -23,6 +23,7 @@ from starlette.testclient import TestClient
 
 from src.agent.agent import AgentLoop
 from src.agent.model_client import ContentDelta, ModelClient, StreamEvent, ToolCallsComplete
+from src.agent.provider_registry import AgentLoopRegistry
 from src.config.settings import CompactionSettings
 from src.constants import DB_SCHEMA
 from src.session.manager import SessionManager
@@ -103,8 +104,16 @@ def _make_app(
         for sid in pre_claim_sessions or []:
             await session_manager.try_claim_session(sid, ttl_seconds=300)
 
+        # Build registry (M6: _handle_chat_send uses registry)
+        registry = AgentLoopRegistry(default_provider="openai")
+        registry.register("openai", agent_loop, "test-model")
+
+        from tests.conftest import StubBudgetGate
+
+        app.state.agent_loop_registry = registry
         app.state.agent_loop = agent_loop
         app.state.session_manager = session_manager
+        app.state.budget_gate = StubBudgetGate()
         app.state.fake_model = model
         app.state.db_session_factory = db_session_factory
 

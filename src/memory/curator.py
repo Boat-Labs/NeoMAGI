@@ -69,10 +69,13 @@ class MemoryCurator:
         model_client: ModelClient,
         settings: MemorySettings,
         indexer: MemoryIndexer | None = None,
+        *,
+        model: str | None = None,
     ) -> None:
         self._model_client = model_client
         self._settings = settings
         self._indexer = indexer
+        self._model = model or settings.curation_model
 
     async def curate(
         self,
@@ -165,7 +168,7 @@ class MemoryCurator:
         response_text = ""
         async for event in self._model_client.chat_stream_with_tools(
             messages,
-            model="gpt-4o-mini",
+            model=self._model,
             temperature=self._settings.curation_temperature,
         ):
             from src.agent.model_client import ContentDelta
