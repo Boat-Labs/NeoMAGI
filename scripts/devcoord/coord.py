@@ -714,6 +714,100 @@ class CoordService:
                 action=f"waiting for next gate after {gate_id}",
             )
 
+    def recovery_check(
+        self,
+        milestone: str,
+        *,
+        role: str,
+        last_seen_gate: str,
+        task: str,
+    ) -> None:
+        normalized_milestone = _normalize_milestone(milestone)
+        normalized_role = _normalize_role(role)
+        normalized_last_seen_gate = last_seen_gate.strip() or "unknown"
+        requested_gate = _none_if_placeholder(normalized_last_seen_gate)
+        now = self.now_fn()
+        with self._locked():
+            issues = self._coord_issues(normalized_milestone)
+            snapshot = self._state_snapshot(issues, preferred_gate_id=requested_gate)
+            self._record_event(
+                issues=issues,
+                milestone=normalized_milestone,
+                phase=snapshot["phase"],
+                role=normalized_role,
+                status="stuck",
+                task=task,
+                event="RECOVERY_CHECK",
+                gate_id=snapshot["gate_id"],
+                target_commit=snapshot["target_commit"],
+                parent_id=snapshot["parent_id"],
+                ts=now,
+                last_seen_gate=normalized_last_seen_gate,
+                allowed_role=snapshot["allowed_role"],
+            )
+            action = "awaiting state sync from PM"
+            if snapshot["gate_id"]:
+                action = f"awaiting state sync for {snapshot['gate_id']}"
+            self._update_agent(
+                issues=self._coord_issues(normalized_milestone),
+                milestone=normalized_milestone,
+                role=normalized_role,
+                state="stuck",
+                task=task,
+                last_activity=now,
+                action=action,
+            )
+
+    def state_sync_ok(
+        self,
+        milestone: str,
+        *,
+        role: str,
+        gate_id: str,
+        target_commit: str,
+        task: str,
+    ) -> None:
+        normalized_milestone = _normalize_milestone(milestone)
+        normalized_role = _normalize_role(role)
+        now = self.now_fn()
+        with self._locked():
+            issues = self._coord_issues(normalized_milestone)
+            gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
+            current_target_commit = gate_issue.metadata_str("target_commit")
+            if current_target_commit and target_commit != current_target_commit:
+                raise CoordError(
+                    "state sync target_commit mismatch: "
+                    f"gate={gate_id} expected={current_target_commit} got={target_commit}"
+                )
+            resolved_target_commit = current_target_commit or target_commit
+            phase = gate_issue.metadata_str("phase")
+            allowed_role = gate_issue.metadata_str("allowed_role")
+            self._record_event(
+                issues=issues,
+                milestone=normalized_milestone,
+                phase=phase,
+                role="pm",
+                status="working",
+                task=task,
+                event="STATE_SYNC_OK",
+                gate_id=gate_id,
+                target_commit=resolved_target_commit,
+                parent_id=gate_issue.issue_id,
+                ts=now,
+                sync_role=normalized_role,
+                allowed_role=allowed_role,
+            )
+            commit_suffix = f" ({resolved_target_commit})" if resolved_target_commit else ""
+            self._update_agent(
+                issues=self._coord_issues(normalized_milestone),
+                milestone=normalized_milestone,
+                role=normalized_role,
+                state="idle",
+                task=task,
+                last_activity=now,
+                action=f"resume at {gate_id}{commit_suffix}",
+            )
+
     def gate_review(
         self,
         milestone: str,
@@ -935,12 +1029,15 @@ class CoordService:
         report_commit: str | None = None,
         report_path: str | None = None,
         source_message_id: str | None = None,
+        last_seen_gate: str | None = None,
+        sync_role: str | None = None,
+        allowed_role: str | None = None,
     ) -> str:
         next_seq = self._next_event_seq(issues)
         metadata = {
             KIND_KEY: "event",
             "milestone": milestone,
-            "phase": phase,
+            "phase": phase or "",
             "role": role,
             "status": status,
             "task": task,
@@ -955,13 +1052,17 @@ class CoordService:
             "report_commit": report_commit or "",
             "report_path": report_path or "",
             "source_message_id": source_message_id or "",
+            "last_seen_gate": last_seen_gate or "",
+            "sync_role": sync_role or "",
+            "allowed_role": allowed_role or "",
             "ts": ts,
         }
+        rendered_phase = phase or "na"
         return self.store.create_issue(
-            title=f"{event} {role} phase {phase}",
+            title=f"{event} {role} phase {rendered_phase}",
             issue_type="task",
             description=task,
-            labels=self._base_labels("event", milestone, phase=phase, role=role),
+            labels=self._base_labels("event", milestone, phase=phase or None, role=role),
             metadata=metadata,
             parent_id=parent_id,
         )
@@ -997,16 +1098,20 @@ class CoordService:
         self,
         issues: Sequence[IssueRecord],
         *,
-        phase: str,
+        phase: str | None,
         gate_id: str | None,
     ) -> str | None:
         if gate_id:
             gate_issue = self._find_single(issues, "gate", gate_id=gate_id)
             if gate_issue is not None:
                 return gate_issue.issue_id
-        phase_issue = self._find_single(issues, "phase", phase=phase)
-        if phase_issue is not None:
-            return phase_issue.issue_id
+        if phase:
+            phase_issue = self._find_single(issues, "phase", phase=phase)
+            if phase_issue is not None:
+                return phase_issue.issue_id
+        milestone_issue = self._find_single(issues, "milestone")
+        if milestone_issue is not None:
+            return milestone_issue.issue_id
         return None
 
     def _find_pending_message(
@@ -1081,6 +1186,68 @@ class CoordService:
     def _iter_kind(issues: Sequence[IssueRecord], kind: str) -> Iterable[IssueRecord]:
         return (issue for issue in issues if issue.metadata_str(KIND_KEY) == kind)
 
+    def _state_snapshot(
+        self,
+        issues: Sequence[IssueRecord],
+        *,
+        preferred_gate_id: str | None = None,
+    ) -> dict[str, str | None]:
+        gate_issue = None
+        if preferred_gate_id:
+            gate_issue = self._find_single(issues, "gate", gate_id=preferred_gate_id)
+        if gate_issue is None:
+            gate_issue = self._latest_gate(issues)
+        phase_issue = self._latest_phase(issues)
+        phase = ""
+        parent_id = None
+        gate_id = ""
+        target_commit = ""
+        allowed_role = ""
+        if gate_issue is not None:
+            phase = gate_issue.metadata_str("phase")
+            gate_id = gate_issue.metadata_str("gate_id")
+            target_commit = gate_issue.metadata_str("target_commit")
+            allowed_role = gate_issue.metadata_str("allowed_role")
+            parent_id = gate_issue.issue_id
+        elif phase_issue is not None:
+            phase = phase_issue.metadata_str("phase")
+            parent_id = phase_issue.issue_id
+        else:
+            milestone_issue = self._find_single(issues, "milestone")
+            if milestone_issue is not None:
+                parent_id = milestone_issue.issue_id
+        return {
+            "phase": phase,
+            "gate_id": gate_id,
+            "target_commit": target_commit,
+            "allowed_role": allowed_role,
+            "parent_id": parent_id,
+        }
+
+    @staticmethod
+    def _latest_gate(issues: Sequence[IssueRecord]) -> IssueRecord | None:
+        gates = sorted(
+            (
+                issue
+                for issue in issues
+                if issue.metadata_str(KIND_KEY) == "gate"
+            ),
+            key=lambda issue: (_phase_sort_key(issue.metadata_str("phase")), issue.issue_id),
+        )
+        return gates[-1] if gates else None
+
+    @staticmethod
+    def _latest_phase(issues: Sequence[IssueRecord]) -> IssueRecord | None:
+        phases = sorted(
+            (
+                issue
+                for issue in issues
+                if issue.metadata_str(KIND_KEY) == "phase"
+            ),
+            key=lambda issue: (_phase_sort_key(issue.metadata_str("phase")), issue.issue_id),
+        )
+        return phases[-1] if phases else None
+
     @staticmethod
     def _next_event_seq(issues: Sequence[IssueRecord]) -> int:
         max_seq = 0
@@ -1122,6 +1289,15 @@ class CoordService:
         source_message_id = issue.metadata_str("source_message_id")
         if source_message_id:
             payload["source_msg_id"] = source_message_id
+        last_seen_gate = issue.metadata_str("last_seen_gate")
+        if last_seen_gate:
+            payload["last_seen_gate"] = last_seen_gate
+        sync_role = issue.metadata_str("sync_role")
+        if sync_role:
+            payload["sync_role"] = _render_role(sync_role)
+        allowed_role = issue.metadata_str("allowed_role")
+        if allowed_role:
+            payload["allowed_role"] = _render_role(allowed_role)
         return payload
 
     def _render_gate_state(self, issues: Sequence[IssueRecord], milestone: str) -> str:
@@ -1284,6 +1460,25 @@ def build_parser() -> argparse.ArgumentParser:
     phase_complete_parser.add_argument("--task", required=True)
     phase_complete_parser.add_argument("--branch")
 
+    recovery_check_parser = subparsers.add_parser(
+        "recovery-check",
+        help="Record a RECOVERY_CHECK event after restart or context loss",
+    )
+    recovery_check_parser.add_argument("--milestone", required=True)
+    recovery_check_parser.add_argument("--role", required=True)
+    recovery_check_parser.add_argument("--last-seen-gate", required=True)
+    recovery_check_parser.add_argument("--task", required=True)
+
+    state_sync_ok_parser = subparsers.add_parser(
+        "state-sync-ok",
+        help="Record a STATE_SYNC_OK response from PM",
+    )
+    state_sync_ok_parser.add_argument("--milestone", required=True)
+    state_sync_ok_parser.add_argument("--role", required=True)
+    state_sync_ok_parser.add_argument("--gate", required=True)
+    state_sync_ok_parser.add_argument("--target-commit", required=True)
+    state_sync_ok_parser.add_argument("--task", required=True)
+
     gate_review_parser = subparsers.add_parser(
         "gate-review",
         help="Record a GATE_REVIEW_COMPLETE event",
@@ -1321,6 +1516,8 @@ def build_parser() -> argparse.ArgumentParser:
             "ack",
             "heartbeat",
             "phase-complete",
+            "recovery-check",
+            "state-sync-ok",
             "gate-review",
             "gate-close",
             "render",
@@ -1392,6 +1589,23 @@ def _execute_action(service: CoordService, command: str, payload: dict[str, Any]
             commit=_require_payload_str(payload, "commit"),
             task=_require_payload_str(payload, "task"),
             branch=_payload_str(payload, "branch", None),
+        )
+        return
+    if command == "recovery-check":
+        service.recovery_check(
+            _require_payload_str(payload, "milestone"),
+            role=_require_payload_str(payload, "role"),
+            last_seen_gate=_require_payload_str(payload, "last_seen_gate"),
+            task=_require_payload_str(payload, "task"),
+        )
+        return
+    if command == "state-sync-ok":
+        service.state_sync_ok(
+            _require_payload_str(payload, "milestone"),
+            role=_require_payload_str(payload, "role"),
+            gate_id=_payload_alias(payload, "gate_id", "gate"),
+            target_commit=_require_payload_str(payload, "target_commit"),
+            task=_require_payload_str(payload, "task"),
         )
         return
     if command == "gate-review":
@@ -1511,6 +1725,29 @@ def run_cli(
                     "commit": args.commit,
                     "task": args.task,
                     "branch": _none_if_placeholder(args.branch),
+                },
+            )
+        elif args.command == "recovery-check":
+            _execute_action(
+                service,
+                "recovery-check",
+                {
+                    "milestone": args.milestone,
+                    "role": args.role,
+                    "last_seen_gate": args.last_seen_gate,
+                    "task": args.task,
+                },
+            )
+        elif args.command == "state-sync-ok":
+            _execute_action(
+                service,
+                "state-sync-ok",
+                {
+                    "milestone": args.milestone,
+                    "role": args.role,
+                    "gate_id": args.gate,
+                    "target_commit": args.target_commit,
+                    "task": args.task,
                 },
             )
         elif args.command == "gate-review":

@@ -233,6 +233,103 @@ def test_ack_fails_closed_without_pending_message(tmp_path: Path) -> None:
         )
 
 
+def test_recovery_check_and_state_sync_render_projection(tmp_path: Path) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    clock = FakeClock(
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:20:00Z",
+        "2026-03-01T10:22:00Z",
+    )
+    service = CoordService(paths=paths, store=store, now_fn=clock)
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="open backend phase 1 gate",
+    )
+    service.ack(
+        "M7",
+        role="backend",
+        command="GATE_OPEN",
+        gate_id="G-M7-P1",
+        commit="abc1234",
+        task="ACK GATE_OPEN, starting Phase 1",
+    )
+    service.recovery_check(
+        "M7",
+        role="backend",
+        last_seen_gate="G-M7-P1",
+        task="context reset, requesting state sync",
+    )
+    service.state_sync_ok(
+        "M7",
+        role="backend",
+        gate_id="G-M7-P1",
+        target_commit="abc1234",
+        task="state sync complete after recovery",
+    )
+    service.render("M7")
+
+    log_dir = paths.log_dir("m7", "2026-03-01")
+    heartbeat_events = [
+        json.loads(line)
+        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [event["event"] for event in heartbeat_events] == [
+        "GATE_OPEN_SENT",
+        "ACK",
+        "GATE_EFFECTIVE",
+        "RECOVERY_CHECK",
+        "STATE_SYNC_OK",
+    ]
+    assert heartbeat_events[3]["last_seen_gate"] == "G-M7-P1"
+    assert heartbeat_events[3]["allowed_role"] == "backend"
+    assert heartbeat_events[4]["sync_role"] == "backend"
+    assert heartbeat_events[4]["allowed_role"] == "backend"
+
+    watchdog_status = (log_dir / "watchdog_status.md").read_text("utf-8")
+    assert (
+        "| backend | idle | 2026-03-01T10:22:00Z | state sync complete after recovery | none | "
+        "resume at G-M7-P1 (abc1234) |"
+    ) in watchdog_status
+
+
+def test_state_sync_ok_fails_closed_on_target_commit_mismatch(tmp_path: Path) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    service = CoordService(
+        paths=paths,
+        store=store,
+        now_fn=FakeClock("2026-03-01T10:01:00Z", "2026-03-01T10:05:00Z"),
+    )
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="open backend phase 1 gate",
+    )
+
+    with pytest.raises(CoordError, match="state sync target_commit mismatch"):
+        service.state_sync_ok(
+            "M7",
+            role="backend",
+            gate_id="G-M7-P1",
+            target_commit="wrong999",
+            task="state sync complete after recovery",
+        )
+
+
 def test_full_flow_renders_projection_files(tmp_path: Path) -> None:
     store = MemoryIssueStore()
     paths = make_paths(tmp_path)
