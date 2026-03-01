@@ -199,6 +199,8 @@ Phase 1 固定采用以下实现方式：
 - `uv run python scripts/devcoord/coord.py phase-complete`
 - `uv run python scripts/devcoord/coord.py recovery-check`
 - `uv run python scripts/devcoord/coord.py state-sync-ok`
+- `uv run python scripts/devcoord/coord.py ping`
+- `uv run python scripts/devcoord/coord.py unconfirmed-instruction`
 - `uv run python scripts/devcoord/coord.py stale-detected`
 - `uv run python scripts/devcoord/coord.py render`
 
@@ -214,10 +216,12 @@ Phase 1 固定采用以下实现方式：
 - `phase-complete`：写入阶段完成事件，更新 phase/gate 相关状态。
 - `recovery-check`：记录 teammate 重启/上下文压缩后的恢复请求，并将角色置为等待同步。
 - `state-sync-ok`：记录 PM 的状态同步确认，并将目标角色恢复到可继续执行状态。
+- `ping`：发送需要 ACK 的 `PING` 指令，用于超时观察窗口中的二次确认。
+- `unconfirmed-instruction`：记录“原指令仍未确认、已进入重复 PING”这一治理事件。
 - `stale-detected`：记录超时观察后判定的可疑失活，并将角色标记为 `suspected_stale`。
 - `render`：从 beads 投影到 `dev_docs`。
 
-补充命令如 `PING`、`unconfirmed-instruction` 在最小闭环跑通后再引入，避免过早扩大命令表面积。
+补充命令如 `LOG_PENDING`、`append-first audit helpers` 在最小闭环跑通后再引入，避免过早扩大命令表面积。
 后续若需要引入 `claim`、`handoff` 或开放竞争相关命令，也应作为执行层原语补充，而不是把执行路径反推回治理状态机。
 
 ## 9. 协议映射
@@ -264,6 +268,7 @@ Phase 1 固定采用以下实现方式：
 - projection 文件允许被覆盖重写，不允许人工增量维护。
 - projection 格式尽量兼容现有文件，降低切换成本。
 - `scripts/devcoord` 负责把内部控制面对象转换为现有 `heartbeat_events.jsonl` schema；该转换逻辑属于控制面实现的一部分，需要单独测试。
+- `project_progress.md` 采用 milestone-scoped generated block upsert：保留既有人工历史条目，只替换 `<!-- devcoord:begin milestone=... -->` 到 `<!-- devcoord:end milestone=... -->` 之间的控制面投影块。
 
 ### 10.3 兼容阶段
 - shadow mode 期间，保留旧文件并对比输出。
