@@ -408,6 +408,73 @@ def test_stale_detected_marks_watchdog_risk(tmp_path: Path) -> None:
     ) in watchdog_status
 
 
+def test_ping_and_unconfirmed_instruction_render_projection(tmp_path: Path) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    clock = FakeClock(
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:20:00Z",
+        "2026-03-01T10:31:00Z",
+    )
+    service = CoordService(paths=paths, store=store, now_fn=clock)
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="open backend phase 1 gate",
+    )
+    service.ack(
+        "M7",
+        role="backend",
+        command="GATE_OPEN",
+        gate_id="G-M7-P1",
+        commit="abc1234",
+        task="ACK GATE_OPEN, starting Phase 1",
+    )
+    service.ping(
+        "M7",
+        role="backend",
+        phase="1",
+        gate_id="G-M7-P1",
+        target_commit="abc1234",
+        task="PING backend after 20 minutes idle",
+    )
+    service.unconfirmed_instruction(
+        "M7",
+        role="backend",
+        command="GATE_OPEN",
+        phase="1",
+        gate_id="G-M7-P1",
+        target_commit="abc1234",
+        ping_count=2,
+        task="record unconfirmed gate open after repeated PING",
+    )
+    service.render("M7")
+
+    log_dir = paths.log_dir("m7", "2026-03-01")
+    heartbeat_events = [
+        json.loads(line)
+        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [event["event"] for event in heartbeat_events] == [
+        "GATE_OPEN_SENT",
+        "ACK",
+        "GATE_EFFECTIVE",
+        "PING_SENT",
+        "UNCONFIRMED_INSTRUCTION",
+    ]
+    assert heartbeat_events[3]["target_role"] == "backend"
+    assert heartbeat_events[4]["command_name"] == "GATE_OPEN"
+    assert heartbeat_events[4]["target_role"] == "backend"
+    assert heartbeat_events[4]["ping_count"] == 2
+
+
 def test_state_sync_ok_fails_closed_on_target_commit_mismatch(tmp_path: Path) -> None:
     store = MemoryIssueStore()
     paths = make_paths(tmp_path)
@@ -515,6 +582,12 @@ def test_full_flow_renders_projection_files(tmp_path: Path) -> None:
     ) in watchdog_status
     assert "| tester | idle |  |  | none | awaiting gate |" in watchdog_status
 
+    progress = paths.progress_file.read_text("utf-8")
+    assert progress.count("<!-- devcoord:begin milestone=m7 -->") == 1
+    assert "## 2026-03-01 (generated) | M7" in progress
+    assert "- Status: in_progress" in progress
+    assert "- Next: 继续推进 G-M7-P1，当前 allowed_role=backend" in progress
+
 
 def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
     store = MemoryIssueStore()
@@ -608,6 +681,11 @@ def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
         "| tester | done | 2026-03-01T10:15:00Z | Phase 1 review PASS | none | "
         "review submitted for G-M7-P1 |"
     ) in watchdog_status
+
+    progress = paths.progress_file.read_text("utf-8")
+    assert progress.count("<!-- devcoord:begin milestone=m7 -->") == 1
+    assert "- Status: done" in progress
+    assert f"`{report_path}` ({report_commit})" in progress
 
 
 def test_gate_close_requires_rendered_reconciliation(tmp_path: Path) -> None:

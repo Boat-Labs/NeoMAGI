@@ -5,6 +5,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -857,6 +858,102 @@ class CoordService:
                 stale_risk="suspected_stale",
             )
 
+    def ping(
+        self,
+        milestone: str,
+        *,
+        role: str,
+        phase: str,
+        gate_id: str,
+        task: str,
+        target_commit: str | None = None,
+    ) -> None:
+        normalized_milestone = _normalize_milestone(milestone)
+        normalized_role = _normalize_role(role)
+        now = self.now_fn()
+        with self._locked():
+            issues = self._coord_issues(normalized_milestone)
+            gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
+            resolved_target_commit = target_commit or gate_issue.metadata_str("target_commit")
+            self.store.create_issue(
+                title=f"PING -> {normalized_role}",
+                issue_type="task",
+                description=task,
+                labels=self._base_labels(
+                    "message",
+                    normalized_milestone,
+                    phase=phase,
+                    role=normalized_role,
+                ),
+                metadata={
+                    KIND_KEY: "message",
+                    "milestone": normalized_milestone,
+                    "phase": phase,
+                    "gate_id": gate_id,
+                    "role": normalized_role,
+                    "command": "PING",
+                    "requires_ack": True,
+                    "effective": False,
+                    "target_commit": resolved_target_commit,
+                    "allowed_role": normalized_role,
+                    "sent_at": now,
+                    "task": task,
+                },
+                assignee=normalized_role,
+                parent_id=gate_issue.issue_id,
+            )
+            self._record_event(
+                issues=self._coord_issues(normalized_milestone),
+                milestone=normalized_milestone,
+                phase=phase,
+                role="pm",
+                status="working",
+                task=task,
+                event="PING_SENT",
+                gate_id=gate_id,
+                target_commit=resolved_target_commit,
+                parent_id=gate_issue.issue_id,
+                ts=now,
+                target_role=normalized_role,
+            )
+
+    def unconfirmed_instruction(
+        self,
+        milestone: str,
+        *,
+        role: str,
+        command: str,
+        phase: str,
+        gate_id: str,
+        task: str,
+        target_commit: str | None = None,
+        ping_count: int | None = None,
+    ) -> None:
+        normalized_milestone = _normalize_milestone(milestone)
+        normalized_role = _normalize_role(role)
+        command_name = command.upper()
+        now = self.now_fn()
+        with self._locked():
+            issues = self._coord_issues(normalized_milestone)
+            gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
+            resolved_target_commit = target_commit or gate_issue.metadata_str("target_commit")
+            self._record_event(
+                issues=issues,
+                milestone=normalized_milestone,
+                phase=phase,
+                role="pm",
+                status="working",
+                task=task,
+                event="UNCONFIRMED_INSTRUCTION",
+                gate_id=gate_id,
+                target_commit=resolved_target_commit,
+                parent_id=gate_issue.issue_id,
+                ts=now,
+                command_name=command_name,
+                target_role=normalized_role,
+                ping_count=ping_count,
+            )
+
     def gate_review(
         self,
         milestone: str,
@@ -1005,6 +1102,18 @@ class CoordService:
         gate_state_path.write_text(self._render_gate_state(issues, normalized_milestone), "utf-8")
         watchdog_path = log_dir / "watchdog_status.md"
         watchdog_path.write_text(self._render_watchdog(issues, normalized_milestone), "utf-8")
+        self.paths.progress_file.parent.mkdir(parents=True, exist_ok=True)
+        self.paths.progress_file.write_text(
+            self._render_project_progress(
+                milestone=normalized_milestone,
+                run_date=run_date,
+                issues=issues,
+                existing=self.paths.progress_file.read_text("utf-8")
+                if self.paths.progress_file.exists()
+                else "",
+            ),
+            "utf-8",
+        )
 
     def _coord_issues(self, milestone: str) -> list[IssueRecord]:
         return [
@@ -1092,6 +1201,8 @@ class CoordService:
         last_seen_gate: str | None = None,
         sync_role: str | None = None,
         allowed_role: str | None = None,
+        command_name: str | None = None,
+        target_role: str | None = None,
         ping_count: int | None = None,
     ) -> str:
         next_seq = self._next_event_seq(issues)
@@ -1116,6 +1227,8 @@ class CoordService:
             "last_seen_gate": last_seen_gate or "",
             "sync_role": sync_role or "",
             "allowed_role": allowed_role or "",
+            "command_name": command_name or "",
+            "target_role": target_role or "",
             "ping_count": ping_count,
             "ts": ts,
         }
@@ -1485,6 +1598,12 @@ class CoordService:
         allowed_role = issue.metadata_str("allowed_role")
         if allowed_role:
             payload["allowed_role"] = _render_role(allowed_role)
+        command_name = issue.metadata_str("command_name")
+        if command_name:
+            payload["command_name"] = command_name
+        target_role = issue.metadata_str("target_role")
+        if target_role:
+            payload["target_role"] = _render_role(target_role)
         ping_count = issue.metadata.get("ping_count")
         if ping_count is not None:
             payload["ping_count"] = ping_count
@@ -1569,6 +1688,108 @@ class CoordService:
                 )
                 + " |"
             )
+        return "\n".join(lines) + "\n"
+
+    def _render_project_progress(
+        self,
+        *,
+        milestone: str,
+        run_date: str,
+        issues: Sequence[IssueRecord],
+        existing: str,
+    ) -> str:
+        begin_marker = f"<!-- devcoord:begin milestone={milestone} -->"
+        end_marker = f"<!-- devcoord:end milestone={milestone} -->"
+        block = self._project_progress_block(
+            milestone=milestone,
+            run_date=run_date,
+            issues=issues,
+            begin_marker=begin_marker,
+            end_marker=end_marker,
+        )
+        base = existing or "# Project Progress\n"
+        pattern = re.compile(
+            rf"{re.escape(begin_marker)}\n.*?\n{re.escape(end_marker)}\n?",
+            flags=re.DOTALL,
+        )
+        if pattern.search(base):
+            updated = pattern.sub(block, base)
+        else:
+            updated = base.rstrip() + "\n\n" + block
+        return updated if updated.endswith("\n") else updated + "\n"
+
+    def _project_progress_block(
+        self,
+        *,
+        milestone: str,
+        run_date: str,
+        issues: Sequence[IssueRecord],
+        begin_marker: str,
+        end_marker: str,
+    ) -> str:
+        latest_gate = self._latest_gate(issues)
+        non_pm_agents = sorted(
+            (
+                issue
+                for issue in self._iter_kind(issues, "agent")
+                if issue.metadata_str("role") != "pm"
+            ),
+            key=lambda issue: issue.metadata_str("role"),
+        )
+        status = "in_progress"
+        done_summary = "control plane initialized"
+        evidence_parts = [
+            f"`dev_docs/logs/{milestone}_{run_date}/gate_state.md`",
+            f"`dev_docs/logs/{milestone}_{run_date}/watchdog_status.md`",
+        ]
+        next_step = f"等待 {milestone.upper()} 下一条 gate 或 phase 指令"
+        risk = "无"
+        if latest_gate is not None:
+            gate_id = latest_gate.metadata_str("gate_id")
+            gate_state = latest_gate.metadata_str("gate_state", "pending")
+            gate_result = latest_gate.metadata_str("result")
+            agent_summary = ", ".join(
+                f"{agent.metadata_str('role')}={agent.metadata_str('agent_state')}"
+                for agent in non_pm_agents
+            ) or "no-agents"
+            done_summary = f"最新 gate {gate_id} 为 {gate_state}"
+            if gate_result:
+                done_summary += f" ({gate_result})"
+            done_summary += f"；{agent_summary}"
+            if gate_state == "closed" and gate_result in {"PASS", "PASS_WITH_RISK"}:
+                status = "done"
+            report_path = latest_gate.metadata_str("report_path")
+            report_commit = latest_gate.metadata_str("report_commit")
+            if report_path and report_commit:
+                evidence_parts.append(f"`{report_path}` ({report_commit})")
+            if gate_state == "open":
+                next_step = (
+                    f"继续推进 {gate_id}，当前 allowed_role="
+                    f"{latest_gate.metadata_str('allowed_role') or 'unknown'}"
+                )
+            elif gate_state == "closed":
+                next_step = f"{gate_id} 已关闭，等待 {milestone.upper()} 下一条 gate"
+            if gate_result == "FAIL":
+                risk = f"{gate_id} 关闭结果为 FAIL"
+            elif gate_result == "PASS_WITH_RISK":
+                risk = f"{gate_id} 关闭结果为 PASS_WITH_RISK"
+        stale_agents = [
+            agent.metadata_str("role")
+            for agent in non_pm_agents
+            if agent.metadata_str("stale_risk", "none") != "none"
+        ]
+        if stale_agents:
+            risk = f"stale_risk={'/'.join(stale_agents)}"
+        lines = [
+            begin_marker,
+            f"## {run_date} (generated) | {milestone.upper()}",
+            f"- Status: {status}",
+            f"- Done: {done_summary}",
+            f"- Evidence: {', '.join(evidence_parts)}",
+            f"- Next: {next_step}",
+            f"- Risk: {risk}",
+            end_marker,
+        ]
         return "\n".join(lines) + "\n"
 
     @contextlib.contextmanager
@@ -1669,6 +1890,30 @@ def build_parser() -> argparse.ArgumentParser:
     state_sync_ok_parser.add_argument("--target-commit", required=True)
     state_sync_ok_parser.add_argument("--task", required=True)
 
+    ping_parser = subparsers.add_parser(
+        "ping",
+        help="Send a PING message that requires ACK",
+    )
+    ping_parser.add_argument("--milestone", required=True)
+    ping_parser.add_argument("--role", required=True)
+    ping_parser.add_argument("--phase", required=True)
+    ping_parser.add_argument("--gate", required=True)
+    ping_parser.add_argument("--task", required=True)
+    ping_parser.add_argument("--target-commit")
+
+    unconfirmed_instruction_parser = subparsers.add_parser(
+        "unconfirmed-instruction",
+        help="Record an unconfirmed instruction after repeated PING attempts",
+    )
+    unconfirmed_instruction_parser.add_argument("--milestone", required=True)
+    unconfirmed_instruction_parser.add_argument("--role", required=True)
+    unconfirmed_instruction_parser.add_argument("--cmd", required=True)
+    unconfirmed_instruction_parser.add_argument("--phase", required=True)
+    unconfirmed_instruction_parser.add_argument("--gate", required=True)
+    unconfirmed_instruction_parser.add_argument("--task", required=True)
+    unconfirmed_instruction_parser.add_argument("--target-commit")
+    unconfirmed_instruction_parser.add_argument("--ping-count", type=int)
+
     stale_detected_parser = subparsers.add_parser(
         "stale-detected",
         help="Record a suspected stale role after timeout checks",
@@ -1720,6 +1965,8 @@ def build_parser() -> argparse.ArgumentParser:
             "phase-complete",
             "recovery-check",
             "state-sync-ok",
+            "ping",
+            "unconfirmed-instruction",
             "stale-detected",
             "gate-review",
             "gate-close",
@@ -1809,6 +2056,31 @@ def _execute_action(service: CoordService, command: str, payload: dict[str, Any]
             gate_id=_payload_alias(payload, "gate_id", "gate"),
             target_commit=_require_payload_str(payload, "target_commit"),
             task=_require_payload_str(payload, "task"),
+        )
+        return
+    if command == "ping":
+        service.ping(
+            _require_payload_str(payload, "milestone"),
+            role=_require_payload_str(payload, "role"),
+            phase=_require_payload_str(payload, "phase"),
+            gate_id=_payload_alias(payload, "gate_id", "gate"),
+            task=_require_payload_str(payload, "task"),
+            target_commit=_payload_str(payload, "target_commit", None),
+        )
+        return
+    if command == "unconfirmed-instruction":
+        ping_count = payload.get("ping_count")
+        if ping_count is not None:
+            ping_count = int(ping_count)
+        service.unconfirmed_instruction(
+            _require_payload_str(payload, "milestone"),
+            role=_require_payload_str(payload, "role"),
+            command=_payload_alias(payload, "command", "cmd"),
+            phase=_require_payload_str(payload, "phase"),
+            gate_id=_payload_alias(payload, "gate_id", "gate"),
+            task=_require_payload_str(payload, "task"),
+            target_commit=_payload_str(payload, "target_commit", None),
+            ping_count=ping_count,
         )
         return
     if command == "stale-detected":
@@ -1965,6 +2237,34 @@ def run_cli(
                     "gate_id": args.gate,
                     "target_commit": args.target_commit,
                     "task": args.task,
+                },
+            )
+        elif args.command == "ping":
+            _execute_action(
+                service,
+                "ping",
+                {
+                    "milestone": args.milestone,
+                    "role": args.role,
+                    "phase": args.phase,
+                    "gate_id": args.gate,
+                    "task": args.task,
+                    "target_commit": _none_if_placeholder(args.target_commit),
+                },
+            )
+        elif args.command == "unconfirmed-instruction":
+            _execute_action(
+                service,
+                "unconfirmed-instruction",
+                {
+                    "milestone": args.milestone,
+                    "role": args.role,
+                    "command": args.cmd,
+                    "phase": args.phase,
+                    "gate_id": args.gate,
+                    "task": args.task,
+                    "target_commit": _none_if_placeholder(args.target_commit),
+                    "ping_count": args.ping_count,
                 },
             )
         elif args.command == "stale-detected":
