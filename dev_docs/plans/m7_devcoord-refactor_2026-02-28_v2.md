@@ -147,4 +147,4 @@
 1. 用 ADR 0043 覆盖 devcoord 运行时入口口径。
 2. 删除 `justfile` 中 devcoord recipes。
 3. 将 skill / prompt / review 文案统一改为 `scripts/devcoord` 直接入口。
-4. 继续补 `recovery-check / state-sync-ok / stale-detected / fail-guards`。
+4. 继续补 `stale-detected / gate-close fail-guards / project_progress projection`。
