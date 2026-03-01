@@ -1063,6 +1063,10 @@ class CoordService:
                     latest_logged_event_seq = max(
                         latest_logged_event_seq, int(payload.get("event_seq") or 0)
                     )
+        gate_states = {
+            issue.metadata_str("gate_id"): issue.metadata_str("gate_state", "pending")
+            for issue in self._iter_kind(issues, "gate")
+        }
         pending_ack_messages = sorted(
             [
                 {
@@ -1073,7 +1077,9 @@ class CoordService:
                     "target_commit": issue.metadata_str("target_commit"),
                 }
                 for issue in self._iter_kind(issues, "message")
-                if issue.metadata_bool("requires_ack") and not issue.metadata_bool("effective")
+                if issue.metadata_bool("requires_ack")
+                and not issue.metadata_bool("effective")
+                and gate_states.get(issue.metadata_str("gate_id"), "pending") != "closed"
             ],
             key=lambda payload: (
                 payload["phase"],
