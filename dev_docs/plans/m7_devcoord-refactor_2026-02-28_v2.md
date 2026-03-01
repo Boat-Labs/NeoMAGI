@@ -58,6 +58,7 @@
 - agent 的正式写路径固定为：`scripts/devcoord/coord.py`
 - 优先使用结构化 payload（`--payload-file` 或 stdin JSON），避免长参数串和 shell quoting 漂移。
 - beads 直连仅允许用于 inspection/query，不允许替代 wrapper 进行协议写入。
+- 共享控制面默认目录固定为仓库根 `.beads`；`.coord/beads` 不再作为默认 fallback。
 
 ## 4. 执行阶段
 

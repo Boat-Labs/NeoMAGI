@@ -79,7 +79,8 @@ LLM
 
 ### 4.1 共享控制面目录
 - 所有 worktree 共享同一个 `BEADS_DIR`。
-- wrapper 优先复用仓库根现有 `.beads/`；若仓库未初始化 beads，再回退到 `.coord/beads/`。
+- 默认共享控制面目录固定为仓库根 `.beads/`。
+- `.coord/beads/` 只视为早期草案阶段的 legacy path，不再作为隐式 fallback。
 - 初期只做本机共享，不开启远程 sync。
 
 ### 4.2 原因
@@ -89,6 +90,7 @@ LLM
 ### 4.3 启动要求
 - wrapper 启动时校验 `BEADS_DIR` 已固定。
 - wrapper 启动时校验当前 worktree 不是在使用本地私有 `.beads`。
+- 若检测到孤立的 `.coord/beads/` 且仓库根 `.beads/` 不存在，直接 fail-closed，要求显式迁移或 override。
 - 若发现控制面路径不一致，直接 fail-closed。
 
 ## 5. 对象模型
