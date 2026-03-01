@@ -45,6 +45,7 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0039 | OpenAI primary development test model: gpt-5-mini | accepted | 2026-02-24 | `decisions/0039-openai-primary-development-test-model-gpt-5-mini.md` |
 | 0040 | M6 provider routing granularity: agent-run boundary | accepted | 2026-02-25 | `decisions/0040-m6-provider-routing-granularity-agent-run-boundary.md` |
 | 0041 | M6 budget gate concurrency semantics: all-provider multi-worker safe | accepted | 2026-02-25 | `decisions/0041-m6-budget-gate-concurrency-semantics-all-provider-multi-worker-safe.md` |
+| 0042 | Devcoord control plane: beads SSOT with dev_docs projection | proposed | 2026-02-28 | `decisions/0042-devcoord-control-plane-beads-ssot-with-dev-docs-projection.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。
