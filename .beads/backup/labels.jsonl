@@ -52,3 +52,13 @@
 {"issue_id":"NeoMAGI-3v2.4.1.6","label":"coord-milestone-m7"}
 {"issue_id":"NeoMAGI-3v2.4.1.6","label":"coord-phase-1"}
 {"issue_id":"NeoMAGI-3v2.4.1.6","label":"coord-role-backend"}
+{"issue_id":"NeoMAGI-3v2.4.1.7","label":"coord"}
+{"issue_id":"NeoMAGI-3v2.4.1.7","label":"coord-kind-event"}
+{"issue_id":"NeoMAGI-3v2.4.1.7","label":"coord-milestone-m7"}
+{"issue_id":"NeoMAGI-3v2.4.1.7","label":"coord-phase-1"}
+{"issue_id":"NeoMAGI-3v2.4.1.7","label":"coord-role-tester"}
+{"issue_id":"NeoMAGI-3v2.4.1.8","label":"coord"}
+{"issue_id":"NeoMAGI-3v2.4.1.8","label":"coord-kind-event"}
+{"issue_id":"NeoMAGI-3v2.4.1.8","label":"coord-milestone-m7"}
+{"issue_id":"NeoMAGI-3v2.4.1.8","label":"coord-phase-1"}
+{"issue_id":"NeoMAGI-3v2.4.1.8","label":"coord-role-pm"}
