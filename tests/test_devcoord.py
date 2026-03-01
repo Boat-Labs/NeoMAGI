@@ -1080,3 +1080,55 @@ def test_gate_close_requires_visible_report_commit(tmp_path: Path) -> None:
             report_path=report_path,
             task="close gate after review",
         )
+
+
+def test_audit_ignores_pending_ack_for_closed_gate(tmp_path: Path) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
+    report_commit = init_git_repo_with_review(paths, report_path)
+    service = CoordService(
+        paths=paths,
+        store=store,
+        now_fn=FakeClock(
+            "2026-03-01T10:01:00Z",
+            "2026-03-01T10:05:00Z",
+            "2026-03-01T10:10:00Z",
+            "2026-03-01T10:15:00Z",
+        ),
+    )
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="open backend gate that stays unacked",
+    )
+    service.gate_review(
+        "M7",
+        role="pm",
+        phase="1",
+        gate_id="G-M7-P1",
+        result="PASS",
+        report_commit=report_commit,
+        report_path=report_path,
+        task="record blocked preflight review",
+    )
+    service.render("M7")
+    service.gate_close(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        result="PASS",
+        report_commit=report_commit,
+        report_path=report_path,
+        task="close blocked preflight gate",
+    )
+    service.render("M7")
+
+    audit = service.audit("M7")
+    assert audit["open_gates"] == []
+    assert audit["pending_ack_messages"] == []
