@@ -2,5 +2,5 @@
 
 | role | status | last_heartbeat | current_task | stale_risk | action |
 |------|--------|----------------|--------------|------------|--------|
-| backend | done | 2026-03-01T12:00:48Z | Phase 1 skeleton and live environment validation complete | none | waiting for next gate after G-M7-P1 |
-| tester | done | 2026-03-01T12:31:23Z | Phase 1 review PASS | none | review submitted for G-M7-P1 |
+| backend | done | 2026-03-01T17:23:14Z | backend phase 2 PM-first cutover result ready for review | none | waiting for next gate after G-M7-P2 |
+| tester | done | 2026-03-01T17:24:30Z | tester accepts M7 phase 2 PM-first cutover review | none | review submitted for G-M7-P2 |

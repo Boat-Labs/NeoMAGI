@@ -253,3 +253,12 @@
 - Reports: `dev_docs/reports/m6_eval_openai_1772064537.json`, `dev_docs/reports/m6_eval_gemini_1772064602.json`, `dev_docs/reports/m6_migration_conclusion.md`
 - Next: M6 关闭，参考 roadmap_milestones_v3.md 确定下一阶段
 - Risk: Gemini T13 长上下文 + 工具历史场景 400 INVALID_ARGUMENT 为已知限制，可通过 compaction 阈值调优缓解
+
+<!-- devcoord:begin milestone=m7 -->
+## 2026-03-01 (generated) | M7
+- Status: done
+- Done: 最新 gate G-M7-P2 为 closed (PASS)；backend=done, tester=done
+- Evidence: `dev_docs/logs/m7_2026-03-01/gate_state.md`, `dev_docs/logs/m7_2026-03-01/watchdog_status.md`, `dev_docs/reviews/m7_phase2_2026-03-01.md` (cea1fb5)
+- Next: G-M7-P2 已关闭，等待 M7 下一条 gate
+- Risk: 无
+<!-- devcoord:end milestone=m7 -->
