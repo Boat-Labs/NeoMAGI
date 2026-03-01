@@ -7,3 +7,5 @@
 | G-M7-P3 | 3 | closed | PASS_WITH_RISK | 2026-03-01T21:45:56Z | 2026-03-01T21:48:10Z | a3a7a08 | dev_docs/reviews/m7_phase3_2026-03-01.md (2ad37fa) |
 | G-M7-P4 | 4 | closed | FAIL | 2026-03-01T22:17:36Z | 2026-03-01T22:17:50Z | a1e5119 | dev_docs/reviews/m7_phase4_2026-03-01.md (b7af7d7) |
 | G-M7-P5 | 5 | closed | PASS_WITH_RISK | 2026-03-01T22:17:39Z | 2026-03-01T22:17:51Z | cd6e40f | dev_docs/reviews/m7_phase5_2026-03-01.md (b7af7d7) |
+| G-M7-P6-NEG | 6 | closed | PASS |  | 2026-03-01T22:33:41Z | cd6e40f | dev_docs/reviews/m7_phase6_2026-03-01.md (0a300c2) |
+| G-M7-P6-POS | 6 | closed | PASS | 2026-03-01T22:32:15Z | 2026-03-01T22:33:42Z | 255da2f545260505fbbc9cb0f0a678e82641bc2c | dev_docs/reviews/m7_phase6_2026-03-01.md (0a300c2) |
