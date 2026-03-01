@@ -1,0 +1,97 @@
+# Claude Code Skill Triggering Notes
+
+> 日期：2026-03-01
+> 范围：NeoMAGI M7 teammate cutover
+
+## 1. 结论
+
+- Claude Code 的 skill 触发不能只看自然语言回答，必须看 CLI debug 日志。
+- frontmatter 的 `description` 是自动发现的关键入口，必须同时写清楚：
+  - 这个 skill 做什么
+  - 什么时候必须使用
+  - 用户/PM 可能说出的关键词
+- 对 devcoord 这类高约束流程，显式提及 skill 名称仍是当前最稳的测试方式。
+
+## 2. 官方口径
+
+- Claude 官方文档明确要求 `description` 既描述能力，也描述使用时机。
+- 官方建议用具体 trigger/context 测试 skill，而不是只写泛泛说明。
+- Claude Code project skill 更新后，需要重启会话才能稳定加载新版本。
+
+参考：
+- `https://docs.claude.com/en/docs/claude-code/skills`
+- `https://docs.claude.com/en/docs/agents-and-tools/agent-skills/best-practices`
+- `https://support.claude.com/en/articles/12512198-how-to-create-custom-skills`
+
+## 3. 本地 CLI 实验结果
+
+环境：
+- Claude Code CLI `2.1.63`
+- 项目 skill 目录：`.claude/skills/`
+
+显式触发实验：
+- 命令提示中直接写 `Use the devcoord-tester skill for this repository`
+- debug 日志出现：
+  - `Loading skills from: ... project=[.../.claude/skills]`
+  - `Loaded 10 unique skills ... project: 3`
+  - `Metadata string for devcoord-tester`
+  - `processPromptSlashCommand creating 3 messages for devcoord-tester`
+  - `SkillTool returning 2 newMessages for skill devcoord-tester`
+
+这说明：
+- project skills 被 CLI 正常加载
+- `devcoord-tester` 被当作实际 `Skill` 工具执行，而不是普通文本记忆
+
+## 4. 当前已知黑盒点
+
+- `--disable-slash-commands` 在本机 `2.1.63` 上不应被视为可靠的负对照。
+- 在一次显式命名 skill 的实验中，disabled 模式下 debug 仍出现了：
+  - `Metadata string for devcoord-tester`
+  - `processPromptSlashCommand ... devcoord-tester`
+  - `SkillTool returning ... devcoord-tester`
+- 因此，当前更可靠的判据是：
+  - 是否出现 `SkillTool returning ...`
+  - 是否命中了预期 skill 名
+  - 是否把 skill 正文作为 tool attachment 注入
+
+## 5. 对 devcoord skills 的写法要求
+
+- `description` 必须带角色语境：`PM` / `backend teammate` / `tester teammate`
+- `description` 必须带命令触发词：如 `open-gate`、`heartbeat`、`phase-complete`、`recovery-check`、`gate-review`
+- skill 正文继续保留角色边界、必需动作、payload 约束
+- 不把复杂状态机逻辑塞进 skill；skill 只负责调用规范和触发提示
+
+## 6. 推荐验证方法
+
+使用：
+
+```bash
+scripts/devcoord/check_skill_activation.sh devcoord-tester \
+  "Use the devcoord-tester skill for this repository. After gate-review, what exact next-step behavior is required?"
+```
+
+关注输出：
+- Claude 最终回答
+- `debug_log=/tmp/...`
+- `processPromptSlashCommand ... <skill-name>`
+- `SkillTool returning ... skill <skill-name>`
+
+若要试验当前 CLI 对 disabled 模式的行为，可加：
+
+```bash
+DISABLE_SLASH_COMMANDS=1 scripts/devcoord/check_skill_activation.sh devcoord-tester \
+  "Use the devcoord-tester skill for this repository. After gate-review, what exact next-step behavior is required?"
+```
+
+但 disabled 模式目前只可作为行为观察，不可作为严格否证。
+
+## 7. 社区经验摘要
+
+- 社区普遍反馈：纯自然语言自动匹配不够稳定，尤其在 skill 多、任务复杂时更明显。
+- 比较一致的经验是：
+  - `description` 要具体，不要写成泛能力词
+  - 明确的 trigger phrases 比抽象职责描述更有效
+  - 需要重复验证，而不是一次命中就当作稳定
+  - 对关键流程可用 hook /显式 skill 名称降低漏触发概率
+
+这与 devcoord 当前“高约束、低容错”的场景一致，因此 M7 teammate cutover 阶段应优先追求可验证性，而不是追求完全隐式自动触发。

@@ -73,6 +73,7 @@ LLM
   - `.claude/skills/devcoord-backend/SKILL.md`
   - `.claude/skills/devcoord-tester/SKILL.md`
 - skill 文件遵循 Claude Skills 官方 `SKILL.md` frontmatter 模板，正文只保留触发条件、工作流和边界约束。
+- skill 触发验证使用 `scripts/devcoord/check_skill_activation.sh`；触发经验和 CLI debug 判据记录在 `dev_docs/devcoord/claude_code_skill_triggering.md`。
 
 ### 3.6 治理层与执行层
 - 治理层回答“现在谁被允许推进、什么条件下可以关闭/恢复/继续”。

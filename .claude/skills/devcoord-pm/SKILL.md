@@ -1,6 +1,6 @@
 ---
 name: devcoord-pm
-description: Use when the agent is acting as the NeoMAGI PM and needs to drive devcoord gates, recovery, stale handling, audit, render, or gate closure through scripts/devcoord/coord.py.
+description: Drive NeoMAGI devcoord gate control, recovery sync, stale handling, projection rendering, audit, and gate closure through scripts/devcoord/coord.py. Use when acting as the PM or when the request mentions open-gate, state-sync-ok, ping, unconfirmed-instruction, stale-detected, log-pending, render, audit, gate-review, or gate-close.
 ---
 
 # Devcoord PM
@@ -9,6 +9,7 @@ This skill is the PM-side operating contract for NeoMAGI devcoord after the cont
 
 ## Use this skill when
 
+- acting as the NeoMAGI PM for devcoord
 - issuing or advancing a gate
 - translating teammate status into control-plane events
 - handling recovery, timeout, stale, or append-first exceptions

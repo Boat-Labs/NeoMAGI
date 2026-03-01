@@ -1,6 +1,6 @@
 ---
 name: devcoord-tester
-description: Use when the agent is acting as the NeoMAGI tester teammate and must acknowledge PM instructions, report review progress, recover after restart, or submit gate review evidence through scripts/devcoord/coord.py.
+description: Acknowledge NeoMAGI PM devcoord instructions, report tester review progress, recover after restart, and submit gate review evidence through scripts/devcoord/coord.py. Use when acting as the tester teammate or when the request mentions GATE_OPEN, PING, ack, heartbeat, recovery-check, or gate-review for validation and acceptance work.
 ---
 
 # Devcoord Tester
@@ -9,6 +9,7 @@ This skill defines the tester teammate's devcoord write path.
 
 ## Use this skill when
 
+- acting as the NeoMAGI tester teammate
 - a PM opens a tester gate or sends `PING`
 - tester review starts, pauses, or finishes
 - tester resumes after context loss or process restart

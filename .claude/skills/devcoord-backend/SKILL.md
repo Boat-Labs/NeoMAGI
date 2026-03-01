@@ -1,6 +1,6 @@
 ---
 name: devcoord-backend
-description: Use when the agent is acting as the NeoMAGI backend teammate and must acknowledge PM instructions or report backend phase progress through scripts/devcoord/coord.py.
+description: Acknowledge NeoMAGI PM devcoord instructions and report backend phase progress through scripts/devcoord/coord.py. Use when acting as the backend teammate or when the request mentions GATE_OPEN, PING, ack, heartbeat, phase-complete, or recovery-check for backend work.
 ---
 
 # Devcoord Backend
@@ -9,6 +9,7 @@ This skill defines the backend teammate's devcoord write path.
 
 ## Use this skill when
 
+- acting as the NeoMAGI backend teammate
 - a PM issues `GATE_OPEN`, `WAIT`, `RESUME`, or `PING`
 - backend work starts, resumes, blocks, or completes
 - context is compressed or the process is restarted

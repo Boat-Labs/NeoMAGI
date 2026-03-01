@@ -95,9 +95,12 @@
 - 产物：
   - `.claude/skills/devcoord-backend/SKILL.md`
   - `.claude/skills/devcoord-tester/SKILL.md`
+  - `scripts/devcoord/check_skill_activation.sh`
+  - `dev_docs/devcoord/claude_code_skill_triggering.md`
 - 要求：
   - `ACK`、`HEARTBEAT`、`PHASE_COMPLETE`、`RECOVERY_CHECK` 统一走 wrapper
   - 禁止直接编辑 `dev_docs/logs/*`
+  - 用 Claude Code CLI debug 日志验证 skill 实际命中，而不是只看自然语言回答
 
 ### Phase 5：Projection-Only 收口
 - 产物：
