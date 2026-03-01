@@ -77,6 +77,8 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 
 - PM spawn teammate 时，prompt 必须显式包含以下协议摘要：`Gate 状态机`、`指令 ACK 生效机制`、`恢复/重启握手`、`worktree/分支同步协议`、`验收产物可见性闭环（commit + push）`。
 - 如使用 Claude Code，PM / backend / tester 分别加载 `.claude/skills/devcoord-pm/SKILL.md`、`.claude/skills/devcoord-backend/SKILL.md`、`.claude/skills/devcoord-tester/SKILL.md`。
+- 对 Claude Code 的 devcoord 关键流程，spawn prompt 必须显式写出对应 skill 名称，并优先使用 slash 形式（如 `/devcoord-backend`、`/devcoord-tester`）降低同名/近义语义污染。
+- 对 Claude Code 的 devcoord 关键流程，PM 应至少用一次 Claude Code CLI debug 日志验证技能实际命中；`processPromptSlashCommand` 或 `SkillTool returning` 命中预期 skill 才算有效注入证据。
 - 未完成上述规则注入的 spawn，不得视为有效开工。
 
 ### 心跳 SLA 与长任务可打断点

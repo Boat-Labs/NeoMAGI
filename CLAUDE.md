@@ -83,7 +83,8 @@ neomagi/
 ## Agent Teams 治理
 
 > Agent Teams 协作控制规则以 `AGENTTEAMS.md` 为 SSOT。`CLAUDE.md`（Claude Code）与 `AGENTS.md`（其他系统）为一致性镜像入口，三者必须保持一致。PM 角色 spawn teammate 时加载 `AGENTTEAMS.md`。
-> M7 devcoord cutover 期间，Claude Code 角色额外加载 `.claude/skills/devcoord-pm/SKILL.md`、`.claude/skills/devcoord-backend/SKILL.md`、`.claude/skills/devcoord-tester/SKILL.md` 中对应角色的 project skill。
+> 使用 devcoord 协作控制时，Claude Code 角色额外加载 `.claude/skills/devcoord-pm/SKILL.md`、`.claude/skills/devcoord-backend/SKILL.md`、`.claude/skills/devcoord-tester/SKILL.md` 中对应角色的 project skill。
+> 对 Claude Code 的 devcoord 关键流程，优先使用 slash skill 形式（如 `/devcoord-backend`、`/devcoord-tester`），并用 CLI debug 的 `processPromptSlashCommand` / `SkillTool returning` 校验实际命中。
 
 ## 架构信息分层
 
