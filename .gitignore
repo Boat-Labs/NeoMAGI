@@ -217,3 +217,7 @@ workspace/
 node_modules/
 *.local
 
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
