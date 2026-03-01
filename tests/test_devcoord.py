@@ -286,6 +286,78 @@ def test_ack_fails_closed_without_pending_message(tmp_path: Path) -> None:
         )
 
 
+def test_ack_deduplicates_duplicate_pending_gate_open(tmp_path: Path) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    clock = FakeClock(
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:06:00Z",
+        "2026-03-01T10:10:00Z",
+    )
+    service = CoordService(paths=paths, store=store, now_fn=clock)
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="open backend phase 1 gate",
+    )
+    service.ack(
+        "M7",
+        role="backend",
+        command="GATE_OPEN",
+        gate_id="G-M7-P1",
+        commit="abc1234",
+        task="ACK GATE_OPEN, starting Phase 1",
+    )
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="re-open same backend gate by mistake",
+    )
+    service.ack(
+        "M7",
+        role="backend",
+        command="GATE_OPEN",
+        gate_id="G-M7-P1",
+        commit="abc1234",
+        task="ACK duplicate GATE_OPEN for same gate",
+    )
+    service.render("M7")
+
+    log_dir = paths.log_dir("m7", "2026-03-01")
+    heartbeat_events = [
+        json.loads(line)
+        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [event["event"] for event in heartbeat_events] == [
+        "GATE_OPEN_SENT",
+        "ACK",
+        "GATE_EFFECTIVE",
+        "GATE_OPEN_SENT",
+    ]
+
+    audit = service.audit("M7")
+    assert audit["pending_ack_messages"] == []
+    assert audit["open_gates"] == [
+        {
+            "gate": "G-M7-P1",
+            "phase": "1",
+            "status": "open",
+            "allowed_role": "backend",
+            "target_commit": "abc1234",
+        }
+    ]
+
+
 def test_recovery_check_and_state_sync_render_projection(tmp_path: Path) -> None:
     store = MemoryIssueStore()
     paths = make_paths(tmp_path)
@@ -352,6 +424,62 @@ def test_recovery_check_and_state_sync_render_projection(tmp_path: Path) -> None
         "| backend | idle | 2026-03-01T10:22:00Z | state sync complete after recovery | none | "
         "resume at G-M7-P1 (abc1234) |"
     ) in watchdog_status
+
+
+def test_recovery_check_is_idempotent_for_same_gate(tmp_path: Path) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    clock = FakeClock(
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:20:00Z",
+        "2026-03-01T10:21:00Z",
+    )
+    service = CoordService(paths=paths, store=store, now_fn=clock)
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="open backend phase 1 gate",
+    )
+    service.ack(
+        "M7",
+        role="backend",
+        command="GATE_OPEN",
+        gate_id="G-M7-P1",
+        commit="abc1234",
+        task="ACK GATE_OPEN, starting Phase 1",
+    )
+    service.recovery_check(
+        "M7",
+        role="backend",
+        last_seen_gate="G-M7-P1",
+        task="context reset, requesting state sync",
+    )
+    service.recovery_check(
+        "M7",
+        role="backend",
+        last_seen_gate="G-M7-P1",
+        task="same recovery check re-sent after CLI retry",
+    )
+    service.render("M7")
+
+    log_dir = paths.log_dir("m7", "2026-03-01")
+    heartbeat_events = [
+        json.loads(line)
+        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [event["event"] for event in heartbeat_events] == [
+        "GATE_OPEN_SENT",
+        "ACK",
+        "GATE_EFFECTIVE",
+        "RECOVERY_CHECK",
+    ]
 
 
 def test_stale_detected_marks_watchdog_risk(tmp_path: Path) -> None:
@@ -674,6 +802,69 @@ def test_full_flow_renders_projection_files(tmp_path: Path) -> None:
     assert "## 2026-03-01 (generated) | M7" in progress
     assert "- Status: in_progress" in progress
     assert "- Next: 继续推进 G-M7-P1，当前 allowed_role=backend" in progress
+
+
+def test_phase_complete_is_idempotent_for_same_gate_commit(tmp_path: Path) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    clock = FakeClock(
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:10:00Z",
+        "2026-03-01T10:15:00Z",
+    )
+    service = CoordService(paths=paths, store=store, now_fn=clock)
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="open backend phase 1 gate",
+    )
+    service.ack(
+        "M7",
+        role="backend",
+        command="GATE_OPEN",
+        gate_id="G-M7-P1",
+        commit="abc1234",
+        task="ACK GATE_OPEN, starting Phase 1",
+    )
+    service.phase_complete(
+        "M7",
+        role="backend",
+        phase="1",
+        gate_id="G-M7-P1",
+        commit="def5678",
+        task="Phase 1 complete",
+        branch="feat/backend-m7-control-plane",
+    )
+    service.phase_complete(
+        "M7",
+        role="backend",
+        phase="1",
+        gate_id="G-M7-P1",
+        commit="def5678",
+        task="Phase 1 complete duplicate retry",
+        branch="feat/backend-m7-control-plane",
+    )
+    service.render("M7")
+
+    log_dir = paths.log_dir("m7", "2026-03-01")
+    heartbeat_events = [
+        json.loads(line)
+        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
+        if line.strip()
+    ]
+    assert [event["event"] for event in heartbeat_events] == [
+        "GATE_OPEN_SENT",
+        "ACK",
+        "GATE_EFFECTIVE",
+        "PHASE_COMPLETE",
+    ]
+    assert heartbeat_events[-1]["target_commit"] == "def5678"
 
 
 def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
