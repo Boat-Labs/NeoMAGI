@@ -153,6 +153,7 @@ LLM
 - `report_commit`
 
 说明：
+- `target_commit` 若在主仓库 `git` 中可解析，统一保存 canonical full SHA；不回填既有 append-only 历史事件。
 - `result` 仅在 review / close 后需要。
 - `report_path` / `report_commit` 仅在已有验收报告时需要。
 
