@@ -101,6 +101,7 @@
   - `ACK`、`HEARTBEAT`、`PHASE_COMPLETE`、`RECOVERY_CHECK` 统一走 wrapper
   - 禁止直接编辑 `dev_docs/logs/*`
   - 用 Claude Code CLI debug 日志验证 skill 实际命中，而不是只看自然语言回答
+  - teammate cutover 默认用 slash 形式 skill 触发（如 `/devcoord-backend`、`/devcoord-tester`），降低同名/近义语义污染
 
 ### Phase 5：Projection-Only 收口
 - 产物：

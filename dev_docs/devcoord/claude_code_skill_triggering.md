@@ -11,6 +11,7 @@
   - 什么时候必须使用
   - 用户/PM 可能说出的关键词
 - 对 devcoord 这类高约束流程，显式提及 skill 名称仍是当前最稳的测试方式。
+- 进一步实验表明，slash 形式 `/devcoord-<role>` 比只写 “Use the devcoord-<role> skill” 更稳定。
 
 ## 2. 官方口径
 
@@ -42,6 +43,17 @@
 - project skills 被 CLI 正常加载
 - `devcoord-tester` 被当作实际 `Skill` 工具执行，而不是普通文本记忆
 
+slash 触发实验：
+- `/devcoord-pm Before gate-close, what exact verification sequence is required?`
+- `/devcoord-backend After commit and push for the current phase, what exact devcoord action should backend take next?`
+- debug 日志都出现了：
+  - `Metadata string for devcoord-pm` / `devcoord-backend`
+  - `processPromptSlashCommand creating ... messages for devcoord-pm` / `devcoord-backend`
+
+这说明：
+- slash 形式对 PM / backend 也能稳定进入技能处理链
+- 在当前 CLI 版本下，slash 形式比自然语言显式提及 skill 名称更可靠
+
 ## 4. 当前已知黑盒点
 
 - `--disable-slash-commands` 在本机 `2.1.63` 上不应被视为可靠的负对照。
@@ -51,8 +63,11 @@
   - `SkillTool returning ... devcoord-tester`
 - 因此，当前更可靠的判据是：
   - 是否出现 `SkillTool returning ...`
+  - 或是否出现 `processPromptSlashCommand ...`
   - 是否命中了预期 skill 名
   - 是否把 skill 正文作为 tool attachment 注入
+- 另一个黑盒点是：只写 “Use the devcoord-<role> skill” 并不保证一定进入 `SkillTool`。在本地实验里，`devcoord-pm` / `devcoord-backend` 有过“回答正确但未进入 skill 处理链”的情况。
+- 因此，显式 skill 名称是弱触发；slash skill 名称是当前更强的触发方式。
 
 ## 5. 对 devcoord skills 的写法要求
 
@@ -60,6 +75,7 @@
 - `description` 必须带命令触发词：如 `open-gate`、`heartbeat`、`phase-complete`、`recovery-check`、`gate-review`
 - skill 正文继续保留角色边界、必需动作、payload 约束
 - 不把复杂状态机逻辑塞进 skill；skill 只负责调用规范和触发提示
+- spawn prompt 对高约束流程优先直接写 `/devcoord-pm`、`/devcoord-backend`、`/devcoord-tester`
 
 ## 6. 推荐验证方法
 
@@ -68,6 +84,13 @@
 ```bash
 scripts/devcoord/check_skill_activation.sh devcoord-tester \
   "Use the devcoord-tester skill for this repository. After gate-review, what exact next-step behavior is required?"
+```
+
+更强的 deterministic 测试方式：
+
+```bash
+claude -p --no-session-persistence \
+  "/devcoord-tester After gate-review, what exact next-step behavior is required?"
 ```
 
 关注输出：
@@ -91,6 +114,7 @@ DISABLE_SLASH_COMMANDS=1 scripts/devcoord/check_skill_activation.sh devcoord-tes
 - 比较一致的经验是：
   - `description` 要具体，不要写成泛能力词
   - 明确的 trigger phrases 比抽象职责描述更有效
+  - 对高风险流程，显式 slash 命令通常比自然语言自动匹配更可控
   - 需要重复验证，而不是一次命中就当作稳定
   - 对关键流程可用 hook /显式 skill 名称降低漏触发概率
 
