@@ -611,6 +611,7 @@ class CoordService:
                 task=task,
                 last_activity=now,
                 action=f"gate {gate_id} effective",
+                stale_risk="none",
             )
 
     def heartbeat(
@@ -656,6 +657,7 @@ class CoordService:
                 task=task,
                 last_activity=now,
                 action="reporting progress",
+                stale_risk="none",
             )
 
     def phase_complete(
@@ -712,6 +714,7 @@ class CoordService:
                 task=task,
                 last_activity=now,
                 action=f"waiting for next gate after {gate_id}",
+                stale_risk="none",
             )
 
     def recovery_check(
@@ -806,6 +809,52 @@ class CoordService:
                 task=task,
                 last_activity=now,
                 action=f"resume at {gate_id}{commit_suffix}",
+                stale_risk="none",
+            )
+
+    def stale_detected(
+        self,
+        milestone: str,
+        *,
+        role: str,
+        phase: str,
+        task: str,
+        gate_id: str | None = None,
+        target_commit: str | None = None,
+        ping_count: int | None = None,
+    ) -> None:
+        normalized_milestone = _normalize_milestone(milestone)
+        normalized_role = _normalize_role(role)
+        now = self.now_fn()
+        with self._locked():
+            issues = self._coord_issues(normalized_milestone)
+            parent_id = self._event_parent_id(issues, phase=phase, gate_id=gate_id)
+            self._record_event(
+                issues=issues,
+                milestone=normalized_milestone,
+                phase=phase,
+                role=normalized_role,
+                status="stuck",
+                task=task,
+                event="STALE_DETECTED",
+                gate_id=gate_id,
+                target_commit=target_commit,
+                parent_id=parent_id,
+                ts=now,
+                ping_count=ping_count,
+            )
+            action = "stale detected; investigate and recover"
+            if gate_id:
+                action = f"stale detected on {gate_id}; investigate and recover"
+            self._update_agent(
+                issues=self._coord_issues(normalized_milestone),
+                milestone=normalized_milestone,
+                role=normalized_role,
+                state="stuck",
+                task=task,
+                last_activity=now,
+                action=action,
+                stale_risk="suspected_stale",
             )
 
     def gate_review(
@@ -863,6 +912,7 @@ class CoordService:
                 task=task,
                 last_activity=now,
                 action=f"review submitted for {gate_id}",
+                stale_risk="none",
             )
 
     def gate_close(
@@ -881,8 +931,18 @@ class CoordService:
         now = self.now_fn()
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
+            milestone_issue = self._require_single(issues, "milestone")
             gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
             phase_issue = self._require_single(issues, "phase", phase=phase)
+            self._ensure_gate_close_guards(
+                issues=issues,
+                milestone_issue=milestone_issue,
+                gate_issue=gate_issue,
+                phase=phase,
+                result=normalized_result,
+                report_commit=report_commit,
+                report_path=report_path,
+            )
             gate_metadata = _merge_dicts(
                 gate_issue.metadata,
                 {
@@ -1032,6 +1092,7 @@ class CoordService:
         last_seen_gate: str | None = None,
         sync_role: str | None = None,
         allowed_role: str | None = None,
+        ping_count: int | None = None,
     ) -> str:
         next_seq = self._next_event_seq(issues)
         metadata = {
@@ -1055,6 +1116,7 @@ class CoordService:
             "last_seen_gate": last_seen_gate or "",
             "sync_role": sync_role or "",
             "allowed_role": allowed_role or "",
+            "ping_count": ping_count,
             "ts": ts,
         }
         rendered_phase = phase or "na"
@@ -1077,16 +1139,20 @@ class CoordService:
         task: str,
         last_activity: str,
         action: str,
+        stale_risk: str | None = None,
     ) -> None:
+        updates: dict[str, Any] = {
+            "agent_state": state,
+            "current_task": task,
+            "last_activity": last_activity,
+            "action": action,
+        }
+        if stale_risk is not None:
+            updates["stale_risk"] = stale_risk
         agent_issue = self._require_single(issues, "agent", role=role)
         agent_metadata = _merge_dicts(
             agent_issue.metadata,
-            {
-                "agent_state": state,
-                "current_task": task,
-                "last_activity": last_activity,
-                "action": action,
-            },
+            updates,
         )
         self.store.update_issue(
             agent_issue.issue_id,
@@ -1248,6 +1314,127 @@ class CoordService:
         )
         return phases[-1] if phases else None
 
+    def _ensure_gate_close_guards(
+        self,
+        *,
+        issues: Sequence[IssueRecord],
+        milestone_issue: IssueRecord,
+        gate_issue: IssueRecord,
+        phase: str,
+        result: str,
+        report_commit: str,
+        report_path: str,
+    ) -> None:
+        self._ensure_review_event(
+            issues=issues,
+            gate_id=gate_issue.metadata_str("gate_id"),
+            phase=phase,
+            result=result,
+            report_commit=report_commit,
+            report_path=report_path,
+        )
+        self._ensure_projection_reconciled(
+            milestone=milestone_issue.metadata_str("milestone"),
+            run_date=milestone_issue.metadata_str("run_date"),
+            expected_events=len(list(self._iter_kind(issues, "event"))),
+        )
+        self._ensure_report_visible(report_commit=report_commit, report_path=report_path)
+
+    def _ensure_review_event(
+        self,
+        *,
+        issues: Sequence[IssueRecord],
+        gate_id: str,
+        phase: str,
+        result: str,
+        report_commit: str,
+        report_path: str,
+    ) -> None:
+        review_event = self._find_matching_event(
+            issues,
+            event="GATE_REVIEW_COMPLETE",
+            gate_id=gate_id,
+            phase=phase,
+            result=result,
+            report_commit=report_commit,
+            report_path=report_path,
+        )
+        if review_event is None:
+            raise CoordError(
+                "cannot close gate without matching GATE_REVIEW_COMPLETE: "
+                f"gate={gate_id} phase={phase}"
+            )
+
+    def _ensure_projection_reconciled(
+        self,
+        *,
+        milestone: str,
+        run_date: str,
+        expected_events: int,
+    ) -> None:
+        heartbeat_path = self.paths.log_dir(milestone, run_date) / "heartbeat_events.jsonl"
+        if not heartbeat_path.exists():
+            raise CoordError("cannot close gate before heartbeat_events.jsonl has been rendered")
+        logged_events = sum(
+            1 for line in heartbeat_path.read_text("utf-8").splitlines() if line.strip()
+        )
+        if logged_events != expected_events:
+            raise CoordError(
+                "cannot close gate before event reconciliation: "
+                f"received_events={expected_events} logged_events={logged_events}"
+            )
+
+    def _ensure_report_visible(self, *, report_commit: str, report_path: str) -> None:
+        report_relpath = self._repo_relative_path(report_path)
+        self._git_cat_file(f"{report_commit}^{{commit}}")
+        self._git_cat_file(f"{report_commit}:{report_relpath}")
+
+    def _repo_relative_path(self, report_path: str) -> str:
+        candidate = Path(report_path)
+        if candidate.is_absolute():
+            try:
+                return str(candidate.resolve().relative_to(self.paths.workspace_root))
+            except ValueError as exc:
+                raise CoordError(f"report_path must be inside workspace: {report_path}") from exc
+        return str(candidate)
+
+    def _git_cat_file(self, object_name: str) -> None:
+        try:
+            subprocess.run(
+                ["git", "cat-file", "-e", object_name],
+                cwd=self.paths.workspace_root,
+                capture_output=True,
+                check=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr.strip() or exc.stdout.strip()
+            raise CoordError(f"git cat-file -e {object_name} failed: {stderr}") from exc
+
+    def _find_matching_event(
+        self,
+        issues: Sequence[IssueRecord],
+        *,
+        event: str,
+        gate_id: str,
+        phase: str,
+        result: str,
+        report_commit: str,
+        report_path: str,
+    ) -> IssueRecord | None:
+        candidates = [
+            issue
+            for issue in self._iter_kind(issues, "event")
+            if issue.metadata_str("event") == event
+            and issue.metadata_str("gate") == gate_id
+            and issue.metadata_str("phase") == phase
+            and issue.metadata_str("result") == result
+            and issue.metadata_str("report_commit") == report_commit
+            and issue.metadata_str("report_path") == report_path
+        ]
+        candidates.sort(key=lambda issue: (issue.metadata_int("event_seq"), issue.issue_id))
+        return candidates[-1] if candidates else None
+
     @staticmethod
     def _next_event_seq(issues: Sequence[IssueRecord]) -> int:
         max_seq = 0
@@ -1298,6 +1485,9 @@ class CoordService:
         allowed_role = issue.metadata_str("allowed_role")
         if allowed_role:
             payload["allowed_role"] = _render_role(allowed_role)
+        ping_count = issue.metadata.get("ping_count")
+        if ping_count is not None:
+            payload["ping_count"] = ping_count
         return payload
 
     def _render_gate_state(self, issues: Sequence[IssueRecord], milestone: str) -> str:
@@ -1479,6 +1669,18 @@ def build_parser() -> argparse.ArgumentParser:
     state_sync_ok_parser.add_argument("--target-commit", required=True)
     state_sync_ok_parser.add_argument("--task", required=True)
 
+    stale_detected_parser = subparsers.add_parser(
+        "stale-detected",
+        help="Record a suspected stale role after timeout checks",
+    )
+    stale_detected_parser.add_argument("--milestone", required=True)
+    stale_detected_parser.add_argument("--role", required=True)
+    stale_detected_parser.add_argument("--phase", required=True)
+    stale_detected_parser.add_argument("--task", required=True)
+    stale_detected_parser.add_argument("--gate")
+    stale_detected_parser.add_argument("--target-commit")
+    stale_detected_parser.add_argument("--ping-count", type=int)
+
     gate_review_parser = subparsers.add_parser(
         "gate-review",
         help="Record a GATE_REVIEW_COMPLETE event",
@@ -1518,6 +1720,7 @@ def build_parser() -> argparse.ArgumentParser:
             "phase-complete",
             "recovery-check",
             "state-sync-ok",
+            "stale-detected",
             "gate-review",
             "gate-close",
             "render",
@@ -1606,6 +1809,20 @@ def _execute_action(service: CoordService, command: str, payload: dict[str, Any]
             gate_id=_payload_alias(payload, "gate_id", "gate"),
             target_commit=_require_payload_str(payload, "target_commit"),
             task=_require_payload_str(payload, "task"),
+        )
+        return
+    if command == "stale-detected":
+        ping_count = payload.get("ping_count")
+        if ping_count is not None:
+            ping_count = int(ping_count)
+        service.stale_detected(
+            _require_payload_str(payload, "milestone"),
+            role=_require_payload_str(payload, "role"),
+            phase=_require_payload_str(payload, "phase"),
+            task=_require_payload_str(payload, "task"),
+            gate_id=_payload_str(payload, "gate_id", _payload_str(payload, "gate", None)),
+            target_commit=_payload_str(payload, "target_commit", None),
+            ping_count=ping_count,
         )
         return
     if command == "gate-review":
@@ -1748,6 +1965,20 @@ def run_cli(
                     "gate_id": args.gate,
                     "target_commit": args.target_commit,
                     "task": args.task,
+                },
+            )
+        elif args.command == "stale-detected":
+            _execute_action(
+                service,
+                "stale-detected",
+                {
+                    "milestone": args.milestone,
+                    "role": args.role,
+                    "phase": args.phase,
+                    "task": args.task,
+                    "gate_id": _none_if_placeholder(args.gate),
+                    "target_commit": _none_if_placeholder(args.target_commit),
+                    "ping_count": args.ping_count,
                 },
             )
         elif args.command == "gate-review":

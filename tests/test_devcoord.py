@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -37,6 +39,57 @@ def make_paths(tmp_path: Path) -> CoordPaths:
         beads_dir=workspace_root / ".coord" / "beads",
         git_common_dir=workspace_root / ".git",
     )
+
+
+def init_git_repo_with_review(paths: CoordPaths, report_relpath: str) -> str:
+    git_dir = paths.workspace_root / ".git"
+    if git_dir.exists() and not (git_dir / "HEAD").exists():
+        shutil.rmtree(git_dir)
+    subprocess.run(
+        ["git", "init"],
+        cwd=paths.workspace_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "NeoMAGI Tests"],
+        cwd=paths.workspace_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "tests@neomagi.local"],
+        cwd=paths.workspace_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    report_path = paths.workspace_root / report_relpath
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("# review\n", "utf-8")
+    subprocess.run(
+        ["git", "add", report_relpath],
+        cwd=paths.workspace_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "docs(tools): add review evidence"],
+        cwd=paths.workspace_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=paths.workspace_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
 
 
 def test_init_creates_milestone_and_agent_beads(tmp_path: Path) -> None:
@@ -301,6 +354,60 @@ def test_recovery_check_and_state_sync_render_projection(tmp_path: Path) -> None
     ) in watchdog_status
 
 
+def test_stale_detected_marks_watchdog_risk(tmp_path: Path) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    clock = FakeClock(
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:40:00Z",
+    )
+    service = CoordService(paths=paths, store=store, now_fn=clock)
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="open backend phase 1 gate",
+    )
+    service.ack(
+        "M7",
+        role="backend",
+        command="GATE_OPEN",
+        gate_id="G-M7-P1",
+        commit="abc1234",
+        task="ACK GATE_OPEN, starting Phase 1",
+    )
+    service.stale_detected(
+        "M7",
+        role="backend",
+        phase="1",
+        gate_id="G-M7-P1",
+        target_commit="abc1234",
+        ping_count=2,
+        task="two unanswered PINGs; suspected stale",
+    )
+    service.render("M7")
+
+    log_dir = paths.log_dir("m7", "2026-03-01")
+    heartbeat_events = [
+        json.loads(line)
+        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
+        if line.strip()
+    ]
+    assert heartbeat_events[-1]["event"] == "STALE_DETECTED"
+    assert heartbeat_events[-1]["ping_count"] == 2
+
+    watchdog_status = (log_dir / "watchdog_status.md").read_text("utf-8")
+    assert (
+        "| backend | stuck | 2026-03-01T10:40:00Z | two unanswered PINGs; suspected stale | "
+        "suspected_stale | stale detected on G-M7-P1; investigate and recover |"
+    ) in watchdog_status
+
+
 def test_state_sync_ok_fails_closed_on_target_commit_mismatch(tmp_path: Path) -> None:
     store = MemoryIssueStore()
     paths = make_paths(tmp_path)
@@ -412,6 +519,8 @@ def test_full_flow_renders_projection_files(tmp_path: Path) -> None:
 def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
     store = MemoryIssueStore()
     paths = make_paths(tmp_path)
+    report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
+    report_commit = init_git_repo_with_review(paths, report_path)
     clock = FakeClock(
         "2026-03-01T10:01:00Z",
         "2026-03-01T10:05:00Z",
@@ -454,17 +563,18 @@ def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
         phase="1",
         gate_id="G-M7-P1",
         result="PASS",
-        report_commit="feed123",
-        report_path="dev_docs/reviews/m7_phase1_2026-03-01.md",
+        report_commit=report_commit,
+        report_path=report_path,
         task="Phase 1 review PASS",
     )
+    service.render("M7")
     service.gate_close(
         "M7",
         phase="1",
         gate_id="G-M7-P1",
         result="PASS",
-        report_commit="feed123",
-        report_path="dev_docs/reviews/m7_phase1_2026-03-01.md",
+        report_commit=report_commit,
+        report_path=report_path,
         task="close gate after review",
     )
     service.render("M7")
@@ -484,13 +594,13 @@ def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
         "GATE_CLOSE",
     ]
     assert heartbeat_events[-2]["result"] == "PASS"
-    assert heartbeat_events[-1]["report_commit"] == "feed123"
+    assert heartbeat_events[-1]["report_commit"] == report_commit
 
     gate_state = (log_dir / "gate_state.md").read_text("utf-8")
     assert (
         "| G-M7-P1 | 1 | closed | PASS | 2026-03-01T10:05:00Z | "
         "2026-03-01T10:20:00Z | def5678 | "
-        "dev_docs/reviews/m7_phase1_2026-03-01.md (feed123) |"
+        f"{report_path} ({report_commit}) |"
     ) in gate_state
 
     watchdog_status = (log_dir / "watchdog_status.md").read_text("utf-8")
@@ -498,3 +608,119 @@ def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
         "| tester | done | 2026-03-01T10:15:00Z | Phase 1 review PASS | none | "
         "review submitted for G-M7-P1 |"
     ) in watchdog_status
+
+
+def test_gate_close_requires_rendered_reconciliation(tmp_path: Path) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
+    report_commit = init_git_repo_with_review(paths, report_path)
+    service = CoordService(
+        paths=paths,
+        store=store,
+        now_fn=FakeClock(
+            "2026-03-01T10:01:00Z",
+            "2026-03-01T10:05:00Z",
+            "2026-03-01T10:10:00Z",
+            "2026-03-01T10:15:00Z",
+        ),
+    )
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="open backend phase 1 gate",
+    )
+    service.ack(
+        "M7",
+        role="backend",
+        command="GATE_OPEN",
+        gate_id="G-M7-P1",
+        commit="abc1234",
+        task="ACK GATE_OPEN, starting Phase 1",
+    )
+    service.gate_review(
+        "M7",
+        role="tester",
+        phase="1",
+        gate_id="G-M7-P1",
+        result="PASS",
+        report_commit=report_commit,
+        report_path=report_path,
+        task="Phase 1 review PASS",
+    )
+
+    with pytest.raises(
+        CoordError,
+        match="cannot close gate before heartbeat_events.jsonl has been rendered",
+    ):
+        service.gate_close(
+            "M7",
+            phase="1",
+            gate_id="G-M7-P1",
+            result="PASS",
+            report_commit=report_commit,
+            report_path=report_path,
+            task="close gate after review",
+        )
+
+
+def test_gate_close_requires_visible_report_commit(tmp_path: Path) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
+    init_git_repo_with_review(paths, report_path)
+    service = CoordService(
+        paths=paths,
+        store=store,
+        now_fn=FakeClock(
+            "2026-03-01T10:01:00Z",
+            "2026-03-01T10:05:00Z",
+            "2026-03-01T10:10:00Z",
+            "2026-03-01T10:15:00Z",
+        ),
+    )
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="open backend phase 1 gate",
+    )
+    service.ack(
+        "M7",
+        role="backend",
+        command="GATE_OPEN",
+        gate_id="G-M7-P1",
+        commit="abc1234",
+        task="ACK GATE_OPEN, starting Phase 1",
+    )
+    service.gate_review(
+        "M7",
+        role="tester",
+        phase="1",
+        gate_id="G-M7-P1",
+        result="PASS",
+        report_commit="deadbeef",
+        report_path=report_path,
+        task="Phase 1 review PASS",
+    )
+    service.render("M7")
+
+    with pytest.raises(CoordError, match="git cat-file -e deadbeef"):
+        service.gate_close(
+            "M7",
+            phase="1",
+            gate_id="G-M7-P1",
+            result="PASS",
+            report_commit="deadbeef",
+            report_path=report_path,
+            task="close gate after review",
+        )
