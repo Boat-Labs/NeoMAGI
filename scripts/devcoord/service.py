@@ -972,6 +972,30 @@ class CoordService:
             "utf-8",
         )
 
+    def close_milestone(self, milestone: str) -> None:
+        normalized_milestone = _normalize_milestone(milestone)
+        with self._locked():
+            issues = self._coord_issues(normalized_milestone)
+            self._require_single(issues, "milestone")
+            audit = self.audit(normalized_milestone)
+            if not audit["reconciled"]:
+                raise CoordError(
+                    "cannot close milestone before event reconciliation: "
+                    f"received_events={audit['received_events']} "
+                    f"logged_events={audit['logged_events']}"
+                )
+            if audit["open_gates"]:
+                open_gate_ids = ", ".join(gate["gate"] for gate in audit["open_gates"])
+                raise CoordError(
+                    f"cannot close milestone while gates remain open: {open_gate_ids}"
+                )
+            if audit["pending_ack_messages"]:
+                raise CoordError("cannot close milestone while pending ACK messages remain")
+            for issue in issues:
+                if issue.status == "closed":
+                    continue
+                self.store.update_issue(issue.issue_id, status="closed")
+
     def _coord_issues(self, milestone: str) -> list[IssueRecord]:
         return [
             issue

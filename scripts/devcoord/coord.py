@@ -206,6 +206,11 @@ def build_parser() -> argparse.ArgumentParser:
     gate_close_parser.add_argument("--report-commit", required=True)
     gate_close_parser.add_argument("--report-path", required=True)
     gate_close_parser.add_argument("--task", required=True)
+    milestone_close_parser = subparsers.add_parser(
+        "milestone-close",
+        help="Close all control-plane beads for a completed milestone",
+    )
+    milestone_close_parser.add_argument("--milestone", required=True)
 
     apply_parser = subparsers.add_parser(
         "apply",
@@ -227,6 +232,7 @@ def build_parser() -> argparse.ArgumentParser:
             "stale-detected",
             "gate-review",
             "gate-close",
+            "milestone-close",
             "audit",
             "render",
         ),
@@ -391,6 +397,9 @@ def _execute_action(service: CoordService, command: str, payload: dict[str, Any]
             report_path=_require_payload_str(payload, "report_path"),
             task=_require_payload_str(payload, "task"),
         )
+        return
+    if command == "milestone-close":
+        service.close_milestone(_require_payload_str(payload, "milestone"))
         return
     if command == "audit":
         payload_milestone = _require_payload_str(payload, "milestone")
@@ -598,6 +607,8 @@ def run_cli(
                     "task": args.task,
                 },
             )
+        elif args.command == "milestone-close":
+            _execute_action(service, "milestone-close", {"milestone": args.milestone})
         elif args.command == "audit":
             _execute_action(service, "audit", {"milestone": args.milestone})
         elif args.command == "render":
