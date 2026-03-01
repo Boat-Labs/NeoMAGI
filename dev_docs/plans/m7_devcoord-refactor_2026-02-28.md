@@ -1,7 +1,9 @@
 # M7 DevCoord 重构计划
 
-> 状态：approved
-> 日期：2026-02-28
+> 状态：superseded by `dev_docs/plans/m7_devcoord-refactor_2026-02-28_v2.md`
+> 说明：本版保留为历史记录；devcoord 运行时入口口径已由 ADR 0043 与 v2 计划修订为 `scripts/devcoord` 直接入口。
+> 原始状态：approved
+> 原始日期：2026-02-28
 > 性质：内部治理 / 执行层重构，不属于产品 roadmap 新功能里程碑
 > 依据：`AGENTTEAMS.md`、`AGENTS.md`、ADR 0005/0006/0023/0036/0042、`dev_docs/devcoord/beads_control_plane.md`
 

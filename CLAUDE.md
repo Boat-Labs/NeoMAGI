@@ -38,7 +38,7 @@ neomagi/
 
 ## 技术栈
 
-**核心**：Python 3.12+ (async/await) · uv · pnpm (frontend) · just · FastAPI + WebSocket · `openai` SDK
+**核心**：Python 3.12+ (async/await) · uv · pnpm (frontend) · just（常规开发任务） · FastAPI + WebSocket · `openai` SDK
 **存储**：PostgreSQL 16 + `pgvector` + ParadeDB `pg_search` (BM25, ICU + Jieba) · Embedding: Ollama 优先 → OpenAI fallback
 **工具链**：pytest + pytest-asyncio · ruff · Podman · `pydantic-settings` + `.env`
 
@@ -104,7 +104,7 @@ neomagi/
 - 不要一次性生成大量代码。每次实现一个模块，写测试，验证通过后再继续
 - 设计文档在 `design_docs/` 中，实现前先阅读对应文档
 - 不确定的设计决策，先写 TODO 注释标记，不要自行决定
-- 常用开发任务优先通过 `just` 执行，避免散落命令
+- 常用开发任务优先通过 `just` 执行，避免散落命令；devcoord 控制面协议写操作除外，统一直接调用 `uv run python scripts/devcoord/coord.py`
 
 ## M0 决策追踪（多管道统一）
 
@@ -133,5 +133,6 @@ neomagi/
 
 - 开发过程中先跑受影响测试；提交前必须跑全量回归。
 - 后端测试使用 `just test`，前端测试使用 `just test-frontend`，静态检查使用 `just lint`（必要时 `just format`）。
+- devcoord 控制面写操作不走 `just`，统一使用 `uv run python scripts/devcoord/coord.py`，优先走结构化 payload。
 - 新 worktree 先完成环境检查（`.env`、依赖安装）再运行测试。
 - 事件名/字段名必须以代码真实定义为准，禁止按猜测编写测试。

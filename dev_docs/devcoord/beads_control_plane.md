@@ -34,10 +34,9 @@
 
 ```text
 LLM
-  -> just coord-*
-    -> scripts/devcoord/*
-      -> beads / Dolt
-      -> dev_docs/logs/* + dev_docs/progress/project_progress.md
+  -> scripts/devcoord/*
+    -> beads / Dolt
+    -> dev_docs/logs/* + dev_docs/progress/project_progress.md
 ```
 
 ### 3.1 LLM
@@ -45,11 +44,7 @@ LLM
 - 提取参数。
 - 产出结论性文本，如风险说明、review 结论、阶段总结。
 
-### 3.2 Just
-- 暴露给 agent 的稳定控制面接口。
-- 屏蔽内部实现细节，确保后续更换实现时 agent 调用面不需要大改。
-
-### 3.3 `scripts/devcoord`
+### 3.2 `scripts/devcoord`
 - 参数校验。
 - 状态机约束。
 - 幂等与顺序控制。
@@ -57,22 +52,24 @@ LLM
 - 投影生成。
 - 对账和恢复辅助。
 - 是 ACK、生效、恢复握手、超时判定、日志对账等协议语义的唯一实现层。
+- 是 devcoord 的正式运行时入口。
+- 推荐通过结构化 payload（JSON file / stdin）调用，减少长参数串和 shell quoting 风险。
 
-### 3.4 Beads / Dolt
+### 3.3 Beads / Dolt
 - 存储结构化控制面状态。
 - 提供历史查询与并发写支持。
 - 作为战术执行层 persistence / query / history SSOT。
 - 不直接承担 NeoMAGI 协作协议状态机语义。
 
-### 3.5 Projection
+### 3.4 Projection
 - 生成兼容文件给现有文档体系与人工审阅使用。
 - 不允许人工直接作为主写入口。
 
-### 3.6 Skill 位置说明
-- skill 继续存在，用于约束 agent 只调用 `just coord-*`，禁止直接写日志文件或自由拼接 `bd`。
+### 3.5 Skill 位置说明
+- skill 继续存在，用于约束 agent 只调用 `scripts/devcoord`，禁止直接写日志文件或自由拼接 `bd`。
 - skill 是行为规范，不是控制面的额外运行时 hop。
 
-### 3.7 治理层与执行层
+### 3.6 治理层与执行层
 - 治理层回答“现在谁被允许推进、什么条件下可以关闭/恢复/继续”。
 - 执行层回答“谁先尝试、何时交接、何时救援、是否允许并行探索”。
 - `phase` / `gate` 在本架构中是授权窗口，不是要求所有任务按单一路径流转的 workflow state。
@@ -82,7 +79,7 @@ LLM
 
 ### 4.1 共享控制面目录
 - 所有 worktree 共享同一个 `BEADS_DIR`。
-- 推荐路径：仓库主目录下独立控制面目录，如 `.coord/beads/`。
+- wrapper 优先复用仓库根现有 `.beads/`；若仓库未初始化 beads，再回退到 `.coord/beads/`。
 - 初期只做本机共享，不开启远程 sync。
 
 ### 4.2 原因
@@ -187,29 +184,33 @@ Phase 1 固定采用以下实现方式：
 选择原因：
 - 最短路径，减少与 beads 内部实现的耦合。
 - 错误边界清晰，便于在 wrapper 层统一处理失败和重试。
-- 若后续判定 beads 不适合当前问题，可替换存储适配层而不影响 `just` 命令面。
+- 若后续判定 beads 不适合当前问题，可替换存储适配层而不影响 `scripts/devcoord` 命令面。
 
 ## 8. 命令面
 
-建议最小命令集如下：
+建议最小动作集如下：
 
-- `just coord-init`
-- `just coord-open-gate`
-- `just coord-ack`
-- `just coord-heartbeat`
-- `just coord-phase-complete`
-- `just coord-render`
+- `uv run python scripts/devcoord/coord.py init`
+- `uv run python scripts/devcoord/coord.py open-gate`
+- `uv run python scripts/devcoord/coord.py ack`
+- `uv run python scripts/devcoord/coord.py heartbeat`
+- `uv run python scripts/devcoord/coord.py phase-complete`
+- `uv run python scripts/devcoord/coord.py render`
+
+推荐调用方式：
+- `uv run python scripts/devcoord/coord.py apply <action> --payload-file <json>`
+- 或 `uv run python scripts/devcoord/coord.py apply <action> --payload-stdin`
 
 命令职责：
-- `coord-init`：初始化共享控制面对象与基础 metadata。
-- `coord-open-gate`：创建/更新 gate bead，并发出 command message。
-- `coord-ack`：记录 ACK 事件，并将待确认指令转为 effective。
-- `coord-heartbeat`：更新 agent bead 与 heartbeat event。
-- `coord-phase-complete`：写入阶段完成事件，更新 phase/gate 相关状态。
-- `coord-render`：从 beads 投影到 `dev_docs`。
+- `init`：初始化共享控制面对象与基础 metadata。
+- `open-gate`：创建/更新 gate bead，并发出 command message。
+- `ack`：记录 ACK 事件，并将待确认指令转为 effective。
+- `heartbeat`：更新 agent bead 与 heartbeat event。
+- `phase-complete`：写入阶段完成事件，更新 phase/gate 相关状态。
+- `render`：从 beads 投影到 `dev_docs`。
 
-补充命令如 `coord-recovery-check`、`coord-state-sync-ok`、`coord-gate-review`、`coord-gate-close` 在最小闭环跑通后再引入，避免过早扩大命令表面积。
-后续若需要引入 `coord-claim`、`coord-handoff` 或开放竞争相关命令，也应作为执行层原语补充，而不是把执行路径反推回治理状态机。
+补充命令如 `recovery-check`、`state-sync-ok`、`gate-review`、`gate-close` 在最小闭环跑通后再引入，避免过早扩大命令表面积。
+后续若需要引入 `claim`、`handoff` 或开放竞争相关命令，也应作为执行层原语补充，而不是把执行路径反推回治理状态机。
 
 ## 9. 协议映射
 
@@ -266,7 +267,7 @@ Phase 1 固定采用以下实现方式：
 - 没有 ACK 的需确认指令，一律是 pending，不得假设 effective。
 - `dev_docs` 文件不是控制面真源。
 - 所有 worktree 必须使用同一个共享控制面目录。
-- agent 只允许通过 `just coord-*` 进入控制面；skill 负责约束这一点。
+- agent 只允许通过 `scripts/devcoord` 进入控制面；skill 负责约束这一点。
 - control plane 失败时默认 fail-closed，不静默补写文件假装成功。
 - append-only 审计事件不得映射为会删除的临时对象。
 - 治理状态机不得把执行路径锁死为唯一路径；系统必须为 handoff / rescue / 更优尝试保留空间。
@@ -283,7 +284,7 @@ Phase 1 固定采用以下实现方式：
 - teammate 暂保持旧回报语义。
 
 ### Stage 3：Teammate Cutover
-- backend / tester 改为通过 skill 调 `just coord-*`。
+- backend / tester 改为通过 skill 调 `scripts/devcoord`。
 
 ### Stage 4：Projection-Only
 - `dev_docs/logs/*` 正式降级为投影层。

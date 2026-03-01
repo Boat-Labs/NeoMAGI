@@ -131,7 +131,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 数据库连接信息读取本地 `.env`，共享模板使用 `.env_template`（不提交真实凭据）。
 - Python 包管理器使用 `uv`。
 - Frontend 包管理器使用 `pnpm`。
-- 命令入口统一使用 `just`。
+- 常规开发/测试命令入口统一使用 `just`；devcoord 控制面协议写操作直接使用 `scripts/devcoord/coord.py`，不再额外包一层 `just`。
 
 ## 决策与计划治理
 
@@ -153,7 +153,8 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 
 ## 质量与验收
 - 开发过程先跑受影响测试；里程碑合并前必须跑全量回归。
-- 统一命令入口：后端 `just test`，前端 `just test-frontend`，静态检查 `just lint`（必要时 `just format`）。
+- 常规开发命令入口：后端 `just test`，前端 `just test-frontend`，静态检查 `just lint`（必要时 `just format`）。
+- devcoord 控制面写操作统一使用 `uv run python scripts/devcoord/coord.py ...`，优先走结构化 payload（`--payload-file` / `--payload-stdin`）。
 - 修复/重构任务提交时需附验证结果摘要（命令与通过概况）。
 
 ## Agent 工作日志（临时降级策略）
