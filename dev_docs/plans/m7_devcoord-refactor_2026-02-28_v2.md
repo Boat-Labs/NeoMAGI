@@ -84,8 +84,8 @@
 
 ### Phase 3：PM First
 - 产物：
-  - PM 专用 skill
-  - 更新后的 PM tactical prompt
+  - `.claude/skills/devcoord-pm/SKILL.md`
+  - `dev_docs/prompts/PM_ActionPlan_M7.md`
 - 要求：
   - PM 停止手写控制日志
   - PM 全部改为调用 `scripts/devcoord`
@@ -93,8 +93,8 @@
 
 ### Phase 4：Teammate Cutover
 - 产物：
-  - teammate skill
-  - backend/tester tactical prompt 更新
+  - `.claude/skills/devcoord-backend/SKILL.md`
+  - `.claude/skills/devcoord-tester/SKILL.md`
 - 要求：
   - `ACK`、`HEARTBEAT`、`PHASE_COMPLETE`、`RECOVERY_CHECK` 统一走 wrapper
   - 禁止直接编辑 `dev_docs/logs/*`
@@ -139,10 +139,11 @@
 | --- | --- | --- |
 | `scripts/devcoord` 仍暴露过多 flag | agent 继续走字符串拼装 | 增加结构化 payload 入口，推荐 file/stdin JSON |
 | agent 绕过 wrapper 直接写 `bd` | 状态分叉 | skill / prompt 明确禁止；code review 以 wrapper 调用为准 |
+| 角色权限当前仅靠 skill / prompt 约束 | 未加载 skill 时可能越权调用高权限动作 | 当前阶段接受；若后续需要代码层强制权限，应引入 actor/subject 分离，而不是复用现有 `role` 字段做简单校验 |
 | 双入口并存（`just` + script） | 文档与行为漂移 | 删除 devcoord recipes，文档统一改为 `scripts/devcoord` |
 | Dolt 运维成本超出当前规模承受范围 | 控制面收益被运维噪声抵消 | 保持 `scripts/devcoord` 接口稳定，仅替换存储适配层 |
 
 ## 8. 下一步建议
 
-1. 用真实 PM spawn / teammate 会话做一次 live PM-first cutover，验证 `RECOVERY_CHECK -> STATE_SYNC_OK -> PING -> LOG_PENDING -> audit -> GATE_CLOSE` 全链路。
-2. 基于一次真实 cutover 结果，决定是否把当前 shadow mode 提升为默认控制面路径。
+1. 用新建的 teammate skills 跑一次真实 backend/tester 会话，验证 `ACK / HEARTBEAT / PHASE_COMPLETE / RECOVERY_CHECK / gate-review` 不再依赖 PM 手工转录。
+2. 完成 projection-only 收口，后续协作文档不再把 `dev_docs/logs/*` 当作人工主写入口。

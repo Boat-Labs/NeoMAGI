@@ -76,6 +76,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 ### Spawn 规则注入（强制）
 
 - PM spawn teammate 时，prompt 必须显式包含以下协议摘要：`Gate 状态机`、`指令 ACK 生效机制`、`恢复/重启握手`、`worktree/分支同步协议`、`验收产物可见性闭环（commit + push）`。
+- 如使用 Claude Code，PM / backend / tester 分别加载 `.claude/skills/devcoord-pm/SKILL.md`、`.claude/skills/devcoord-backend/SKILL.md`、`.claude/skills/devcoord-tester/SKILL.md`。
 - 未完成上述规则注入的 spawn，不得视为有效开工。
 
 ### 心跳 SLA 与长任务可打断点
@@ -88,13 +89,13 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 
 ### 事件日志（强制，append-only）
 
-- PM 必须维护：`dev_docs/logs/{milestone}_{YYYY-MM-DD}/heartbeat_events.jsonl`。
-- PM 收到任何状态变更消息（含 ACK、Gate、PING、报告同步）后，必须在同一 PM 回合先追加日志，再发送下一条控制指令（append-first）。
-- 若同回合无法落盘，PM 必须先记录 `LOG_PENDING`，并在下一 PM 回合第一步补录。
+- PM 必须通过 `uv run python scripts/devcoord/coord.py ...` 记录协作控制事件；repo 根 `.beads` 为 SSOT，`dev_docs/logs/{milestone}_{YYYY-MM-DD}/heartbeat_events.jsonl`、`gate_state.md`、`watchdog_status.md` 为 `render` 投影。
+- PM 收到任何状态变更消息（含 ACK、Gate、PING、报告同步）后，必须在同一 PM 回合先完成对应 control plane 写入，再发送下一条控制指令（append-first）。
+- 若同回合无法落盘，PM 必须先记录 `LOG_PENDING`（通过 `log-pending`），并在下一 PM 回合第一步补录。
 - 最大允许滞后为 1 个 PM 回合，不得跨 2 个 PM 回合。
-- 每条至少包含：`ts`、`role`、`phase`、`status`、`task`、`eta_min`。
+- `heartbeat_events.jsonl` 投影每条至少包含：`ts`、`role`、`phase`、`status`、`task`、`eta_min`。
 - 建议附加字段：`event`、`gate`、`target_commit`、`ack_of`、`branch`、`worktree`、`source_msg_id`、`event_seq`。
-- PM 在 `GATE_CLOSE` 前必须完成日志对账：`received_events == logged_events`；不一致时禁止关 Gate。
+- PM 在 `GATE_CLOSE` 前必须先执行 `render` 与 `audit`，并满足 `audit.reconciled=true`；不一致时禁止关 Gate。
 
 ### PM 超时判定与重启前置
 
@@ -161,7 +162,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 状态：M1.5 阶段临时降级为“非阻塞”。
 - 作用域：本降级仅适用于 role 经验日志，不适用于协作控制日志。
 - 原因：Agent Teams 当前存在指令未稳定透传到 agent 层的问题。
-- 执行：保留 `dev_docs/logs/{milestone}_{YYYY-MM-DD}/` 目录；由 PM 提交阶段汇总日志，各 role 日志改为尽力提供。
+- 执行：保留 `dev_docs/logs/{milestone}_{YYYY-MM-DD}/` 目录；协作控制三件套由 `scripts/devcoord/coord.py render` 生成，各 role 日志改为尽力提供。
 - 协作控制日志（`heartbeat_events.jsonl`、`gate_state.md`、`watchdog_status.md`）仍为强制门槛，必须按“协作控制与活性治理”章节执行。
 - 验收：当前阶段不因缺少单个 role 经验日志而阻塞；缺少协作控制日志则阻塞。
 - 恢复条件：并行流程连续 3 次无透传丢失后，恢复为强制门槛。

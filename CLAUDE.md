@@ -83,6 +83,7 @@ neomagi/
 ## Agent Teams 治理
 
 > Agent Teams 协作控制规则以 `AGENTTEAMS.md` 为 SSOT。`CLAUDE.md`（Claude Code）与 `AGENTS.md`（其他系统）为一致性镜像入口，三者必须保持一致。PM 角色 spawn teammate 时加载 `AGENTTEAMS.md`。
+> M7 devcoord cutover 期间，Claude Code 角色额外加载 `.claude/skills/devcoord-pm/SKILL.md`、`.claude/skills/devcoord-backend/SKILL.md`、`.claude/skills/devcoord-tester/SKILL.md` 中对应角色的 project skill。
 
 ## 架构信息分层
 
@@ -105,6 +106,7 @@ neomagi/
 - 设计文档在 `design_docs/` 中，实现前先阅读对应文档
 - 不确定的设计决策，先写 TODO 注释标记，不要自行决定
 - 常用开发任务优先通过 `just` 执行，避免散落命令；devcoord 控制面协议写操作除外，统一直接调用 `uv run python scripts/devcoord/coord.py`
+- devcoord 协作控制的 append-first 落点是 beads 事件；`dev_docs/logs/*` 和 `dev_docs/progress/project_progress.md` 只作为 `render` 生成的 projection，不直接手写。
 
 ## M0 决策追踪（多管道统一）
 
@@ -134,5 +136,6 @@ neomagi/
 - 开发过程中先跑受影响测试；提交前必须跑全量回归。
 - 后端测试使用 `just test`，前端测试使用 `just test-frontend`，静态检查使用 `just lint`（必要时 `just format`）。
 - devcoord 控制面写操作不走 `just`，统一使用 `uv run python scripts/devcoord/coord.py`，优先走结构化 payload。
+- 关 gate 前固定执行 `render` + `audit`；只有 `audit.reconciled=true` 才允许 `gate-close`。
 - 新 worktree 先完成环境检查（`.env`、依赖安装）再运行测试。
 - 事件名/字段名必须以代码真实定义为准，禁止按猜测编写测试。

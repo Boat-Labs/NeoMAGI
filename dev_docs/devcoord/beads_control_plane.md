@@ -68,6 +68,11 @@ LLM
 ### 3.5 Skill 位置说明
 - skill 继续存在，用于约束 agent 只调用 `scripts/devcoord`，禁止直接写日志文件或自由拼接 `bd`。
 - skill 是行为规范，不是控制面的额外运行时 hop。
+- Claude Code project skills 当前固定为：
+  - `.claude/skills/devcoord-pm/SKILL.md`
+  - `.claude/skills/devcoord-backend/SKILL.md`
+  - `.claude/skills/devcoord-tester/SKILL.md`
+- skill 文件遵循 Claude Skills 官方 `SKILL.md` frontmatter 模板，正文只保留触发条件、工作流和边界约束。
 
 ### 3.6 治理层与执行层
 - 治理层回答“现在谁被允许推进、什么条件下可以关闭/恢复/继续”。
@@ -294,6 +299,8 @@ Phase 1 固定采用以下实现方式：
 - `dev_docs` 文件不是控制面真源。
 - 所有 worktree 必须使用同一个共享控制面目录。
 - agent 只允许通过 `scripts/devcoord` 进入控制面；skill 负责约束这一点。
+- 当前角色权限边界由 skill / prompt 约束，`scripts/devcoord` 尚未实现 actor-level 权限校验。
+- 若后续需要代码层强制权限，不应复用现有事件语义里的 `role` 字段做简单 `--role` 校验，而应显式区分 actor 与 subject。
 - control plane 失败时默认 fail-closed，不静默补写文件假装成功。
 - append-only 审计事件不得映射为会删除的临时对象。
 - `audit.reconciled=false` 时禁止关闭 gate。
