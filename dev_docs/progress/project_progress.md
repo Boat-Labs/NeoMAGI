@@ -262,3 +262,10 @@
 - Next: G-M7-P6-POS 已关闭，等待 M7 下一条 gate
 - Risk: 无
 <!-- devcoord:end milestone=m7 -->
+
+## 2026-03-01 (local) | M7
+- Status: done
+- Done: M7 收尾完成并关闭——beads control plane、`scripts/devcoord` 直接入口、Claude Code project skills、PM-first / teammate cutover、幂等护栏、`target_commit` preflight 与 canonical full SHA 规范已全部落地；`coord.py` 已按职责机械拆分为 `model.py` / `service.py` / 薄入口 `coord.py`
+- Evidence: `dev_docs/reviews/m7_summary_2026-03-01.md`, `dev_docs/reviews/m7_phase6_2026-03-01.md`, `dev_docs/logs/m7_2026-03-01/gate_state.md`
+- Next: 按 `design_docs/roadmap_milestones_v3.md` 进入 M4（第二渠道适配）；M5 继续保持触发式进入
+- Risk: M7 residual risks 已记录于 `dev_docs/reviews/m7_summary_2026-03-01.md`，不阻塞关闭

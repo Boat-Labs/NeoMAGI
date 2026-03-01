@@ -18,14 +18,16 @@
 
 ---
 
-## 2. 当前进展快照（截至 2026-02-24）
+## 2. 当前进展快照（截至 2026-03-01）
 
 - `M0`：已完成（治理与决策追踪）。
 - `M1.1 ~ M1.4`：已完成（基础交互、任务闭环、稳定性、测试与 CI 基线）。
 - `M1.5`：已完成（Tool Modes 可控执行闭环）。
 - `M2`：已完成（会话内连续性 — 压缩、反漂移、token 预算）。
 - `M3`：已完成（会话外持久记忆 — 5 Phase + post-review 修正，481 tests，ADR 0034~0037）。
-- 当前阶段判断：进入 `M6`（模型迁移验证）。
+- `M6`：已完成（模型迁移验证）。
+- `M7`：已完成（多代理协作控制与开发治理使能）。
+- 当前阶段判断：进入 `M4`（第二渠道适配）；`M5` 仍保持触发式进入。
 
 ---
 
@@ -40,7 +42,7 @@
 - `SOUL.md` 护栏：原则上仅允许 AI 写入；人类不直接编辑内容，但保留 veto/rollback 权限。
 - 会话隔离与记忆召回必须同源治理：session scope 与 memory scope 使用同一策略，不允许“会话隔离正确但记忆跨作用域泄漏”。
 
-该校准不改变当前推荐顺序（`M1.5 -> M2 -> M3 -> M6 -> M4 -> M5`），仅补充阶段验收口径。
+该校准不改变当前推荐顺序（`M1.5 -> M2 -> M3 -> M6 -> M7 -> M4 -> M5`），仅补充阶段验收口径。
 
 ### 2.2 会话隔离校准（dmScope）
 - 对齐 OpenClaw `dmScope` 策略作为后续演进起点：`main`、`per-peer`、`per-channel-peer`、`per-account-channel-peer`。
@@ -137,6 +139,30 @@
 
 ---
 
+### M7：协作控制与开发治理（内部使能）
+**用户价值**
+- 用户不可直接感知此里程碑，但它降低后续大范围重构、跨 worktree 协作和多代理开发时的状态分叉、越权推进与证据断裂风险，为 M4/M5 的后续交付提供更稳定的工程底座。
+
+**边界**
+- In:
+  - beads control plane 作为协作 SSOT。
+  - `scripts/devcoord` 作为唯一协议写入口。
+  - Claude Code project skills、slash trigger 验证、teammate cutover。
+  - gate / ack / recovery / render / audit / projection 闭环。
+  - 幂等护栏、`target_commit` preflight、canonical full SHA 规范。
+- Out:
+  - 不把 devcoord 扩展成通用 workflow engine。
+  - 不在本阶段建设额外的权限中心或 actor auth 子系统。
+  - 不为了实验性 negative control 引入更多持久化事件类型。
+
+**验收标准（Use Case）**
+- 用例 A：PM、backend、tester 在共享 `.beads` 控制面下可完成 gate open -> teammate write -> review -> close 的 live 闭环。
+- 用例 B：projection 可由 control plane 重建，且 `audit` 能稳定回到 `reconciled=true`。
+- 用例 C：同一 gate 下重复 `ACK / RECOVERY_CHECK / PHASE_COMPLETE` 不会重复落事件。
+- 用例 D：若 teammate worktree `HEAD != target_commit`，Claude Code slash skill 会停在阻塞态而不是误写控制面。
+
+---
+
 ### M4：第二渠道适配（Telegram）
 **用户价值**
 - 用户可在 WebChat 之外，通过第二入口稳定使用同一 agent 能力。
@@ -182,11 +208,13 @@
 2. M2（会话内连续性）
 3. M3（会话外持久记忆）
 4. M6（模型迁移验证）
-5. M4（第二渠道适配）
-6. M5（触发式进入）
+5. M7（协作控制与开发治理，使能里程碑）
+6. M4（第二渠道适配）
+7. M5（触发式进入）
 
 排序说明：
 - M6 排在 M4 之前，是为了先验证模型迁移与回退策略，再扩展第二渠道，减少渠道适配后的重复校准成本。
+- M7 排在 M4 之前，是为了先把多代理协作控制、cutover 和证据闭环稳定下来，降低后续渠道扩展时的开发治理噪音。
 
 ---
 
@@ -208,3 +236,4 @@
 | v3.3 | 2026-02-22 | 对齐 OpenClaw `dmScope`：补充 M3 作用域治理验收与 M4 渠道激活边界 | ADR 0034 |
 | v3.4 | 2026-02-23 | 新增 M3 启动门槛：最小运行时反漂移防护（Core contract guard + 风险分级 fail-closed） | ADR 0035 |
 | v3.5 | 2026-02-24 | M3 完成：5 Phase 交付 + post-review 修正（网关接线、Evolution 补偿、搜索触发器、路径校验）；进入 M6 | ADR 0036, 0037 |
+| v3.6 | 2026-03-01 | M6 与新增 M7 已完成；补充 M7（协作控制与开发治理）为内部使能里程碑；当前阶段进入 M4 | ADR 0042, 0043 |

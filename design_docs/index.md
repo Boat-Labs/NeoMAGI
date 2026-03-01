@@ -13,7 +13,8 @@
 
 3. 当前里程碑对应 architecture 文档  
    - 按 `design_docs/roadmap_milestones_v3.md` 当前阶段读取对应文档。  
-   - 当前建议优先阅读：`design_docs/m2_architecture.md`（会话内连续性，含反漂移基线）。
+   - 当前建议优先阅读：`design_docs/m4_architecture.md`（第二渠道适配）。
+   - 若任务涉及多代理协作控制或 devcoord，额外读取：`dev_docs/reviews/m7_summary_2026-03-01.md`、`dev_docs/devcoord/beads_control_plane.md`。
 
 ## 2. 里程碑 Architecture 文档映射
 
@@ -24,6 +25,7 @@
 - `design_docs/m4_architecture.md`：M4 计划（Telegram 第二渠道）
 - `design_docs/m5_architecture.md`：M5 计划（运营可靠性，触发式）
 - `design_docs/m6_architecture.md`：M6 计划（模型迁移验证）
+- `M7`：无独立 architecture 文档；以 `dev_docs/plans/m7_devcoord-refactor_2026-02-28_v2.md`、`dev_docs/reviews/m7_summary_2026-03-01.md` 和 `dev_docs/devcoord/beads_control_plane.md` 为依据
 
 ## 3. 场景化按需加载
 
