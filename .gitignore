@@ -209,7 +209,7 @@ __marimo__/
 .claude/worktree
 .claude/worktrees/
 dev_docs/prompts/
-dev_docs/reports/
+dev_docs/reports/*.json
 
 # Workspace (user-specific agent files)
 workspace/
