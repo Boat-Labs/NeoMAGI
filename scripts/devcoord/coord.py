@@ -538,6 +538,16 @@ class CoordService:
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
             gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
+            resolved_phase = phase or gate_issue.metadata_str("phase")
+            duplicate_ack = self._find_latest_event(
+                issues,
+                event="ACK",
+                role=normalized_role,
+                gate=gate_id,
+                phase=resolved_phase,
+                ack_of=command_name,
+                target_commit=commit,
+            )
             message_issue = self._find_pending_message(
                 issues,
                 role=normalized_role,
@@ -549,7 +559,6 @@ class CoordService:
                     f"no pending {command_name} message for role={normalized_role} gate={gate_id}"
                 )
             now = self.now_fn()
-            resolved_phase = phase or message_issue.metadata_str("phase")
             updated_message_metadata = _merge_dicts(
                 message_issue.metadata,
                 {
@@ -563,6 +572,31 @@ class CoordService:
                 message_issue.issue_id,
                 metadata=updated_message_metadata,
             )
+            if duplicate_ack is not None:
+                self.store.update_issue(
+                    gate_issue.issue_id,
+                    metadata=_merge_dicts(
+                        gate_issue.metadata,
+                        {
+                            "gate_state": "open",
+                            "opened_at": gate_issue.metadata_str("opened_at")
+                            or duplicate_ack.metadata_str("ts"),
+                            "target_commit": commit,
+                        },
+                    ),
+                )
+                issues = self._coord_issues(normalized_milestone)
+                self._update_agent(
+                    issues,
+                    milestone=normalized_milestone,
+                    role=normalized_role,
+                    state="working",
+                    task=duplicate_ack.metadata_str("task") or task,
+                    last_activity=now,
+                    action=f"gate {gate_id} effective",
+                    stale_risk="none",
+                )
+                return
             issues = self._coord_issues(normalized_milestone)
             self._record_event(
                 issues=issues,
@@ -674,9 +708,19 @@ class CoordService:
     ) -> None:
         normalized_milestone = _normalize_milestone(milestone)
         normalized_role = _normalize_role(role)
-        now = self.now_fn()
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
+            duplicate_phase_complete = self._find_latest_event(
+                issues,
+                event="PHASE_COMPLETE",
+                role=normalized_role,
+                gate=gate_id,
+                phase=phase,
+                target_commit=commit,
+            )
+            if duplicate_phase_complete is not None:
+                return
+            now = self.now_fn()
             gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
             phase_issue = self._require_single(issues, "phase", phase=phase)
             self.store.update_issue(
@@ -730,10 +774,21 @@ class CoordService:
         normalized_role = _normalize_role(role)
         normalized_last_seen_gate = last_seen_gate.strip() or "unknown"
         requested_gate = _none_if_placeholder(normalized_last_seen_gate)
-        now = self.now_fn()
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
             snapshot = self._state_snapshot(issues, preferred_gate_id=requested_gate)
+            duplicate_recovery = self._find_latest_event(
+                issues,
+                event="RECOVERY_CHECK",
+                role=normalized_role,
+                gate=snapshot["gate_id"],
+                phase=snapshot["phase"],
+                target_commit=snapshot["target_commit"],
+                last_seen_gate=normalized_last_seen_gate,
+            )
+            if duplicate_recovery is not None:
+                return
+            now = self.now_fn()
             self._record_event(
                 issues=issues,
                 milestone=normalized_milestone,
@@ -1651,6 +1706,22 @@ class CoordService:
             and issue.metadata_str("result") == result
             and issue.metadata_str("report_commit") == report_commit
             and issue.metadata_str("report_path") == report_path
+        ]
+        candidates.sort(key=lambda issue: (issue.metadata_int("event_seq"), issue.issue_id))
+        return candidates[-1] if candidates else None
+
+    def _find_latest_event(
+        self,
+        issues: Sequence[IssueRecord],
+        *,
+        event: str,
+        **matches: str,
+    ) -> IssueRecord | None:
+        candidates = [
+            issue
+            for issue in self._iter_kind(issues, "event")
+            if issue.metadata_str("event") == event
+            and all(issue.metadata_str(key) == value for key, value in matches.items())
         ]
         candidates.sort(key=lambda issue: (issue.metadata_int("event_seq"), issue.issue_id))
         return candidates[-1] if candidates else None
