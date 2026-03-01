@@ -257,8 +257,8 @@
 <!-- devcoord:begin milestone=m7 -->
 ## 2026-03-01 (generated) | M7
 - Status: done
-- Done: 最新 gate G-M7-P2 为 closed (PASS)；backend=done, tester=done
-- Evidence: `dev_docs/logs/m7_2026-03-01/gate_state.md`, `dev_docs/logs/m7_2026-03-01/watchdog_status.md`, `dev_docs/reviews/m7_phase2_2026-03-01.md` (cea1fb5)
-- Next: G-M7-P2 已关闭，等待 M7 下一条 gate
-- Risk: 无
+- Done: 最新 gate G-M7-P3 为 closed (PASS_WITH_RISK)；backend=done, tester=done
+- Evidence: `dev_docs/logs/m7_2026-03-01/gate_state.md`, `dev_docs/logs/m7_2026-03-01/watchdog_status.md`, `dev_docs/reviews/m7_phase3_2026-03-01.md` (2ad37fa)
+- Next: G-M7-P3 已关闭，等待 M7 下一条 gate
+- Risk: G-M7-P3 关闭结果为 PASS_WITH_RISK
 <!-- devcoord:end milestone=m7 -->
