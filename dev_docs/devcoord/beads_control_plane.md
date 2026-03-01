@@ -199,6 +199,7 @@ Phase 1 固定采用以下实现方式：
 - `uv run python scripts/devcoord/coord.py phase-complete`
 - `uv run python scripts/devcoord/coord.py recovery-check`
 - `uv run python scripts/devcoord/coord.py state-sync-ok`
+- `uv run python scripts/devcoord/coord.py stale-detected`
 - `uv run python scripts/devcoord/coord.py render`
 
 推荐调用方式：
@@ -213,9 +214,10 @@ Phase 1 固定采用以下实现方式：
 - `phase-complete`：写入阶段完成事件，更新 phase/gate 相关状态。
 - `recovery-check`：记录 teammate 重启/上下文压缩后的恢复请求，并将角色置为等待同步。
 - `state-sync-ok`：记录 PM 的状态同步确认，并将目标角色恢复到可继续执行状态。
+- `stale-detected`：记录超时观察后判定的可疑失活，并将角色标记为 `suspected_stale`。
 - `render`：从 beads 投影到 `dev_docs`。
 
-补充命令如 `stale-detected`、`gate-close fail-guards` 在最小闭环跑通后再引入，避免过早扩大命令表面积。
+补充命令如 `PING`、`unconfirmed-instruction` 在最小闭环跑通后再引入，避免过早扩大命令表面积。
 后续若需要引入 `claim`、`handoff` 或开放竞争相关命令，也应作为执行层原语补充，而不是把执行路径反推回治理状态机。
 
 ## 9. 协议映射
