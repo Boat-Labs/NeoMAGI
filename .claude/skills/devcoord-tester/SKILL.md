@@ -19,17 +19,19 @@ This skill defines the tester teammate's devcoord write path.
 
 - Never review against an unpushed local backend state.
 - Before acceptance, sync to the visible backend commit and confirm `git rev-parse HEAD`.
+- Before any devcoord write, verify the current `HEAD` matches the gate `target_commit`; if not, sync or stop and report the mismatch instead of writing.
 - Never edit `dev_docs/logs/*` or `dev_docs/progress/project_progress.md` directly.
 - Never close gates yourself; tester can submit review evidence, PM owns `gate-close`.
 - Prefer `uv run python scripts/devcoord/coord.py apply <action> --payload-stdin`.
 
 ## Required actions
 
-1. On `GATE_OPEN` or `PING`, send `ack`.
-2. On long reviews or test runs, send `heartbeat`.
-3. After restart or context loss, send `recovery-check` before continuing.
-4. When the review report is committed and visible, submit `gate-review`.
-5. After `gate-review`, wait for PM to run `render -> audit -> gate-close` unless PM issues a new gate or sync instruction.
+1. Before any write, confirm the review worktree is on the visible backend state by checking `git rev-parse --show-toplevel`, `git rev-parse --abbrev-ref HEAD`, and `git rev-parse HEAD`; only continue if `HEAD == target_commit`.
+2. On `GATE_OPEN` or `PING`, send `ack`.
+3. On long reviews or test runs, send `heartbeat`.
+4. After restart or context loss, send `recovery-check` before continuing.
+5. When the review report is committed and visible, submit `gate-review`.
+6. After `gate-review`, wait for PM to run `render -> audit -> gate-close` unless PM issues a new gate or sync instruction.
 
 ## Role boundaries
 
@@ -49,3 +51,4 @@ This skill defines the tester teammate's devcoord write path.
 ## Recovery payload note
 
 - `last_seen_gate` is required for `recovery-check`.
+- If `HEAD != target_commit`, stop and report the mismatch before attempting `recovery-check`.

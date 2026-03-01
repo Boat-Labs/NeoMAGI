@@ -75,7 +75,8 @@ LLM
 - skill 文件遵循 Claude Skills 官方 `SKILL.md` frontmatter 模板，正文只保留触发条件、工作流和边界约束。
 - skill 触发验证使用 `scripts/devcoord/check_skill_activation.sh`；触发经验和 CLI debug 判据记录在 `dev_docs/devcoord/claude_code_skill_triggering.md`。
 - 当前经验表明：纯自然语言提及 skill 名称仍可能被近义语义污染；对高约束流程，slash 形式 `/devcoord-<role>` 更可靠。
-- live slash 写操作当前不具备幂等保护；同一 prompt 重跑可能追加重复事件。operator 必须先检查 beads / `audit` / debug，再决定是否补发。
+- teammate live 写操作前必须先校验当前 worktree `git rev-parse HEAD == target_commit`；若不一致，只允许回报阻塞，不允许写入控制面。
+- `ACK`、`RECOVERY_CHECK`、`PHASE_COMPLETE` 已具备重复写入去重护栏；其他动作仍按“先查 `audit` / projection / debug，再决定是否补发”执行。
 
 ### 3.6 治理层与执行层
 - 治理层回答“现在谁被允许推进、什么条件下可以关闭/恢复/继续”。

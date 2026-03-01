@@ -130,3 +130,5 @@ DISABLE_SLASH_COMMANDS=1 scripts/devcoord/check_skill_activation.sh devcoord-tes
   - 不要把“无输出”直接当作“未写入”。
 - `render -> audit -> projection read` 必须串行执行。若把 `render` 与 `audit` 或文件读取并行跑，容易看到旧投影，形成假阳性的“gate 仍 open / projection 未更新”判断。
 - tester 场景对 prompt 具体度更敏感；当目标是 `recovery-check` 或 `gate-review` 时，直接给出 payload/命令形状比只给自然语言意图更稳。
+- `G-M7-P4` 的污染 drill 说明：即使 skill 已命中，若 teammate 运行在旧 worktree，Claude Code CLI 仍可能沿用错误的本地执行路径。最小有效护栏不是再加 wrapper，而是把 `git rev-parse HEAD == target_commit` 作为写前强制 preflight。
+- `G-M7-P5` 的 clean drill 说明：在 fresh worktree + committed 代码下，`ACK`、`RECOVERY_CHECK`、`PHASE_COMPLETE` 的重复重放已不会追加新事件。当前“补发前先对账”的要求主要保留给未做去重的其他动作。

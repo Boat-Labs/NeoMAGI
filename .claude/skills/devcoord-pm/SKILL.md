@@ -29,8 +29,9 @@ This skill is the PM-side operating contract for NeoMAGI devcoord after the cont
 1. Read `AGENTTEAMS.md`, `dev_docs/devcoord/beads_control_plane.md`, and the latest M7 plan/review if they are not already in context.
 2. For every teammate status change, record the matching devcoord action first, then continue coordination.
 3. If append-first cannot be satisfied in the same PM turn, immediately record `log-pending` and backfill on the next PM turn.
-4. Before any `gate-close`, run `render`, then `audit`, and require `reconciled=true`.
-5. Only close a gate after `gate-review` exists and the report commit/path are visible in the main repo.
+4. When spawning Claude Code teammate actions, include `target_commit` and require the teammate to verify `git rev-parse HEAD == target_commit` before any devcoord write.
+5. Before any `gate-close`, run `render`, then `audit`, and require `reconciled=true`.
+6. Only close a gate after `gate-review` exists and the report commit/path are visible in the main repo.
 
 ## Command map
 
