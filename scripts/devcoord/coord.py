@@ -424,6 +424,7 @@ class CoordService:
     ) -> None:
         normalized_milestone = _normalize_milestone(milestone)
         normalized_role = _normalize_role(allowed_role)
+        canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
             self.store.init_repo()
@@ -438,7 +439,7 @@ class CoordService:
                 "phase": phase,
                 "gate_id": gate_id,
                 "allowed_role": normalized_role,
-                "target_commit": target_commit,
+                "target_commit": canonical_target_commit,
                 "result": "",
                 "report_path": "",
                 "report_commit": "",
@@ -477,7 +478,7 @@ class CoordService:
                 "command": "GATE_OPEN",
                 "requires_ack": True,
                 "effective": False,
-                "target_commit": target_commit,
+                "target_commit": canonical_target_commit,
                 "allowed_role": normalized_role,
                 "sent_at": now,
                 "task": task,
@@ -506,7 +507,7 @@ class CoordService:
                 task=task,
                 event="GATE_OPEN_SENT",
                 gate_id=gate_id,
-                target_commit=target_commit,
+                target_commit=canonical_target_commit,
                 parent_id=gate_issue_id,
                 ts=now,
             )
@@ -535,6 +536,7 @@ class CoordService:
         normalized_milestone = _normalize_milestone(milestone)
         normalized_role = _normalize_role(role)
         command_name = command.upper()
+        canonical_commit = self._canonicalize_commit_ref(commit)
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
             gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
@@ -546,7 +548,7 @@ class CoordService:
                 gate=gate_id,
                 phase=resolved_phase,
                 ack_of=command_name,
-                target_commit=commit,
+                target_commit=canonical_commit,
             )
             message_issue = self._find_pending_message(
                 issues,
@@ -565,7 +567,7 @@ class CoordService:
                     "effective": True,
                     "acked_at": now,
                     "ack_role": normalized_role,
-                    "ack_commit": commit,
+                    "ack_commit": canonical_commit,
                 },
             )
             self.store.update_issue(
@@ -581,7 +583,7 @@ class CoordService:
                             "gate_state": "open",
                             "opened_at": gate_issue.metadata_str("opened_at")
                             or duplicate_ack.metadata_str("ts"),
-                            "target_commit": commit,
+                            "target_commit": canonical_commit,
                         },
                     ),
                 )
@@ -607,7 +609,7 @@ class CoordService:
                 task=task,
                 event="ACK",
                 gate_id=gate_id,
-                target_commit=commit,
+                target_commit=canonical_commit,
                 ack_of=command_name,
                 parent_id=gate_issue.issue_id,
                 ts=now,
@@ -618,7 +620,7 @@ class CoordService:
                 {
                     "gate_state": "open",
                     "opened_at": now,
-                    "target_commit": commit,
+                    "target_commit": canonical_commit,
                 },
             )
             self.store.update_issue(gate_issue.issue_id, metadata=gate_metadata)
@@ -632,7 +634,7 @@ class CoordService:
                 task=f"{command_name} effective for {normalized_role}",
                 event="GATE_EFFECTIVE",
                 gate_id=gate_id,
-                target_commit=commit,
+                target_commit=canonical_commit,
                 parent_id=gate_issue.issue_id,
                 ts=now,
                 source_message_id=message_issue.issue_id,
@@ -664,6 +666,7 @@ class CoordService:
     ) -> None:
         normalized_milestone = _normalize_milestone(milestone)
         normalized_role = _normalize_role(role)
+        canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
@@ -677,7 +680,7 @@ class CoordService:
                 task=task,
                 event="HEARTBEAT",
                 gate_id=gate_id,
-                target_commit=target_commit,
+                target_commit=canonical_target_commit,
                 parent_id=parent_id,
                 ts=now,
                 eta_min=eta_min,
@@ -708,6 +711,7 @@ class CoordService:
     ) -> None:
         normalized_milestone = _normalize_milestone(milestone)
         normalized_role = _normalize_role(role)
+        canonical_commit = self._canonicalize_commit_ref(commit)
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
             duplicate_phase_complete = self._find_latest_event(
@@ -716,7 +720,7 @@ class CoordService:
                 role=normalized_role,
                 gate=gate_id,
                 phase=phase,
-                target_commit=commit,
+                target_commit=canonical_commit,
             )
             if duplicate_phase_complete is not None:
                 return
@@ -725,13 +729,13 @@ class CoordService:
             phase_issue = self._require_single(issues, "phase", phase=phase)
             self.store.update_issue(
                 gate_issue.issue_id,
-                metadata=_merge_dicts(gate_issue.metadata, {"target_commit": commit}),
+                metadata=_merge_dicts(gate_issue.metadata, {"target_commit": canonical_commit}),
             )
             self.store.update_issue(
                 phase_issue.issue_id,
                 metadata=_merge_dicts(
                     phase_issue.metadata,
-                    {"phase_state": "submitted", "last_commit": commit},
+                    {"phase_state": "submitted", "last_commit": canonical_commit},
                 ),
             )
             issues = self._coord_issues(normalized_milestone)
@@ -744,7 +748,7 @@ class CoordService:
                 task=task,
                 event="PHASE_COMPLETE",
                 gate_id=gate_id,
-                target_commit=commit,
+                target_commit=canonical_commit,
                 parent_id=gate_issue.issue_id,
                 ts=now,
                 eta_min=0,
@@ -828,17 +832,18 @@ class CoordService:
     ) -> None:
         normalized_milestone = _normalize_milestone(milestone)
         normalized_role = _normalize_role(role)
+        canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
             gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
             current_target_commit = gate_issue.metadata_str("target_commit")
-            if current_target_commit and target_commit != current_target_commit:
+            if current_target_commit and canonical_target_commit != current_target_commit:
                 raise CoordError(
                     "state sync target_commit mismatch: "
-                    f"gate={gate_id} expected={current_target_commit} got={target_commit}"
+                    f"gate={gate_id} expected={current_target_commit} got={canonical_target_commit}"
                 )
-            resolved_target_commit = current_target_commit or target_commit
+            resolved_target_commit = current_target_commit or canonical_target_commit
             phase = gate_issue.metadata_str("phase")
             allowed_role = gate_issue.metadata_str("allowed_role")
             self._record_event(
@@ -881,6 +886,7 @@ class CoordService:
     ) -> None:
         normalized_milestone = _normalize_milestone(milestone)
         normalized_role = _normalize_role(role)
+        canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
@@ -894,7 +900,7 @@ class CoordService:
                 task=task,
                 event="STALE_DETECTED",
                 gate_id=gate_id,
-                target_commit=target_commit,
+                target_commit=canonical_target_commit,
                 parent_id=parent_id,
                 ts=now,
                 ping_count=ping_count,
@@ -925,11 +931,14 @@ class CoordService:
     ) -> None:
         normalized_milestone = _normalize_milestone(milestone)
         normalized_role = _normalize_role(role)
+        canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
             gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
-            resolved_target_commit = target_commit or gate_issue.metadata_str("target_commit")
+            resolved_target_commit = canonical_target_commit or gate_issue.metadata_str(
+                "target_commit"
+            )
             self.store.create_issue(
                 title=f"PING -> {normalized_role}",
                 issue_type="task",
@@ -987,11 +996,14 @@ class CoordService:
         normalized_milestone = _normalize_milestone(milestone)
         normalized_role = _normalize_role(role)
         command_name = command.upper()
+        canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
             gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
-            resolved_target_commit = target_commit or gate_issue.metadata_str("target_commit")
+            resolved_target_commit = canonical_target_commit or gate_issue.metadata_str(
+                "target_commit"
+            )
             self._record_event(
                 issues=issues,
                 milestone=normalized_milestone,
@@ -1019,6 +1031,7 @@ class CoordService:
         target_commit: str | None = None,
     ) -> None:
         normalized_milestone = _normalize_milestone(milestone)
+        canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
             issues = self._coord_issues(normalized_milestone)
@@ -1032,7 +1045,7 @@ class CoordService:
                 task=task,
                 event="LOG_PENDING",
                 gate_id=gate_id,
-                target_commit=target_commit,
+                target_commit=canonical_target_commit,
                 parent_id=parent_id,
                 ts=now,
             )
@@ -1691,6 +1704,19 @@ class CoordService:
         except subprocess.CalledProcessError as exc:
             stderr = exc.stderr.strip() or exc.stdout.strip()
             raise CoordError(f"git cat-file -e {object_name} failed: {stderr}") from exc
+
+    def _canonicalize_commit_ref(self, commit_ref: str | None) -> str | None:
+        if commit_ref in (None, ""):
+            return commit_ref
+        try:
+            return _git_output(
+                self.paths.workspace_root,
+                "rev-parse",
+                "--verify",
+                f"{commit_ref}^{{commit}}",
+            )
+        except CoordError:
+            return commit_ref
 
     def _find_matching_event(
         self,
