@@ -12,6 +12,7 @@ from scripts.devcoord.coord import (
     CoordPaths,
     CoordService,
     MemoryIssueStore,
+    _resolve_paths,
     run_cli,
 )
 
@@ -156,6 +157,40 @@ def test_apply_payload_stdin_executes_init(tmp_path: Path, monkeypatch: pytest.M
     assert exit_code == 0
     issues = store.load_issues()
     assert any(issue.metadata.get("coord_kind") == "milestone" for issue in issues)
+
+
+def test_resolve_paths_defaults_to_workspace_root_for_root_beads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    (workspace_root / ".beads").mkdir(parents=True, exist_ok=True)
+    (workspace_root / ".beads" / "metadata.json").write_text("{}", "utf-8")
+    git_common_dir = workspace_root / ".git"
+    git_common_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(coord_module, "_shared_workspace_root", lambda cwd: workspace_root)
+    monkeypatch.setattr(coord_module, "_resolve_git_common_dir", lambda cwd: git_common_dir)
+
+    paths = _resolve_paths(None)
+
+    assert paths.workspace_root == workspace_root
+    assert paths.beads_dir == workspace_root
+    assert paths.lock_file == git_common_dir / "coord.lock"
+
+
+def test_resolve_paths_rejects_legacy_coord_beads_without_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    legacy_root = workspace_root / ".coord" / "beads" / ".beads"
+    legacy_root.mkdir(parents=True, exist_ok=True)
+    (legacy_root / "metadata.json").write_text("{}", "utf-8")
+    git_common_dir = workspace_root / ".git"
+    git_common_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(coord_module, "_shared_workspace_root", lambda cwd: workspace_root)
+    monkeypatch.setattr(coord_module, "_resolve_git_common_dir", lambda cwd: git_common_dir)
+
+    with pytest.raises(CoordError, match="legacy shared control plane detected at .coord/beads"):
+        _resolve_paths(None)
 
 
 def test_ack_fails_closed_without_pending_message(tmp_path: Path) -> None:

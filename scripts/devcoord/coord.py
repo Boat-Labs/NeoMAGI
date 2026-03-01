@@ -17,7 +17,7 @@ COORD_LABEL = "coord"
 KIND_KEY = "coord_kind"
 SCHEMA_VERSION = 1
 DEFAULT_ROLES = ("pm", "backend", "tester")
-DEFAULT_BEADS_SUBDIR = Path(".coord/beads")
+LEGACY_BEADS_SUBDIR = Path(".coord/beads")
 
 
 class CoordError(RuntimeError):
@@ -1222,7 +1222,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--beads-dir",
         default=os.environ.get("BEADS_DIR"),
-        help="Shared BEADS_DIR. Defaults to <git-common-root>/.coord/beads",
+        help="Shared BEADS_DIR. Defaults to the shared repo root containing .beads",
     )
     parser.add_argument(
         "--bd-bin",
@@ -1563,14 +1563,14 @@ def _resolve_paths(beads_dir_override: str | None) -> CoordPaths:
         beads_dir = Path(beads_dir_override).expanduser()
     else:
         root_beads = workspace_root / ".beads" / "metadata.json"
-        default_beads_root = workspace_root / DEFAULT_BEADS_SUBDIR
-        default_beads = default_beads_root / ".beads" / "metadata.json"
-        if root_beads.exists():
-            beads_dir = workspace_root
-        elif default_beads.exists():
-            beads_dir = default_beads_root
-        else:
-            beads_dir = default_beads_root
+        legacy_beads_root = workspace_root / LEGACY_BEADS_SUBDIR
+        legacy_beads = legacy_beads_root / ".beads" / "metadata.json"
+        if legacy_beads.exists() and not root_beads.exists():
+            raise CoordError(
+                "legacy shared control plane detected at .coord/beads; "
+                "migrate to repo root .beads or pass --beads-dir explicitly"
+            )
+        beads_dir = workspace_root
     if not beads_dir.is_absolute():
         beads_dir = (workspace_root / beads_dir).resolve()
     return CoordPaths(
