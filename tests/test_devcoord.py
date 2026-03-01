@@ -212,6 +212,55 @@ def test_apply_payload_stdin_executes_init(tmp_path: Path, monkeypatch: pytest.M
     assert any(issue.metadata.get("coord_kind") == "milestone" for issue in issues)
 
 
+def test_open_gate_canonicalizes_target_commit_when_git_can_resolve_it(tmp_path: Path) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    short_commit = init_git_repo_with_review(paths, "dev_docs/reviews/m7_phase1_2026-03-01.md")
+    full_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=paths.workspace_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    service = CoordService(
+        paths=paths,
+        store=store,
+        now_fn=FakeClock("2026-03-01T10:00:00Z"),
+    )
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit=short_commit,
+        task="open gate with short git ref",
+    )
+    service.render("M7")
+
+    audit = service.audit("M7")
+    assert audit["open_gates"] == [
+        {
+            "gate": "G-M7-P1",
+            "phase": "1",
+            "status": "pending",
+            "allowed_role": "backend",
+            "target_commit": full_commit,
+        }
+    ]
+    assert audit["pending_ack_messages"] == [
+        {
+            "command": "GATE_OPEN",
+            "role": "backend",
+            "gate": "G-M7-P1",
+            "phase": "1",
+            "target_commit": full_commit,
+        }
+    ]
+
+
 def test_resolve_paths_defaults_to_workspace_root_for_root_beads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
