@@ -1,6 +1,6 @@
-# M7 DevCoord 重构计划（草稿）
+# M7 DevCoord 重构计划
 
-> 状态：draft
+> 状态：approved
 > 日期：2026-02-28
 > 性质：内部治理 / 执行层重构，不属于产品 roadmap 新功能里程碑
 > 依据：`AGENTTEAMS.md`、`AGENTS.md`、ADR 0005/0006/0023/0036/0042、`dev_docs/devcoord/beads_control_plane.md`
@@ -47,6 +47,7 @@
 - append-first、ACK 生效、恢复握手、日志对账无法通过程序强制。
 - 同一规则同时分散在 `AGENTTEAMS.md`、`AGENTS.md`、PM action plan、phase prompt 与日志文件里，维护成本高。
 - agent 当前缺少稳定的“控制面 API”，导致协议细节过度暴露给模型上下文。
+- 当前项目规模较小，短期内会低利用 `beads / Dolt` 的部分高级特性；M7 选择它是对未来协作能力的前置投资，而不是假设当前阶段已经需要吃满其规模优势。
 
 ## 4. 目标架构
 
@@ -164,6 +165,11 @@
   - stale / respawn
   - gate review fail -> re-review pass
 
+### 7.5 Exit Criteria 验证
+- 记录 Dolt server 启动、连接、健康检查与恢复操作的实际运维成本
+- 验证是否出现 shadow database、stale server、lock contention、空库误连等高摩擦问题
+- 评估 `beads` 是否在当前阶段提供了超出“重型存储壳”的实际收益
+
 ## 8. 风险与缓解
 
 | 风险 | 影响 | 缓解 |
@@ -176,12 +182,34 @@
 | 审计事件被当作临时对象删除 | 审计链断裂 | 审计事件只使用 append-only event bead，不使用 wisp |
 | 远程 sync 过早引入 | 额外复杂度 | M7 初期只做本机单控制面 |
 | 把执行路径一并写死在状态机 | handoff / rescue / 并行探索能力下降 | 将状态机限制在治理边界；把执行路径保持为 lease / handoff 风格 |
+| Dolt 运维成本超出当前规模承受范围 | 控制面收益被运维噪声抵消 | 在 Shadow Mode 记录实际成本；若超过 exit criteria，则替换存储适配层而保留 `just -> scripts/devcoord` 接口 |
 
 ## 9. 回滚策略
 
 - 若 beads 控制面未稳定，可回退到“wrapper 停用 + 继续人工维护 `dev_docs/logs/*`”。
 - `dev_docs` 文件保持兼容输出，确保回滚不需要恢复旧格式。
 - M7 任一阶段失败，不影响产品主链路功能与产品数据面。
+
+### 9.1 Exit Criteria
+满足以下任一情况时，应评估停止将 `beads / Dolt` 作为 M7 的默认存储后端，并切换到更轻量的适配实现：
+
+- Shadow Mode 或 PM First 阶段反复出现 shadow database、stale server、锁冲突、空库误连等问题，且无法通过 wrapper 和运维约束稳定消除。
+- 运行期需要频繁人工介入 Dolt server 生命周期、锁清理或数据同步诊断，运维心智负担超过当前项目规模可接受范围。
+- Phase 1 / 2 结束后，`beads / Dolt` 未显著提升共享状态查询、历史回放或协作可见性，仅充当高成本存储壳。
+
+切换要求：
+- 保持 `just -> scripts/devcoord` 命令面不变。
+- 仅替换存储适配层，不回退到 prompt 直接维护日志文件。
+- `dev_docs` projection 输出格式继续保持兼容。
+
+### 9.2 未来分级存储
+当前阶段统一采用 append-only 审计事件。
+
+若未来协调事件量显著增长，可再评估分级策略：
+- 审计级事件：持久保存
+- 操作级临时协调消息：允许采用更轻量、可压缩或临时生命周期的承载方式
+
+该优化不属于 M7 当前范围。
 
 ## 10. 下一步建议
 

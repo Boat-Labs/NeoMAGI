@@ -1,6 +1,6 @@
 # 0042-devcoord-control-plane-beads-ssot-with-dev-docs-projection
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-02-28
 
 ## 选了什么
@@ -16,6 +16,7 @@
 ## 为什么
 - 当前协作控制依赖 prompt 约束 PM 手工维护 `heartbeat_events.jsonl`、`gate_state.md`、`watchdog_status.md` 等文件，真实状态与投影文件之间缺乏结构化约束，append-first、ACK 生效、恢复握手、对账等规则过度依赖人工执行。
 - `beads` 已具备适合协作控制面的基础能力：结构化 metadata、agent state、message/thread、版本化历史与查询能力，适合承载控制面对象的结构化存储与查询；但协议状态机仍需由 `scripts/devcoord` 显式实现。
+- 当前项目规模仅为少量 agent 协作，短期内会低利用 `beads / Dolt` 的部分高级能力（如更大规模多写者并发、跨 rig / convoy 调度等）；这是有意识接受的阶段性超配，用于换取共享结构化状态、历史查询与后续扩展空间。
 - 把确定性流程从 prompt 下沉到脚本，可以显著降低上下文噪声与协议漂移风险，使状态机、幂等、投影生成与回归测试可程序化验证。
 - 当前主要问题是治理边界失真，而不是任务执行路径不够刚性；如果把完整执行路径一并写死在状态机里，会削弱 handoff、rescue 与并行探索能力。
 - 借鉴 `beads / Gas Town` 的重点是共享状态、异步 handoff 与活性监控，而不是照搬其对象名词或把所有任务做成固定流程。
@@ -36,5 +37,6 @@
 - 将新增 `dev_docs/devcoord/beads_control_plane.md` 作为控制面架构文档，定义对象模型、命令面、投影规则、共享 `BEADS_DIR` 拓扑与迁移顺序。
 - M7 Phase 1 将固定通过 `bd ... --json` CLI shell-out 与 beads 交互；不直接写 Dolt SQL，不通过 MCP server。
 - M7 的状态机实现应保持“治理层强约束、执行层弱路径”：前者负责权限与审计，后者保留 lease / handoff / rescue / competition 的弹性空间。
+- 若后续事件量显著增长，可再引入“审计级持久 / 操作级临时”的分级策略；当前阶段仍以 append-only 审计事件为基线，不预先优化到高吞吐协调消息场景。
 - `dev_docs/logs/README.md`、PM Action Plan、teammate tactical prompt 后续需要改写为“调用控制面接口”，而非“直接维护日志文件”。
 - 需要为“产品运行时 PostgreSQL SSOT”与“开发协作控制面 beads SSOT”做边界澄清：前者仍是产品数据面唯一基线，后者仅是内部治理与执行态控制面。

@@ -1,6 +1,6 @@
 # Beads Control Plane
 
-> 状态：draft
+> 状态：approved
 > 日期：2026-02-28
 > 适用范围：NeoMAGI 开发协作控制面（非产品运行时）
 
@@ -213,7 +213,7 @@ Phase 1 固定采用以下实现方式：
 
 ## 9. 协议映射
 
-### 8.1 指令类
+### 9.1 指令类
 - `GATE_OPEN`
 - `STOP`
 - `WAIT`
@@ -226,7 +226,7 @@ Phase 1 固定采用以下实现方式：
 - `metadata.requires_ack=true`。
 - command 只有收到 `ACK` 后才标记 effective。
 
-### 8.2 状态类
+### 9.2 状态类
 - `PHASE_COMPLETE`
 - `RECOVERY_CHECK`
 - `STATE_SYNC_OK`
@@ -238,25 +238,25 @@ Phase 1 固定采用以下实现方式：
 - 同步更新相关 bead 的聚合状态字段。
 - `PHASE_COMPLETE` 表示当前尝试已提交可评审结果，不等同于问题空间已被彻底穷尽。
 
-### 8.3 角色活性
+### 9.3 角色活性
 - 使用 agent bead 的 `agent_state` 与 `last_activity`。
 - heartbeat 更新 agent bead，并额外落一条 append-only event bead。
 
 ## 10. Projection 规则
 
-### 9.1 生成文件
+### 10.1 生成文件
 - `dev_docs/logs/{milestone}_{date}/heartbeat_events.jsonl`
 - `dev_docs/logs/{milestone}_{date}/gate_state.md`
 - `dev_docs/logs/{milestone}_{date}/watchdog_status.md`
 - `dev_docs/progress/project_progress.md`
 
-### 9.2 生成原则
+### 10.2 生成原则
 - `scripts/devcoord` 每次从 beads 读取完整状态后重建目标文件。
 - projection 文件允许被覆盖重写，不允许人工增量维护。
 - projection 格式尽量兼容现有文件，降低切换成本。
 - `scripts/devcoord` 负责把内部控制面对象转换为现有 `heartbeat_events.jsonl` schema；该转换逻辑属于控制面实现的一部分，需要单独测试。
 
-### 9.3 兼容阶段
+### 10.3 兼容阶段
 - shadow mode 期间，保留旧文件并对比输出。
 - cutover 后，旧文件仍保留，但来源改为 `scripts/devcoord` 投影。
 
