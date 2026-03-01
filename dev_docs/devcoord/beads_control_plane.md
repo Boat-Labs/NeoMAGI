@@ -202,7 +202,11 @@ Phase 1 固定采用以下实现方式：
 - `uv run python scripts/devcoord/coord.py ping`
 - `uv run python scripts/devcoord/coord.py unconfirmed-instruction`
 - `uv run python scripts/devcoord/coord.py stale-detected`
+- `uv run python scripts/devcoord/coord.py log-pending`
+- `uv run python scripts/devcoord/coord.py gate-review`
+- `uv run python scripts/devcoord/coord.py gate-close`
 - `uv run python scripts/devcoord/coord.py render`
+- `uv run python scripts/devcoord/coord.py audit`
 
 推荐调用方式：
 - `uv run python scripts/devcoord/coord.py apply <action> --payload-file <json>`
@@ -219,9 +223,13 @@ Phase 1 固定采用以下实现方式：
 - `ping`：发送需要 ACK 的 `PING` 指令，用于超时观察窗口中的二次确认。
 - `unconfirmed-instruction`：记录“原指令仍未确认、已进入重复 PING”这一治理事件。
 - `stale-detected`：记录超时观察后判定的可疑失活，并将角色标记为 `suspected_stale`。
+- `log-pending`：记录 append-first 暂时未能在同一 PM 回合落盘的延迟补录事件。
+- `gate-review`：写入 gate 审阅结论与报告证据，但不直接关闭 gate。
+- `gate-close`：在 review、projection 对账、报告可见性都满足时关闭 gate。
 - `render`：从 beads 投影到 `dev_docs`。
+- `audit`：只读输出 append-first / projection 对账快照，供关 gate 前自检。
 
-补充命令如 `LOG_PENDING`、`append-first audit helpers` 在最小闭环跑通后再引入，避免过早扩大命令表面积。
+当前最小闭环已经包含 `LOG_PENDING` 与 `audit`。后者是 read-only helper，不承担状态写入，只负责输出 `received_events`、`logged_events`、`pending_ack_messages`、`open_gates`、`log_pending_events` 等审计视图。
 后续若需要引入 `claim`、`handoff` 或开放竞争相关命令，也应作为执行层原语补充，而不是把执行路径反推回治理状态机。
 
 ## 9. 协议映射
@@ -241,10 +249,14 @@ Phase 1 固定采用以下实现方式：
 
 ### 9.2 状态类
 - `PHASE_COMPLETE`
+- `PING_SENT`
+- `UNCONFIRMED_INSTRUCTION`
+- `LOG_PENDING`
 - `RECOVERY_CHECK`
 - `STATE_SYNC_OK`
 - `STALE_DETECTED`
 - `GATE_REVIEW_COMPLETE`
+- `GATE_CLOSE`
 
 映射方式：
 - 使用 append-only event bead 承载。
@@ -269,6 +281,7 @@ Phase 1 固定采用以下实现方式：
 - projection 格式尽量兼容现有文件，降低切换成本。
 - `scripts/devcoord` 负责把内部控制面对象转换为现有 `heartbeat_events.jsonl` schema；该转换逻辑属于控制面实现的一部分，需要单独测试。
 - `project_progress.md` 采用 milestone-scoped generated block upsert：保留既有人工历史条目，只替换 `<!-- devcoord:begin milestone=... -->` 到 `<!-- devcoord:end milestone=... -->` 之间的控制面投影块。
+- `audit` 读取 beads 当前事件数与已渲染的 `heartbeat_events.jsonl`，用于 append-first 与 gate-close 前的对账，不修改任何控制面对象。
 
 ### 10.3 兼容阶段
 - shadow mode 期间，保留旧文件并对比输出。
@@ -283,6 +296,7 @@ Phase 1 固定采用以下实现方式：
 - agent 只允许通过 `scripts/devcoord` 进入控制面；skill 负责约束这一点。
 - control plane 失败时默认 fail-closed，不静默补写文件假装成功。
 - append-only 审计事件不得映射为会删除的临时对象。
+- `audit.reconciled=false` 时禁止关闭 gate。
 - 治理状态机不得把执行路径锁死为唯一路径；系统必须为 handoff / rescue / 更优尝试保留空间。
 
 ## 12. 迁移顺序

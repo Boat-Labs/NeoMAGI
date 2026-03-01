@@ -144,7 +144,5 @@
 
 ## 8. 下一步建议
 
-1. 用 ADR 0043 覆盖 devcoord 运行时入口口径。
-2. 删除 `justfile` 中 devcoord recipes。
-3. 将 skill / prompt / review 文案统一改为 `scripts/devcoord` 直接入口。
-4. 继续补 `LOG_PENDING / append-first audit helpers / live PM-first cutover`。
+1. 用真实 PM spawn / teammate 会话做一次 live PM-first cutover，验证 `RECOVERY_CHECK -> STATE_SYNC_OK -> PING -> LOG_PENDING -> audit -> GATE_CLOSE` 全链路。
+2. 基于一次真实 cutover 结果，决定是否把当前 shadow mode 提升为默认控制面路径。
