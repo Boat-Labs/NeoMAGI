@@ -475,6 +475,93 @@ def test_ping_and_unconfirmed_instruction_render_projection(tmp_path: Path) -> N
     assert heartbeat_events[4]["ping_count"] == 2
 
 
+def test_log_pending_and_audit_snapshot(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    store = MemoryIssueStore()
+    paths = make_paths(tmp_path)
+    clock = FakeClock(
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:20:00Z",
+        "2026-03-01T10:21:00Z",
+    )
+    service = CoordService(paths=paths, store=store, now_fn=clock)
+
+    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+    service.open_gate(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        allowed_role="backend",
+        target_commit="abc1234",
+        task="open backend phase 1 gate",
+    )
+    service.ack(
+        "M7",
+        role="backend",
+        command="GATE_OPEN",
+        gate_id="G-M7-P1",
+        commit="abc1234",
+        task="ACK GATE_OPEN, starting Phase 1",
+    )
+    service.log_pending(
+        "M7",
+        phase="1",
+        gate_id="G-M7-P1",
+        target_commit="abc1234",
+        task="append-first delayed; will backfill next PM turn",
+    )
+    service.ping(
+        "M7",
+        role="backend",
+        phase="1",
+        gate_id="G-M7-P1",
+        target_commit="abc1234",
+        task="PING backend after append-first recovery",
+    )
+    service.render("M7")
+
+    audit = service.audit("M7")
+    assert audit["reconciled"] is True
+    assert audit["received_events"] == 5
+    assert audit["logged_events"] == 5
+    assert audit["open_gates"] == [
+        {
+            "gate": "G-M7-P1",
+            "phase": "1",
+            "status": "open",
+            "allowed_role": "backend",
+            "target_commit": "abc1234",
+        }
+    ]
+    assert audit["pending_ack_messages"] == [
+        {
+            "command": "PING",
+            "role": "backend",
+            "gate": "G-M7-P1",
+            "phase": "1",
+            "target_commit": "abc1234",
+        }
+    ]
+    assert len(audit["log_pending_events"]) == 1
+    assert audit["log_pending_events"][0]["event"] == "LOG_PENDING"
+
+    exit_code = run_cli(
+        [
+            "audit",
+            "--milestone",
+            "M7",
+        ],
+        store=store,
+        paths=paths,
+    )
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["reconciled"] is True
+    assert payload["pending_ack_messages"][0]["command"] == "PING"
+    assert payload["log_pending_events"][0]["event"] == "LOG_PENDING"
+
+
 def test_state_sync_ok_fails_closed_on_target_commit_mismatch(tmp_path: Path) -> None:
     store = MemoryIssueStore()
     paths = make_paths(tmp_path)

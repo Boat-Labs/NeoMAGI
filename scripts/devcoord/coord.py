@@ -954,6 +954,113 @@ class CoordService:
                 ping_count=ping_count,
             )
 
+    def log_pending(
+        self,
+        milestone: str,
+        *,
+        phase: str,
+        task: str,
+        gate_id: str | None = None,
+        target_commit: str | None = None,
+    ) -> None:
+        normalized_milestone = _normalize_milestone(milestone)
+        now = self.now_fn()
+        with self._locked():
+            issues = self._coord_issues(normalized_milestone)
+            parent_id = self._event_parent_id(issues, phase=phase, gate_id=gate_id)
+            self._record_event(
+                issues=issues,
+                milestone=normalized_milestone,
+                phase=phase,
+                role="pm",
+                status="blocked",
+                task=task,
+                event="LOG_PENDING",
+                gate_id=gate_id,
+                target_commit=target_commit,
+                parent_id=parent_id,
+                ts=now,
+            )
+
+    def audit(self, milestone: str) -> dict[str, Any]:
+        normalized_milestone = _normalize_milestone(milestone)
+        issues = self._coord_issues(normalized_milestone)
+        milestone_issue = self._require_single(issues, "milestone")
+        run_date = milestone_issue.metadata_str("run_date")
+        if not run_date:
+            raise CoordError(f"milestone {normalized_milestone} does not have run_date metadata")
+        events = sorted(
+            self._iter_kind(issues, "event"),
+            key=lambda issue: (issue.metadata_int("event_seq"), issue.issue_id),
+        )
+        heartbeat_path = (
+            self.paths.log_dir(normalized_milestone, run_date) / "heartbeat_events.jsonl"
+        )
+        logged_events = 0
+        latest_logged_event_seq = 0
+        if heartbeat_path.exists():
+            for line in heartbeat_path.read_text("utf-8").splitlines():
+                if not line.strip():
+                    continue
+                logged_events += 1
+                payload = json.loads(line)
+                if isinstance(payload, dict):
+                    latest_logged_event_seq = max(
+                        latest_logged_event_seq, int(payload.get("event_seq") or 0)
+                    )
+        pending_ack_messages = sorted(
+            [
+                {
+                    "command": issue.metadata_str("command"),
+                    "role": issue.metadata_str("role"),
+                    "gate": issue.metadata_str("gate_id"),
+                    "phase": issue.metadata_str("phase"),
+                    "target_commit": issue.metadata_str("target_commit"),
+                }
+                for issue in self._iter_kind(issues, "message")
+                if issue.metadata_bool("requires_ack") and not issue.metadata_bool("effective")
+            ],
+            key=lambda payload: (
+                payload["phase"],
+                payload["gate"],
+                payload["role"],
+                payload["command"],
+            ),
+        )
+        open_gates = sorted(
+            [
+                {
+                    "gate": issue.metadata_str("gate_id"),
+                    "phase": issue.metadata_str("phase"),
+                    "status": issue.metadata_str("gate_state"),
+                    "allowed_role": issue.metadata_str("allowed_role"),
+                    "target_commit": issue.metadata_str("target_commit"),
+                }
+                for issue in self._iter_kind(issues, "gate")
+                if issue.metadata_str("gate_state") != "closed"
+            ],
+            key=lambda payload: (payload["phase"], payload["gate"]),
+        )
+        log_pending_events = [
+            self._event_projection(issue)
+            for issue in events
+            if issue.metadata_str("event") == "LOG_PENDING"
+        ]
+        latest_event_seq = events[-1].metadata_int("event_seq") if events else 0
+        return {
+            "milestone": normalized_milestone,
+            "run_date": run_date,
+            "received_events": len(events),
+            "logged_events": logged_events,
+            "latest_event_seq": latest_event_seq,
+            "latest_logged_event_seq": latest_logged_event_seq,
+            "reconciled": len(events) == logged_events,
+            "pending_ack_messages": pending_ack_messages,
+            "open_gates": open_gates,
+            "log_pending_events": log_pending_events,
+            "projection_path": str(heartbeat_path.relative_to(self.paths.workspace_root)),
+        }
+
     def gate_review(
         self,
         milestone: str,
@@ -1914,6 +2021,16 @@ def build_parser() -> argparse.ArgumentParser:
     unconfirmed_instruction_parser.add_argument("--target-commit")
     unconfirmed_instruction_parser.add_argument("--ping-count", type=int)
 
+    log_pending_parser = subparsers.add_parser(
+        "log-pending",
+        help="Record a LOG_PENDING event when append-first logging is deferred",
+    )
+    log_pending_parser.add_argument("--milestone", required=True)
+    log_pending_parser.add_argument("--phase", required=True)
+    log_pending_parser.add_argument("--task", required=True)
+    log_pending_parser.add_argument("--gate")
+    log_pending_parser.add_argument("--target-commit")
+
     stale_detected_parser = subparsers.add_parser(
         "stale-detected",
         help="Record a suspected stale role after timeout checks",
@@ -1967,9 +2084,11 @@ def build_parser() -> argparse.ArgumentParser:
             "state-sync-ok",
             "ping",
             "unconfirmed-instruction",
+            "log-pending",
             "stale-detected",
             "gate-review",
             "gate-close",
+            "audit",
             "render",
         ),
     )
@@ -1979,6 +2098,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     render_parser = subparsers.add_parser("render", help="Render dev_docs projection files")
     render_parser.add_argument("--milestone", required=True)
+    audit_parser = subparsers.add_parser(
+        "audit",
+        help="Report append-first / projection reconciliation status",
+    )
+    audit_parser.add_argument("--milestone", required=True)
     return parser
 
 
@@ -2083,6 +2207,15 @@ def _execute_action(service: CoordService, command: str, payload: dict[str, Any]
             ping_count=ping_count,
         )
         return
+    if command == "log-pending":
+        service.log_pending(
+            _require_payload_str(payload, "milestone"),
+            phase=_require_payload_str(payload, "phase"),
+            task=_require_payload_str(payload, "task"),
+            gate_id=_payload_str(payload, "gate_id", _payload_str(payload, "gate", None)),
+            target_commit=_payload_str(payload, "target_commit", None),
+        )
+        return
     if command == "stale-detected":
         ping_count = payload.get("ping_count")
         if ping_count is not None:
@@ -2119,6 +2252,10 @@ def _execute_action(service: CoordService, command: str, payload: dict[str, Any]
             report_path=_require_payload_str(payload, "report_path"),
             task=_require_payload_str(payload, "task"),
         )
+        return
+    if command == "audit":
+        payload_milestone = _require_payload_str(payload, "milestone")
+        print(json.dumps(service.audit(payload_milestone), ensure_ascii=False))
         return
     if command == "render":
         service.render(_require_payload_str(payload, "milestone"))
@@ -2267,6 +2404,18 @@ def run_cli(
                     "ping_count": args.ping_count,
                 },
             )
+        elif args.command == "log-pending":
+            _execute_action(
+                service,
+                "log-pending",
+                {
+                    "milestone": args.milestone,
+                    "phase": args.phase,
+                    "task": args.task,
+                    "gate_id": _none_if_placeholder(args.gate),
+                    "target_commit": _none_if_placeholder(args.target_commit),
+                },
+            )
         elif args.command == "stale-detected":
             _execute_action(
                 service,
@@ -2310,6 +2459,8 @@ def run_cli(
                     "task": args.task,
                 },
             )
+        elif args.command == "audit":
+            _execute_action(service, "audit", {"milestone": args.milestone})
         elif args.command == "render":
             _execute_action(service, "render", {"milestone": args.milestone})
         else:
