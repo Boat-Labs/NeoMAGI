@@ -102,6 +102,8 @@
   - 禁止直接编辑 `dev_docs/logs/*`
   - 用 Claude Code CLI debug 日志验证 skill 实际命中，而不是只看自然语言回答
   - teammate cutover 默认用 slash 形式 skill 触发（如 `/devcoord-backend`、`/devcoord-tester`），降低同名/近义语义污染
+  - live slash 写操作按“一次提交、先对账再补发”执行；当前未做幂等保护，重复重跑可能追加重复事件
+  - `render -> audit -> projection read` 必须串行，避免把旧 projection 误判成控制面状态
 
 ### Phase 5：Projection-Only 收口
 - 产物：

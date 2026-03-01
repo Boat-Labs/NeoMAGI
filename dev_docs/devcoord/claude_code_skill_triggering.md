@@ -119,3 +119,14 @@ DISABLE_SLASH_COMMANDS=1 scripts/devcoord/check_skill_activation.sh devcoord-tes
   - 对关键流程可用 hook /显式 skill 名称降低漏触发概率
 
 这与 devcoord 当前“高约束、低容错”的场景一致，因此 M7 teammate cutover 阶段应优先追求可验证性，而不是追求完全隐式自动触发。
+
+## 8. M7 Phase 3 Live Cutover Findings
+
+- backend 和 tester 的 slash skill 已在真实 worktree 中命中并完成控制面写入，debug 判据仍以 `processPromptSlashCommand` 为准。
+- 当前 slash prompt 重跑不是幂等的；同一 gate 下重复重试会追加重复 `ACK`、`RECOVERY_CHECK`、`PHASE_COMPLETE` 等事件。
+- 因此，对 devcoord live 写操作的当前操作要求是：
+  - 每个 slash prompt 只提交一次。
+  - 若首次 run 未确认成功，先检查 beads/audit/debug，再决定是否补发。
+  - 不要把“无输出”直接当作“未写入”。
+- `render -> audit -> projection read` 必须串行执行。若把 `render` 与 `audit` 或文件读取并行跑，容易看到旧投影，形成假阳性的“gate 仍 open / projection 未更新”判断。
+- tester 场景对 prompt 具体度更敏感；当目标是 `recovery-check` 或 `gate-review` 时，直接给出 payload/命令形状比只给自然语言意图更稳。

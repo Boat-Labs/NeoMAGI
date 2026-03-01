@@ -75,6 +75,7 @@ LLM
 - skill 文件遵循 Claude Skills 官方 `SKILL.md` frontmatter 模板，正文只保留触发条件、工作流和边界约束。
 - skill 触发验证使用 `scripts/devcoord/check_skill_activation.sh`；触发经验和 CLI debug 判据记录在 `dev_docs/devcoord/claude_code_skill_triggering.md`。
 - 当前经验表明：纯自然语言提及 skill 名称仍可能被近义语义污染；对高约束流程，slash 形式 `/devcoord-<role>` 更可靠。
+- live slash 写操作当前不具备幂等保护；同一 prompt 重跑可能追加重复事件。operator 必须先检查 beads / `audit` / debug，再决定是否补发。
 
 ### 3.6 治理层与执行层
 - 治理层回答“现在谁被允许推进、什么条件下可以关闭/恢复/继续”。
@@ -237,6 +238,7 @@ Phase 1 固定采用以下实现方式：
 - `audit`：只读输出 append-first / projection 对账快照，供关 gate 前自检。
 
 当前最小闭环已经包含 `LOG_PENDING` 与 `audit`。后者是 read-only helper，不承担状态写入，只负责输出 `received_events`、`logged_events`、`pending_ack_messages`、`open_gates`、`log_pending_events` 等审计视图。
+- `render -> audit -> read projection` 必须串行执行；并行执行时可能读到旧投影，形成假性的 gate/projection 偏差判断。
 后续若需要引入 `claim`、`handoff` 或开放竞争相关命令，也应作为执行层原语补充，而不是把执行路径反推回治理状态机。
 
 ## 9. 协议映射
