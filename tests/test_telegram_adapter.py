@@ -314,6 +314,27 @@ class TestReadinessCheck:
 
 
 # ---------------------------------------------------------------------------
+# Lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestLifecycle:
+    @pytest.mark.asyncio
+    async def test_start_polling_disables_aiogram_signal_handlers(self):
+        """Embedded polling must not steal SIGINT/SIGTERM from uvicorn."""
+        adapter = _make_adapter()
+
+        with patch.object(adapter._dp, "start_polling", new=AsyncMock()) as start_polling:
+            await adapter.start_polling()
+
+        start_polling.assert_awaited_once_with(
+            adapter._bot,
+            handle_signals=False,
+            close_bot_session=False,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Dispatch error handling
 # ---------------------------------------------------------------------------
 

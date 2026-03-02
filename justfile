@@ -11,9 +11,13 @@ format:
     uv run ruff format src/
     uv run ruff check --fix src/
 
-# Start development server
+# Start development server (default: safer for Telegram/WebSocket debugging)
 dev:
-    uv run uvicorn src.gateway.app:app --reload --host 0.0.0.0 --port 19789
+    uv run uvicorn src.gateway.app:app --host 0.0.0.0 --port 19789 --timeout-graceful-shutdown 3
+
+# Start development server with auto-reload
+dev-reload:
+    uv run uvicorn src.gateway.app:app --reload --host 0.0.0.0 --port 19789 --timeout-graceful-shutdown 3
 
 # Initialize workspace with template files (idempotent)
 init-workspace:

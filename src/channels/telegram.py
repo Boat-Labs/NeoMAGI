@@ -81,11 +81,18 @@ class TelegramAdapter:
     async def start_polling(self) -> None:
         """Start long-polling. Blocks until stopped or fatal error."""
         logger.info("telegram_polling_started", username=self._bot_username)
-        await self._dp.start_polling(self._bot)
+        await self._dp.start_polling(
+            self._bot,
+            handle_signals=False,
+            close_bot_session=False,
+        )
 
     async def stop(self) -> None:
         """Gracefully stop polling and close bot session."""
-        await self._dp.stop_polling()
+        try:
+            await self._dp.stop_polling()
+        except RuntimeError:
+            logger.debug("telegram_polling_stop_skipped")
         await self._bot.session.close()
         logger.info("telegram_polling_stopped")
 
@@ -133,7 +140,8 @@ class TelegramAdapter:
 
         # Start typing indicator
         typing_task = asyncio.create_task(
-            self._typing_loop(message.chat.id), name="tg_typing",
+            self._typing_loop(message.chat.id),
+            name="tg_typing",
         )
 
         try:
