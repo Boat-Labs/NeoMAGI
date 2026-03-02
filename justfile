@@ -1,6 +1,7 @@
 # NeoMAGI development commands
 
 frontend_dir := "src/frontend"
+beads_repo_dir := ".beads/dolt/NeoMAGI"
 
 # Run linter checks
 lint:
@@ -22,6 +23,14 @@ dev-reload:
 # Initialize workspace with template files (idempotent)
 init-workspace:
     uv run python -m src.infra.init_workspace
+
+# Pull beads control-plane state from Dolt remote
+beads-pull:
+    cd {{beads_repo_dir}} && dolt pull origin main
+
+# Push beads control-plane state to Dolt remote
+beads-push:
+    cd {{beads_repo_dir}} && dolt push origin main
 
 # Start frontend dev server
 dev-frontend:
