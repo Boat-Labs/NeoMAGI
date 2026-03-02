@@ -34,13 +34,33 @@ class TestResolveScopeKey:
         si = SessionIdentity(session_id="s1")
         assert resolve_scope_key(si) == "main"
 
-    def test_non_main_raises(self) -> None:
+    def test_per_channel_peer(self) -> None:
+        si = SessionIdentity(
+            session_id="s1", channel_type="telegram", peer_id="123"
+        )
+        assert resolve_scope_key(si, dm_scope="per-channel-peer") == "telegram:peer:123"
+
+    def test_per_peer(self) -> None:
+        si = SessionIdentity(session_id="s1", peer_id="456")
+        assert resolve_scope_key(si, dm_scope="per-peer") == "peer:456"
+
+    def test_per_channel_peer_missing_peer_id_raises(self) -> None:
+        si = SessionIdentity(session_id="s1", channel_type="telegram")
+        with pytest.raises(ValueError, match="peer_id required for per-channel-peer"):
+            resolve_scope_key(si, dm_scope="per-channel-peer")
+
+    def test_per_peer_missing_peer_id_raises(self) -> None:
         si = SessionIdentity(session_id="s1")
-        with pytest.raises(ValueError, match="not supported in M3"):
+        with pytest.raises(ValueError, match="peer_id required for per-peer"):
             resolve_scope_key(si, dm_scope="per-peer")
 
+    def test_unsupported_scope_raises(self) -> None:
+        si = SessionIdentity(session_id="s1")
+        with pytest.raises(ValueError, match="Unsupported dm_scope"):
+            resolve_scope_key(si, dm_scope="invalid-scope")
+
     def test_identity_fields_preserved(self) -> None:
-        """M4 fields are accepted but unused in M3."""
+        """M4 fields are accepted; main scope ignores peer_id."""
         si = SessionIdentity(
             session_id="s1",
             channel_type="telegram",
@@ -62,7 +82,12 @@ class TestResolveSessionKey:
         )
         assert resolve_session_key(si, dm_scope="main") == "group:group-42"
 
-    def test_group_without_channel_id_raises(self) -> None:
-        si = SessionIdentity(session_id="s1", channel_type="telegram")
-        with pytest.raises(ValueError, match="channel_id is required"):
-            resolve_session_key(si, dm_scope="main")
+    def test_telegram_dm_uses_scope_path(self) -> None:
+        """Telegram DM (channel_id=None) routes through resolve_scope_key."""
+        si = SessionIdentity(
+            session_id="s1", channel_type="telegram", peer_id="789"
+        )
+        assert (
+            resolve_session_key(si, dm_scope="per-channel-peer")
+            == "telegram:peer:789"
+        )

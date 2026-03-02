@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.gateway.app import _extract_eval_run_id
+from src.gateway.dispatch import _extract_eval_run_id
 
 
 class TestExtractEvalRunId:

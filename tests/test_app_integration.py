@@ -24,6 +24,7 @@ def _make_mock_settings(tmp_path: Path) -> MagicMock:
         GeminiSettings,
         MemorySettings,
         ProviderSettings,
+        TelegramSettings,
     )
 
     settings = MagicMock()
@@ -42,6 +43,7 @@ def _make_mock_settings(tmp_path: Path) -> MagicMock:
     settings.memory = MemorySettings(workspace_path=tmp_path)
     settings.session = MagicMock()
     settings.session.default_mode = "chat_safe"
+    settings.telegram = TelegramSettings()  # bot_token="" → adapter not started
     return settings
 
 
@@ -128,6 +130,38 @@ async def test_m3_tools_registered_and_wired(tmp_path):
             for soul_tool_name in ("soul_propose", "soul_status", "soul_rollback"):
                 soul_tool = registry.get(soul_tool_name)
                 assert soul_tool._engine is not None, f"{soul_tool_name} engine is None"
+
+
+@pytest.mark.asyncio
+async def test_empty_bot_token_skips_telegram(tmp_path):
+    """Empty TELEGRAM_BOT_TOKEN → no TelegramAdapter created."""
+    app = MagicMock()
+    app.state = MagicMock()
+
+    fake_engine = AsyncMock()
+    fake_engine.dispose = AsyncMock()
+    fake_session_factory = MagicMock()
+
+    with (
+        patch("src.gateway.app.setup_logging"),
+        patch("src.gateway.app.get_settings") as mock_settings,
+        patch("src.gateway.app.create_db_engine", return_value=fake_engine),
+        patch("src.gateway.app.ensure_schema", return_value=None),
+        patch("src.gateway.app.make_session_factory", return_value=fake_session_factory),
+        patch("src.gateway.app.EvolutionEngine") as mock_evolution_cls,
+    ):
+        mock_evolution = AsyncMock()
+        mock_evolution.reconcile_soul_projection = AsyncMock()
+        mock_evolution_cls.return_value = mock_evolution
+
+        settings = _make_mock_settings(tmp_path)
+        assert settings.telegram.bot_token == ""  # sanity check
+        mock_settings.return_value = settings
+
+        # TelegramAdapter import should NOT happen
+        with patch.dict("sys.modules", {}):
+            async with lifespan(app):
+                pass  # no crash = adapter was not started
 
 
 @pytest.mark.asyncio

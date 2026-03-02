@@ -4,7 +4,7 @@ Covers:
 - compaction → auto-persist flush candidates
 - no candidates → skip
 - persist failure → does not crash main flow
-- scope_key resolved from candidate.source_session_id
+- scope_key passed from caller, not resolved internally
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ class TestPersistFlushCandidates:
             ),
         ]
 
-        await loop._persist_flush_candidates(candidates, "main")
+        await loop._persist_flush_candidates(candidates, "main", scope_key="main")
 
         # Verify file was written
         from datetime import date
@@ -76,14 +76,14 @@ class TestPersistFlushCandidates:
         # _persist_flush_candidates won't be called if _memory_writer is None
         # since the guard is in _try_compact. But we test the method directly:
         # it should still not crash.
-        await loop._persist_flush_candidates([], "main")
+        await loop._persist_flush_candidates([], "main", scope_key="main")
 
     @pytest.mark.asyncio
     async def test_empty_candidates_no_write(self, tmp_path: Path) -> None:
         settings = _make_settings()
         loop = _make_agent_loop(tmp_path, memory_settings=settings)
 
-        await loop._persist_flush_candidates([], "main")
+        await loop._persist_flush_candidates([], "main", scope_key="main")
 
         # No file should be created
         from datetime import date
@@ -110,11 +110,11 @@ class TestPersistFlushCandidates:
         ]
 
         # Should not raise
-        await loop._persist_flush_candidates(candidates, "main")
+        await loop._persist_flush_candidates(candidates, "main", scope_key="main")
 
     @pytest.mark.asyncio
-    async def test_scope_key_from_candidate_session_id(self, tmp_path: Path) -> None:
-        """scope_key is resolved from candidate.source_session_id, not current session_id."""
+    async def test_scope_key_used_directly(self, tmp_path: Path) -> None:
+        """scope_key is passed by caller, not resolved from candidate.source_session_id."""
         settings = _make_settings()
         loop = _make_agent_loop(tmp_path, memory_settings=settings)
 
@@ -126,16 +126,18 @@ class TestPersistFlushCandidates:
             ),
         ]
 
-        # Call with a different "current" session_id
-        await loop._persist_flush_candidates(candidates, "different-session")
+        # Pass scope_key="telegram:peer:123" — should be used directly
+        await loop._persist_flush_candidates(
+            candidates, "main", scope_key="telegram:peer:123"
+        )
 
         from datetime import date
 
         today = date.today()
         path = tmp_path / "memory" / f"{today.isoformat()}.md"
         content = path.read_text(encoding="utf-8")
-        # scope should be "main" (from candidate.source_session_id), not "different-session"
-        assert "scope: main" in content
+        # scope should be "telegram:peer:123" (caller-provided), not "main"
+        assert "scope: telegram:peer:123" in content
 
     @pytest.mark.asyncio
     async def test_filters_by_confidence(self, tmp_path: Path) -> None:
@@ -155,7 +157,7 @@ class TestPersistFlushCandidates:
             ),
         ]
 
-        await loop._persist_flush_candidates(candidates, "main")
+        await loop._persist_flush_candidates(candidates, "main", scope_key="main")
 
         from datetime import date
 

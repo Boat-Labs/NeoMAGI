@@ -85,15 +85,21 @@
 - `design_docs/m1_5_architecture.md`
 
 ## 6. Channel Adapter
-- 状态：WebChat 已实现，Telegram 计划中（M4）
+- 状态：WebChat + Telegram 已实现（M4 完成）
 - 现状：
   - WebChat 已作为第一渠道打通。
-  - `channels` 包尚无第二渠道实现。
+  - Telegram DM adapter 已实现（aiogram 3.x 同进程 long-polling）。
+  - 两渠道共用 `dispatch_chat()` 核心链路，渠道层仅负责协议转换与身份映射。
+  - Telegram 默认 `dm_scope="per-channel-peer"` → scope_key 按用户隔离。
+  - Response rendering: 消息分割 + MarkdownV2 格式化 + 错误映射。
 
 实现参考：
 - `src/frontend/`
-- `src/channels/`
+- `src/channels/telegram.py`
+- `src/channels/telegram_render.py`
+- `src/gateway/dispatch.py`
 - `decisions/0003-channel-baseline-webchat-first-telegram-second.md`
+- `decisions/0044-telegram-adapter-aiogram-same-process.md`
 
 ## 7. Config
 - 状态：M1 已实现（M6 继续扩展）

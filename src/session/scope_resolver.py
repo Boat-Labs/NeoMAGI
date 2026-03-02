@@ -21,34 +21,31 @@ class SessionIdentity:
 def resolve_scope_key(identity: SessionIdentity, dm_scope: str = "main") -> str:
     """Pure function: identity + dm_scope → scope_key.
 
-    M3: dm_scope is guaranteed to be 'main' by SessionSettings validator.
-    Non-main values raise ValueError (fail-fast, no silent fallback).
-
-    M4 extension points (after SessionSettings validator is relaxed):
-    - 'per-peer' → f"peer:{identity.peer_id}"
-    - 'per-channel-peer' → f"{identity.channel_type}:peer:{identity.peer_id}"
-    - 'per-account-channel-peer' →
-        f"{identity.account_id}:{identity.channel_type}:peer:{identity.peer_id}"
+    Supported scopes:
+    - 'main' → "main" (global shared session)
+    - 'per-channel-peer' → "{channel_type}:peer:{peer_id}" (M4 Telegram default)
+    - 'per-peer' → "peer:{peer_id}" (cross-channel peer isolation)
     """
     if dm_scope == "main":
         return "main"
-    # M3: this branch should never be reached (guarded by SessionSettings validator).
-    # Fail-fast if it does — never silently degrade to main.
-    raise ValueError(
-        f"dm_scope '{dm_scope}' is not supported in M3. "
-        "Only 'main' is allowed. See ADR 0034."
-    )
+    if dm_scope == "per-channel-peer":
+        if identity.peer_id is None:
+            raise ValueError("peer_id required for per-channel-peer")
+        return f"{identity.channel_type}:peer:{identity.peer_id}"
+    if dm_scope == "per-peer":
+        if identity.peer_id is None:
+            raise ValueError("peer_id required for per-peer")
+        return f"peer:{identity.peer_id}"
+    raise ValueError(f"Unsupported dm_scope: '{dm_scope}'")
 
 
 def resolve_session_key(identity: SessionIdentity, dm_scope: str = "main") -> str:
     """Pure function: identity + dm_scope → session storage key.
 
-    Key semantics (aligned with existing manager.py:resolve_session):
-    - DM → scope_key (from resolve_scope_key)
-    - Group → 'group:{channel_id}' (channel_id from identity, NOT session_id)
+    Key semantics:
+    - DM (channel_id is None) → scope_key (from resolve_scope_key)
+    - Group (channel_id is set) → 'group:{channel_id}'
     """
-    if identity.channel_type == "dm":
-        return resolve_scope_key(identity, dm_scope)
     if identity.channel_id is None:
-        raise ValueError("channel_id is required for non-DM session key resolution")
+        return resolve_scope_key(identity, dm_scope)
     return f"group:{identity.channel_id}"

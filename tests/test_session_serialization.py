@@ -41,9 +41,8 @@ class TestSessionBusyRPC:
 
     @pytest.mark.asyncio
     async def test_session_busy_error_response(self):
-        import json
-
         from src.gateway.app import _handle_chat_send
+        from src.infra.errors import GatewayError
 
         mock_ws = AsyncMock()
         mock_ws.app = MagicMock()
@@ -52,13 +51,11 @@ class TestSessionBusyRPC:
         mock_manager.try_claim_session = AsyncMock(return_value=None)
         mock_ws.app.state.session_manager = mock_manager
 
-        await _handle_chat_send(mock_ws, "req-1", {"content": "hi", "session_id": "s1"})
+        # SESSION_BUSY now raises GatewayError (caught by _handle_rpc_message)
+        with pytest.raises(GatewayError) as exc_info:
+            await _handle_chat_send(mock_ws, "req-1", {"content": "hi", "session_id": "s1"})
 
-        # Should have sent an error response
-        mock_ws.send_text.assert_called_once()
-        sent = json.loads(mock_ws.send_text.call_args[0][0])
-        assert sent["type"] == "error"
-        assert sent["error"]["code"] == "SESSION_BUSY"
+        assert exc_info.value.code == "SESSION_BUSY"
 
 
 class TestNormalRelease:
