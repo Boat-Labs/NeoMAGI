@@ -143,7 +143,7 @@ class TestAuthGating:
         with patch("src.channels.telegram.dispatch_chat", side_effect=_fake_dispatch):
             await adapter._handle_dm(msg)
 
-        msg.answer.assert_awaited_once_with("response")
+        msg.answer.assert_awaited_once_with("response", parse_mode=None)
 
     @pytest.mark.asyncio
     async def test_denied_user_ignored(self):
@@ -207,7 +207,7 @@ class TestDmDispatch:
         with patch("src.channels.telegram.dispatch_chat", side_effect=_multi_chunk):
             await adapter._handle_dm(msg)
 
-        msg.answer.assert_awaited_once_with("Hello World")
+        msg.answer.assert_awaited_once_with("Hello World", parse_mode=None)
 
     @pytest.mark.asyncio
     async def test_non_text_events_ignored(self):
@@ -222,7 +222,7 @@ class TestDmDispatch:
         with patch("src.channels.telegram.dispatch_chat", side_effect=_mixed_events):
             await adapter._handle_dm(msg)
 
-        msg.answer.assert_awaited_once_with("text")
+        msg.answer.assert_awaited_once_with("text", parse_mode=None)
 
     @pytest.mark.asyncio
     async def test_empty_response_not_sent(self):
@@ -239,8 +239,8 @@ class TestDmDispatch:
         msg.answer.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_long_response_truncated(self):
-        """Responses exceeding message_max_length are truncated."""
+    async def test_long_response_split(self):
+        """Responses exceeding message_max_length are split into multiple messages."""
         settings = _make_settings()
         settings.message_max_length = 20
         adapter = _make_adapter(telegram_settings=settings)
@@ -252,9 +252,9 @@ class TestDmDispatch:
         with patch("src.channels.telegram.dispatch_chat", side_effect=_long_response):
             await adapter._handle_dm(msg)
 
-        sent_text = msg.answer.call_args[0][0]
-        assert len(sent_text) == 20
-        assert sent_text.endswith("...")
+        assert msg.answer.await_count == 3
+        for call in msg.answer.call_args_list:
+            assert len(call[0][0]) <= 20
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +334,7 @@ class TestErrorHandling:
 
         msg.answer.assert_awaited_once()
         sent = msg.answer.call_args[0][0]
-        assert "error" in sent.lower()
+        assert "处理消息时遇到了问题" in sent
 
 
 # ---------------------------------------------------------------------------

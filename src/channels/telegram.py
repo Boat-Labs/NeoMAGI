@@ -15,10 +15,11 @@ from aiogram.types import Message
 
 from src.agent.events import TextChunk
 from src.agent.provider_registry import AgentLoopRegistry
+from src.channels.telegram_render import format_for_telegram, friendly_error_message, split_message
 from src.config.settings import GatewaySettings, TelegramSettings
 from src.gateway.budget_gate import BudgetGate
 from src.gateway.dispatch import dispatch_chat
-from src.infra.errors import ChannelError
+from src.infra.errors import ChannelError, GatewayError
 from src.session.manager import SessionManager
 from src.session.scope_resolver import SessionIdentity, resolve_session_key
 
@@ -153,25 +154,44 @@ class TelegramAdapter:
 
             response = "".join(chunks).strip()
             if response:
-                # Respect Telegram message length limit
-                max_len = self._settings.message_max_length
-                if len(response) > max_len:
-                    response = response[:max_len - 3] + "..."
-                await message.answer(response)
+                await self._send_response(message, response)
 
+        except GatewayError as exc:
+            logger.exception(
+                "telegram_dispatch_error",
+                user_id=user_id,
+                session_id=session_id,
+                error_code=exc.code,
+            )
+            await message.answer(friendly_error_message(exc.code))
         except Exception:
             logger.exception(
                 "telegram_dispatch_error",
                 user_id=user_id,
                 session_id=session_id,
             )
-            await message.answer("An error occurred while processing your message.")
+            await message.answer(friendly_error_message(None))
         finally:
             typing_task.cancel()
             try:
                 await typing_task
             except asyncio.CancelledError:
                 pass
+
+    async def _send_response(self, message: Message, text: str) -> None:
+        """Send response with optional MarkdownV2 formatting and message splitting."""
+        formatted, parse_mode = format_for_telegram(text)
+        target = formatted if parse_mode else text
+        parts = split_message(target, self._settings.message_max_length)
+        for part in parts:
+            try:
+                await message.answer(part, parse_mode=parse_mode)
+            except Exception:
+                if parse_mode:
+                    logger.debug("telegram_markdownv2_send_failed")
+                    await message.answer(part, parse_mode=None)
+                else:
+                    raise
 
     async def _typing_loop(self, chat_id: int) -> None:
         """Send typing indicator every _TYPING_INTERVAL_S until cancelled."""
