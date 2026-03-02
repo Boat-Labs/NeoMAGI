@@ -99,9 +99,7 @@ class BudgetTracker:
     def __init__(self, settings: CompactionSettings, model: str) -> None:
         self._counter = TokenCounter(model)
         usable = (
-            settings.context_limit
-            - settings.reserved_output_tokens
-            - settings.safety_margin_tokens
+            settings.context_limit - settings.reserved_output_tokens - settings.safety_margin_tokens
         )
         self._usable_budget = usable
         self._warn_threshold = int(usable * settings.warn_ratio)

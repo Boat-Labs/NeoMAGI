@@ -37,7 +37,9 @@ class AgentLoopRegistry:
 
     def register(self, name: str, agent_loop: AgentLoop, model: str) -> None:
         self._providers[name] = ProviderEntry(
-            name=name, agent_loop=agent_loop, model=model,
+            name=name,
+            agent_loop=agent_loop,
+            model=model,
         )
 
     def get(self, name: str | None = None) -> ProviderEntry:

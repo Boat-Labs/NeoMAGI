@@ -125,9 +125,7 @@ class MemoryCurator:
         # 7. Reindex if indexer available
         if self._indexer:
             try:
-                await self._indexer.index_curated_memory(
-                    memory_md_path, scope_key=scope_key
-                )
+                await self._indexer.index_curated_memory(memory_md_path, scope_key=scope_key)
             except Exception:
                 logger.exception("curation_reindex_failed")
 

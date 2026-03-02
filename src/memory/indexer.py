@@ -39,9 +39,7 @@ class MemoryIndexer:
         self._db_factory = db_session_factory
         self._settings = settings
 
-    async def index_daily_note(
-        self, file_path: Path, *, scope_key: str = "main"
-    ) -> int:
+    async def index_daily_note(self, file_path: Path, *, scope_key: str = "main") -> int:
         """Parse and index a daily note file.
 
         Strategy: DELETE existing rows WHERE source_path = file_path,
@@ -79,22 +77,22 @@ class MemoryIndexer:
             if not entry_text:
                 continue
 
-            rows.append({
-                "scope_key": entry_scope,
-                "source_type": "daily_note",
-                "source_path": rel_path,
-                "source_date": source_date,
-                "title": "",
-                "content": entry_text,
-                "tags": [],
-                "confidence": None,
-            })
+            rows.append(
+                {
+                    "scope_key": entry_scope,
+                    "source_type": "daily_note",
+                    "source_path": rel_path,
+                    "source_date": source_date,
+                    "title": "",
+                    "content": entry_text,
+                    "tags": [],
+                    "confidence": None,
+                }
+            )
 
         async with self._db_factory() as db:
             # Delete existing rows for this file (idempotent)
-            await db.execute(
-                delete(MemoryEntry).where(MemoryEntry.source_path == rel_path)
-            )
+            await db.execute(delete(MemoryEntry).where(MemoryEntry.source_path == rel_path))
 
             # Insert new rows
             for row in rows:
@@ -111,9 +109,7 @@ class MemoryIndexer:
         )
         return len(rows)
 
-    async def index_curated_memory(
-        self, file_path: Path, *, scope_key: str = "main"
-    ) -> int:
+    async def index_curated_memory(self, file_path: Path, *, scope_key: str = "main") -> int:
         """Parse and index MEMORY.md by markdown headers.
 
         Each ## section becomes one memory_entries row with source_type='curated'.
@@ -129,9 +125,7 @@ class MemoryIndexer:
         sections = self._split_by_headers(content)
 
         async with self._db_factory() as db:
-            await db.execute(
-                delete(MemoryEntry).where(MemoryEntry.source_path == rel_path)
-            )
+            await db.execute(delete(MemoryEntry).where(MemoryEntry.source_path == rel_path))
 
             for title, body in sections:
                 if not body.strip():

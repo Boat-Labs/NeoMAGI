@@ -156,12 +156,15 @@ class EvolutionEngine:
             # Check 1: Content coherence
             content = record.content
             is_coherent = bool(content and content.strip())
-            checks.append(EvalCheck(
-                name="content_coherence",
-                passed=is_coherent,
-                detail="Content is non-empty and well-formed" if is_coherent
-                else "Content is empty or whitespace-only",
-            ))
+            checks.append(
+                EvalCheck(
+                    name="content_coherence",
+                    passed=is_coherent,
+                    detail="Content is non-empty and well-formed"
+                    if is_coherent
+                    else "Content is empty or whitespace-only",
+                )
+            )
 
             # Check 2: Size limit
             max_tokens = 4000
@@ -169,26 +172,32 @@ class EvolutionEngine:
                 max_tokens = self._settings.curated_max_tokens
             max_chars = max_tokens * 4
             within_limit = len(content) <= max_chars
-            checks.append(EvalCheck(
-                name="size_limit",
-                passed=within_limit,
-                detail=f"Content size {len(content)} chars"
-                + (f" (limit: {max_chars})" if not within_limit else ""),
-            ))
+            checks.append(
+                EvalCheck(
+                    name="size_limit",
+                    passed=within_limit,
+                    detail=f"Content size {len(content)} chars"
+                    + (f" (limit: {max_chars})" if not within_limit else ""),
+                )
+            )
 
             # Check 3: Diff sanity — not identical to current
             current = await self._get_active_version(db)
             is_different = current is None or current.content.strip() != content.strip()
-            checks.append(EvalCheck(
-                name="diff_sanity",
-                passed=is_different,
-                detail="Content differs from current active version" if is_different
-                else "Content identical to current active version",
-            ))
+            checks.append(
+                EvalCheck(
+                    name="diff_sanity",
+                    passed=is_different,
+                    detail="Content differs from current active version"
+                    if is_different
+                    else "Content identical to current active version",
+                )
+            )
 
             passed = all(c.passed for c in checks)
             summary = (
-                "All checks passed" if passed
+                "All checks passed"
+                if passed
                 else "Failed: " + ", ".join(c.name for c in checks if not c.passed)
             )
 
@@ -196,8 +205,7 @@ class EvolutionEngine:
             eval_dict = {
                 "passed": passed,
                 "checks": [
-                    {"name": c.name, "passed": c.passed, "detail": c.detail}
-                    for c in checks
+                    {"name": c.name, "passed": c.passed, "detail": c.detail} for c in checks
                 ],
                 "summary": summary,
             }
@@ -389,9 +397,7 @@ class EvolutionEngine:
         """Get version history for audit/review."""
         async with self._db_factory() as db:
             result = await db.execute(
-                select(SoulVersionRecord)
-                .order_by(SoulVersionRecord.version.desc())
-                .limit(limit)
+                select(SoulVersionRecord).order_by(SoulVersionRecord.version.desc()).limit(limit)
             )
             return [self._to_soul_version(r) for r in result.scalars().all()]
 
@@ -459,9 +465,7 @@ class EvolutionEngine:
     async def _next_version(db: AsyncSession) -> int:
         """Get next monotonic version number."""
         result = await db.execute(
-            select(SoulVersionRecord.version)
-            .order_by(SoulVersionRecord.version.desc())
-            .limit(1)
+            select(SoulVersionRecord.version).order_by(SoulVersionRecord.version.desc()).limit(1)
         )
         max_ver = result.scalar()
         return (max_ver or 0) + 1
@@ -474,9 +478,7 @@ class EvolutionEngine:
         )
         record = result.scalars().first()
         if not record:
-            raise EvolutionError(
-                f"Version {version} not found", code="VERSION_NOT_FOUND"
-            )
+            raise EvolutionError(f"Version {version} not found", code="VERSION_NOT_FOUND")
         return record
 
     @staticmethod

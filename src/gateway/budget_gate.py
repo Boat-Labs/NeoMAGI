@@ -67,10 +67,12 @@ class BudgetGate:
 
             if result is None:
                 # Budget exceeded — read current for error message
-                current_row = await conn.execute(text(
-                    f"SELECT cumulative_eur FROM {self._schema}.budget_state"
-                    " WHERE id = 'global'"
-                ))
+                current_row = await conn.execute(
+                    text(
+                        f"SELECT cumulative_eur FROM {self._schema}.budget_state"
+                        " WHERE id = 'global'"
+                    )
+                )
                 current = float(current_row.scalar_one())
                 return Reservation(
                     denied=True,

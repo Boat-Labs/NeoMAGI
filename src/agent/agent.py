@@ -81,9 +81,7 @@ def _sanitize_tool_call_history(messages: list[dict[str, Any]]) -> list[dict[str
             return
 
         fallback_text = (
-            pending_assistant.get("content", "")
-            if isinstance(pending_assistant, dict)
-            else ""
+            pending_assistant.get("content", "") if isinstance(pending_assistant, dict) else ""
         )
         sanitized = sanitized[:chain_start_idx]
         if isinstance(fallback_text, str) and fallback_text.strip():
@@ -256,9 +254,7 @@ class AgentLoop:
         current_user_seq = user_msg.seq
 
         # Resolve scope_key ONCE as local variable (concurrency-safe, ADR 0034)
-        effective_identity = identity or SessionIdentity(
-            session_id=session_id, channel_type="dm"
-        )
+        effective_identity = identity or SessionIdentity(session_id=session_id, channel_type="dm")
         effective_dm_scope = dm_scope if dm_scope is not None else self._session_settings.dm_scope
         scope_key = resolve_scope_key(effective_identity, dm_scope=effective_dm_scope)
 
@@ -274,34 +270,26 @@ class AgentLoop:
 
         # Compaction state tracking for this request
         compaction_count = 0
-        max_compactions = (
-            self._settings.max_compactions_per_request if self._settings else 2
-        )
+        max_compactions = self._settings.max_compactions_per_request if self._settings else 2
 
         # 2. Load compaction state and build initial prompt
         compaction_state = await self._session_manager.get_compaction_state(session_id)
-        last_compaction_seq = (
-            compaction_state.last_compaction_seq if compaction_state else None
-        )
-        compacted_context = (
-            compaction_state.compacted_context if compaction_state else None
-        )
+        last_compaction_seq = compaction_state.last_compaction_seq if compaction_state else None
+        compacted_context = compaction_state.compacted_context if compaction_state else None
 
         # Memory recall: extract recent user messages and search memory
-        recall_results = await self._fetch_memory_recall(
-            session_id, scope_key=scope_key
-        )
+        recall_results = await self._fetch_memory_recall(session_id, scope_key=scope_key)
 
         system_prompt = self._prompt_builder.build(
-            session_id, mode, compacted_context=compacted_context,
+            session_id,
+            mode,
+            compacted_context=compacted_context,
             scope_key=scope_key,
             recall_results=recall_results,
         )
 
         # Lazily refresh guardrail contract (hash-based, ADR 0035)
-        self._contract = maybe_refresh_contract(
-            self._contract, self._workspace_dir
-        )
+        self._contract = maybe_refresh_contract(self._contract, self._workspace_dir)
 
         # 4. Streaming tool call loop
         for iteration in range(MAX_TOOL_ITERATIONS):
@@ -309,9 +297,7 @@ class AgentLoop:
             effective_msgs = self._session_manager.get_effective_history(
                 session_id, last_compaction_seq
             )
-            history_msgs = _sanitize_tool_call_history(
-                _messages_with_seq_to_openai(effective_msgs)
-            )
+            history_msgs = _sanitize_tool_call_history(_messages_with_seq_to_openai(effective_msgs))
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 *history_msgs,
@@ -366,7 +352,9 @@ class AgentLoop:
 
                         # Rebuild system prompt with new compacted context
                         system_prompt = self._prompt_builder.build(
-                            session_id, mode, compacted_context=compacted_context,
+                            session_id,
+                            mode,
+                            compacted_context=compacted_context,
                             scope_key=scope_key,
                             recall_results=recall_results,
                         )
@@ -384,22 +372,16 @@ class AgentLoop:
                         ]
 
                         # F2: Post-compaction budget recheck
-                        rebuilt_tokens = (
-                            self._budget_tracker.counter.count_messages(messages)
-                        )
+                        rebuilt_tokens = self._budget_tracker.counter.count_messages(messages)
                         if tools_schema_list:
-                            rebuilt_tokens += (
-                                self._budget_tracker.counter.count_tools_schema(
-                                    tools_schema_list
-                                )
+                            rebuilt_tokens += self._budget_tracker.counter.count_tools_schema(
+                                tools_schema_list
                             )
                         post_status = self._budget_tracker.check(rebuilt_tokens)
 
                         if post_status.status == "compact_needed":
                             # Overflow: try emergency trim with reduced preserved turns
-                            original_turns = (
-                                self._settings.min_preserved_turns
-                            )
+                            original_turns = self._settings.min_preserved_turns
                             reduced_turns = max(original_turns // 2, 1)
 
                             logger.warning(
@@ -432,12 +414,8 @@ class AgentLoop:
                                     emergency_result,
                                     lock_token=lock_token,
                                 )
-                                last_compaction_seq = (
-                                    emergency_result.new_compaction_seq
-                                )
-                                compacted_context = (
-                                    emergency_result.compacted_context
-                                )
+                                last_compaction_seq = emergency_result.new_compaction_seq
+                                compacted_context = emergency_result.compacted_context
                                 system_prompt = self._prompt_builder.build(
                                     session_id,
                                     mode,
@@ -445,10 +423,8 @@ class AgentLoop:
                                     scope_key=scope_key,
                                     recall_results=recall_results,
                                 )
-                                effective_msgs = (
-                                    self._session_manager.get_effective_history(
-                                        session_id, last_compaction_seq
-                                    )
+                                effective_msgs = self._session_manager.get_effective_history(
+                                    session_id, last_compaction_seq
                                 )
                                 history_msgs = _sanitize_tool_call_history(
                                     _messages_with_seq_to_openai(effective_msgs)
@@ -457,19 +433,12 @@ class AgentLoop:
                                     {"role": "system", "content": system_prompt},
                                     *history_msgs,
                                 ]
-                                final_tokens = (
-                                    self._budget_tracker.counter.count_messages(
-                                        messages
-                                    )
-                                )
+                                final_tokens = self._budget_tracker.counter.count_messages(messages)
                                 if tools_schema_list:
-                                    final_tokens += (
-                                        self._budget_tracker.counter
-                                        .count_tools_schema(tools_schema_list)
+                                    final_tokens += self._budget_tracker.counter.count_tools_schema(
+                                        tools_schema_list
                                     )
-                                final_status = self._budget_tracker.check(
-                                    final_tokens
-                                )
+                                final_status = self._budget_tracker.check(final_tokens)
                                 if final_status.status == "compact_needed":
                                     logger.error(
                                         "emergency_trim_still_over_budget",
@@ -488,8 +457,7 @@ class AgentLoop:
                                     session_id=session_id,
                                 )
                                 yield TextChunk(
-                                    content="抱歉，会话压缩过程中遇到错误。"
-                                    "请开始新会话继续对话。"
+                                    content="抱歉，会话压缩过程中遇到错误。请开始新会话继续对话。"
                                 )
                                 return
 
@@ -561,13 +529,9 @@ class AgentLoop:
                             mode=mode.value,
                             session_id=session_id,
                         )
-                        denial_msg = (
-                            f"Tool '{tc['name']}' is not available in "
-                            f"'{mode.value}' mode."
-                        )
+                        denial_msg = f"Tool '{tc['name']}' is not available in '{mode.value}' mode."
                         denial_next = (
-                            "当前为 chat_safe 模式，代码工具不可用。"
-                            "未来版本将支持 coding 模式。"
+                            "当前为 chat_safe 模式，代码工具不可用。未来版本将支持 coding 模式。"
                         )
                         yield ToolDenied(
                             tool_name=tc["name"],
@@ -614,16 +578,12 @@ class AgentLoop:
             await self._session_manager.append_message(
                 session_id, "assistant", collected_text, lock_token=lock_token
             )
-            logger.info(
-                "response_complete", session_id=session_id, chars=len(collected_text)
-            )
+            logger.info("response_complete", session_id=session_id, chars=len(collected_text))
             return
 
         # Safety: max iterations
         logger.warning("max_tool_iterations", max=MAX_TOOL_ITERATIONS, session_id=session_id)
-        yield TextChunk(
-            content="I've reached the maximum number of tool calls. Please try again."
-        )
+        yield TextChunk(content="I've reached the maximum number of tool calls. Please try again.")
 
     async def _try_compact(
         self,
@@ -731,9 +691,7 @@ class AgentLoop:
 
         # Keep recent completed turns, trim only at turn boundaries to avoid
         # splitting assistant(tool_calls) and tool response chains.
-        completed_turns = [
-            t for t in split_turns(all_msgs) if t.start_seq < current_user_seq
-        ]
+        completed_turns = [t for t in split_turns(all_msgs) if t.start_seq < current_user_seq]
         if len(completed_turns) <= min_preserved:
             return None
 
@@ -786,11 +744,7 @@ class AgentLoop:
         try:
             # Extract recent user messages from history
             all_msgs = self._session_manager.get_history_with_seq(session_id)
-            recent_user = [
-                m.content
-                for m in all_msgs
-                if m.role == "user" and m.content
-            ][-3:]
+            recent_user = [m.content for m in all_msgs if m.role == "user" and m.content][-3:]
 
             query = PromptBuilder.extract_recall_query(recent_user)
             if not query:
@@ -847,9 +801,7 @@ class AgentLoop:
                 for c in candidates
             ]
             min_confidence = (
-                self._memory_settings.flush_min_confidence
-                if self._memory_settings
-                else 0.5
+                self._memory_settings.flush_min_confidence if self._memory_settings else 0.5
             )
             written = await self._memory_writer.process_flush_candidates(
                 resolved, min_confidence=min_confidence
@@ -886,9 +838,7 @@ class AgentLoop:
             return {"error_code": "UNKNOWN_TOOL", "message": f"Unknown tool: {tool_name}"}
 
         # Pre-tool guard check (ADR 0035)
-        guard_block = check_pre_tool_guard(
-            guard_state, tool_name, tool.risk_level
-        )
+        guard_block = check_pre_tool_guard(guard_state, tool_name, tool.risk_level)
         if guard_block is not None:
             return {
                 "ok": False,

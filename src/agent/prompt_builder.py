@@ -124,9 +124,7 @@ class PromptBuilder:
         # Placeholder — no skills in M1.2
         return ""
 
-    def _layer_workspace(
-        self, session_id: str, *, scope_key: str = "main"
-    ) -> str:
+    def _layer_workspace(self, session_id: str, *, scope_key: str = "main") -> str:
         """Load workspace bootstrap files and concatenate their contents."""
         parts: list[str] = []
 
@@ -188,9 +186,7 @@ class PromptBuilder:
         total_chars = 0
 
         for r in recall_results:
-            date_str = (
-                r.created_at.strftime("%Y-%m-%d") if r.created_at else "unknown"
-            )
+            date_str = r.created_at.strftime("%Y-%m-%d") if r.created_at else "unknown"
             # Truncate individual content to avoid one entry dominating
             content = r.content[:300] if len(r.content) > 300 else r.content
             content = content.replace("\n", " ").strip()

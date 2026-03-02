@@ -58,9 +58,7 @@ class MemorySearchTool(BaseTool):
             "required": ["query"],
         }
 
-    async def execute(
-        self, arguments: dict, context: ToolContext | None = None
-    ) -> dict:
+    async def execute(self, arguments: dict, context: ToolContext | None = None) -> dict:
         if self._searcher is None:
             return {"results": [], "message": "Memory search not yet configured"}
 

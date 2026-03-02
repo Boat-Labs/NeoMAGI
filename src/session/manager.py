@@ -119,9 +119,7 @@ class SessionManager:
             )
             return ToolMode.chat_safe
 
-    async def try_claim_session(
-        self, session_id: str, ttl_seconds: int = 300
-    ) -> str | None:
+    async def try_claim_session(self, session_id: str, ttl_seconds: int = 300) -> str | None:
         """Try to claim a session for exclusive processing.
 
         [Decision 0021] Session-level serialization: prevents concurrent
@@ -356,10 +354,7 @@ class SessionManager:
 
         try:
             async with self._db() as db_session:
-                stmt = (
-                    select(SessionRecord)
-                    .where(SessionRecord.id == session_id)
-                )
+                stmt = select(SessionRecord).where(SessionRecord.id == session_id)
                 result = await db_session.execute(stmt)
                 record = result.scalar_one_or_none()
                 if record is None:
@@ -471,8 +466,7 @@ class SessionManager:
 
             if seq is None:
                 raise SessionFencingError(
-                    f"Lock token mismatch for session {session_id}: "
-                    "another worker has taken over"
+                    f"Lock token mismatch for session {session_id}: another worker has taken over"
                 )
 
             db_session.add(
@@ -515,11 +509,13 @@ def _messages_to_history_format(messages: list[Message]) -> list[dict[str, Any]]
             continue
         if not m.content:
             continue
-        result.append({
-            "role": m.role,
-            "content": m.content,
-            "timestamp": m.timestamp.isoformat(),
-        })
+        result.append(
+            {
+                "role": m.role,
+                "content": m.content,
+                "timestamp": m.timestamp.isoformat(),
+            }
+        )
     return result
 
 

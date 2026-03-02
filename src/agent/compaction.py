@@ -86,21 +86,25 @@ def split_turns(messages: list[MessageWithSeq]) -> list[Turn]:
     for msg in messages:
         if msg.role == "user" and current_msgs:
             # End previous turn, start new one
-            turns.append(Turn(
-                start_seq=current_msgs[0].seq,
-                end_seq=current_msgs[-1].seq,
-                messages=current_msgs,
-            ))
+            turns.append(
+                Turn(
+                    start_seq=current_msgs[0].seq,
+                    end_seq=current_msgs[-1].seq,
+                    messages=current_msgs,
+                )
+            )
             current_msgs = []
         current_msgs.append(msg)
 
     # Last turn
     if current_msgs:
-        turns.append(Turn(
-            start_seq=current_msgs[0].seq,
-            end_seq=current_msgs[-1].seq,
-            messages=current_msgs,
-        ))
+        turns.append(
+            Turn(
+                start_seq=current_msgs[0].seq,
+                end_seq=current_msgs[-1].seq,
+                messages=current_msgs,
+            )
+        )
 
     return turns
 
@@ -174,9 +178,7 @@ class CompactionEngine:
                 status="noop",
                 new_compaction_seq=last_compaction_seq or 0,
                 compaction_metadata=self._make_metadata("noop"),
-                preserved_messages=[
-                    m for t in completed_turns for m in t.messages
-                ],
+                preserved_messages=[m for t in completed_turns for m in t.messages],
             )
 
         preserved_turns = completed_turns[-min_preserved:]
@@ -184,18 +186,14 @@ class CompactionEngine:
 
         # Filter out already-compacted turns
         if last_compaction_seq is not None:
-            compressible_turns = [
-                t for t in compressible_turns if t.end_seq > last_compaction_seq
-            ]
+            compressible_turns = [t for t in compressible_turns if t.end_seq > last_compaction_seq]
 
         if not compressible_turns:
             return CompactionResult(
                 status="noop",
                 new_compaction_seq=last_compaction_seq or 0,
                 compaction_metadata=self._make_metadata("noop"),
-                preserved_messages=[
-                    m for t in preserved_turns for m in t.messages
-                ],
+                preserved_messages=[m for t in preserved_turns for m in t.messages],
             )
 
         # New watermark: end_seq of last compressible turn
@@ -270,9 +268,7 @@ class CompactionEngine:
         preserved_text = self._turns_to_text(preserved_turns)
         anchor_passed = True
         if summary_text and status == "success":
-            anchor_passed = self._validate_anchors(
-                system_prompt, summary_text, preserved_text
-            )
+            anchor_passed = self._validate_anchors(system_prompt, summary_text, preserved_text)
             if not anchor_passed and self._settings.anchor_retry_enabled:
                 anchor_retry_used = True
                 logger.info("anchor_retry", session_id=session_id)
@@ -294,9 +290,7 @@ class CompactionEngine:
 
                 if not anchor_passed:
                     status = "degraded"
-                    logger.warning(
-                        "anchor_validation_failed_after_retry", session_id=session_id
-                    )
+                    logger.warning("anchor_validation_failed_after_retry", session_id=session_id)
 
         # Build metadata
         metadata = self._make_metadata(

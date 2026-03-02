@@ -65,11 +65,7 @@ class MemoryWriter:
         filepath = memory_dir / filename
 
         now = datetime.now(UTC)
-        entry = (
-            f"---\n"
-            f"[{now.strftime('%H:%M')}] (source: {source}, scope: {scope_key})\n"
-            f"{text}\n"
-        )
+        entry = f"---\n[{now.strftime('%H:%M')}] (source: {source}, scope: {scope_key})\n{text}\n"
 
         # Check file size limit before writing
         current_size = filepath.stat().st_size if filepath.exists() else 0

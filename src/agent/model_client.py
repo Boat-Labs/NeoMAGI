@@ -155,9 +155,7 @@ class OpenAICompatModelClient(ModelClient):
                 )
                 await asyncio.sleep(delay)
             except APIStatusError as e:
-                raise LLMError(
-                    f"LLM API error: {e.status_code} {e.message}"
-                ) from e
+                raise LLMError(f"LLM API error: {e.status_code} {e.message}") from e
         # Unreachable, but satisfies type checker
         raise LLMError("Retry loop exhausted")  # pragma: no cover
 
@@ -326,6 +324,4 @@ class OpenAICompatModelClient(ModelClient):
 
         # After stream ends: yield accumulated tool calls if any
         if pending_tool_calls:
-            yield ToolCallsComplete(
-                tool_calls=[pending_tool_calls[k] for k in pending_order]
-            )
+            yield ToolCallsComplete(tool_calls=[pending_tool_calls[k] for k in pending_order])

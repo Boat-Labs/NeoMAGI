@@ -55,9 +55,7 @@ class ReadFileTool(BaseTool):
             "required": ["path"],
         }
 
-    async def execute(
-        self, arguments: dict, context: ToolContext | None = None
-    ) -> dict:
+    async def execute(self, arguments: dict, context: ToolContext | None = None) -> dict:
         raw_path = arguments.get("path", "")
 
         # Reject non-string or empty path

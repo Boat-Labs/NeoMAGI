@@ -66,8 +66,7 @@ async def dispatch_chat(
         entry = registry.get(provider)
     except KeyError:
         raise GatewayError(
-            f"Provider '{provider}' is not available. "
-            f"Configured: {registry.available_providers()}",
+            f"Provider '{provider}' is not available. Configured: {registry.available_providers()}",
             code="PROVIDER_NOT_AVAILABLE",
         )
 
@@ -80,7 +79,8 @@ async def dispatch_chat(
 
     # 2. Session claim
     lock_token = await session_manager.try_claim_session(
-        session_id, ttl_seconds=session_claim_ttl_seconds,
+        session_id,
+        ttl_seconds=session_claim_ttl_seconds,
     )
     if lock_token is None:
         raise GatewayError(

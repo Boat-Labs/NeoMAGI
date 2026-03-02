@@ -72,9 +72,7 @@ class BaseTool(ABC):
         return RiskLevel.high
 
     @abstractmethod
-    async def execute(
-        self, arguments: dict, context: ToolContext | None = None
-    ) -> dict:
+    async def execute(self, arguments: dict, context: ToolContext | None = None) -> dict:
         """Execute the tool with given arguments and optional runtime context.
 
         context is injected by AgentLoop with scope_key and session_id.

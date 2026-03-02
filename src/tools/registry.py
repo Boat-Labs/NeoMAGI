@@ -66,8 +66,7 @@ class ToolRegistry:
     def list_tools(self, mode: ToolMode) -> list[BaseTool]:
         """Return tools available in the given mode."""
         return [
-            tool for tool in self._tools.values()
-            if mode in self.get_effective_modes(tool.name)
+            tool for tool in self._tools.values() if mode in self.get_effective_modes(tool.name)
         ]
 
     def get_tools_schema(self, mode: ToolMode) -> list[dict]:

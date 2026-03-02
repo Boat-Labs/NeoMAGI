@@ -59,9 +59,7 @@ class SoulRollbackTool(BaseTool):
             "required": ["action"],
         }
 
-    async def execute(
-        self, arguments: dict, context: ToolContext | None = None
-    ) -> dict:
+    async def execute(self, arguments: dict, context: ToolContext | None = None) -> dict:
         if self._engine is None:
             return {"error_code": "NOT_CONFIGURED", "message": "Evolution engine not configured"}
 

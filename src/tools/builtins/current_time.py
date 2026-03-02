@@ -40,18 +40,13 @@ class CurrentTimeTool(BaseTool):
             "properties": {
                 "timezone": {
                     "type": "string",
-                    "description": (
-                        "IANA timezone name, e.g. 'Asia/Shanghai'. "
-                        "Defaults to UTC."
-                    ),
+                    "description": ("IANA timezone name, e.g. 'Asia/Shanghai'. Defaults to UTC."),
                 },
             },
             "required": [],
         }
 
-    async def execute(
-        self, arguments: dict, context: ToolContext | None = None
-    ) -> dict:
+    async def execute(self, arguments: dict, context: ToolContext | None = None) -> dict:
         tz_name = arguments.get("timezone", "UTC")
         try:
             if tz_name == "UTC":

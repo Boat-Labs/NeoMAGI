@@ -54,9 +54,7 @@ class MemoryAppendTool(BaseTool):
             "required": ["text"],
         }
 
-    async def execute(
-        self, arguments: dict, context: ToolContext | None = None
-    ) -> dict:
+    async def execute(self, arguments: dict, context: ToolContext | None = None) -> dict:
         text = arguments.get("text", "")
         if not isinstance(text, str) or not text.strip():
             return {
