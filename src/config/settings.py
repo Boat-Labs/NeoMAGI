@@ -167,6 +167,26 @@ class MemorySettings(BaseSettings):
     curation_model: str = "gpt-4o-mini"  # offline curation model, independent of provider routing
 
 
+class TelegramSettings(BaseSettings):
+    """Telegram channel settings. Env vars prefixed with TELEGRAM_."""
+
+    model_config = SettingsConfigDict(env_prefix="TELEGRAM_")
+
+    bot_token: str = ""  # empty = channel disabled
+    dm_scope: str = "per-channel-peer"
+    allowed_user_ids: str = ""  # comma-separated Telegram user ID whitelist
+    message_max_length: int = 4096
+
+    @field_validator("dm_scope")
+    @classmethod
+    def _validate_dm_scope(cls, v: str) -> str:
+        allowed = {"per-channel-peer", "per-peer", "main"}
+        if v not in allowed:
+            msg = f"TELEGRAM_DM_SCOPE must be one of {allowed} (got '{v}')"
+            raise ValueError(msg)
+        return v
+
+
 class GeminiSettings(BaseSettings):
     """Gemini API settings via OpenAI-compatible endpoint."""
 
@@ -207,6 +227,7 @@ class Settings(BaseSettings):
     session: SessionSettings = Field(default_factory=SessionSettings)
     compaction: CompactionSettings = Field(default_factory=CompactionSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
+    telegram: TelegramSettings = Field(default_factory=TelegramSettings)
     workspace_dir: Path = Path("workspace")
 
 
