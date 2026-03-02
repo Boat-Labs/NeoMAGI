@@ -269,3 +269,19 @@
 - Evidence: `dev_docs/reviews/m7_summary_2026-03-01.md`, `dev_docs/reviews/m7_phase6_2026-03-01.md`, `dev_docs/logs/m7_2026-03-01/gate_state.md`
 - Next: 按 `design_docs/roadmap_milestones_v3.md` 进入 M4（第二渠道适配）；M5 继续保持触发式进入
 - Risk: M7 residual risks 已记录于 `dev_docs/reviews/m7_summary_2026-03-01.md`，不阻塞关闭
+
+## 2026-03-02 (local) | M4
+- Status: done
+- Done: M4 Telegram 第二渠道适配全部完成（Agent Teams PM 协调，5 Phase Gate 全通过）— TelegramSettings + scope_resolver 激活、dispatch_chat channel-agnostic 调度核心、TelegramAdapter (aiogram 3.x) DM 适配、telegram_render 消息拆分/格式化/错误映射、跨渠道隔离测试 + Use Case A/B/C 验收 + ADR 0044 归档
+- Detail:
+  - Phase 0: Config + Scope 激活 — TelegramSettings (pydantic-settings), scope_resolver per-channel-peer 分支, SessionSettings.dm_scope 锁定 main
+  - Phase 1: Dispatch 抽取 + Identity — dispatch_chat(), session_id/scope_key 分离, AgentLoop identity+dm_scope 参数
+  - Phase 2: Telegram Adapter — aiogram 3.x, check_ready/start_polling/stop, 鉴权门控 (fail-closed), Gateway lifespan 集成
+  - Phase 3: Response Rendering — split_message (代码块保护), format_for_telegram (MarkdownV2 + 回退), 错误消息中文映射
+  - Phase 4: E2E + Docs + ADR — test_channel_isolation.py (11 tests), ADR 0044, 文档更新
+- Evidence: 668 tests passed, ruff clean; merge commit 549253f; PM 报告 `dev_docs/logs/m4_2026-03-02/pm.md`; 验收报告 `dev_docs/reviews/m4_phase{0-4}_2026-03-02.md`
+- Plan: `dev_docs/plans/m4_telegram-channel-integration_2026-03-02.md`
+- Decisions: ADR 0044 (Telegram adapter aiogram same-process)
+- Resilience: 经历 tmux 崩溃 + team 重建 + agent respawn 恢复，验证了 Agent Teams 韧性
+- Next: 按 roadmap_milestones_v3.md 确定下一阶段
+- Risk: 无；Tester LOW findings (MarkdownV2 send 回退等) 可后续 hardening 处理
