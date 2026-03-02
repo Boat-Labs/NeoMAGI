@@ -254,14 +254,12 @@
 - Next: M6 关闭，参考 roadmap_milestones_v3.md 确定下一阶段
 - Risk: Gemini T13 长上下文 + 工具历史场景 400 INVALID_ARGUMENT 为已知限制，可通过 compaction 阈值调优缓解
 
-<!-- devcoord:begin milestone=m7 -->
 ## 2026-03-01 (generated) | M7
 - Status: done
 - Done: 最新 gate G-M7-P6-POS 为 closed (PASS)；backend=working, tester=done
 - Evidence: `dev_docs/logs/m7_2026-03-01/gate_state.md`, `dev_docs/logs/m7_2026-03-01/watchdog_status.md`, `dev_docs/reviews/m7_phase6_2026-03-01.md` (0a300c2)
 - Next: G-M7-P6-POS 已关闭，等待 M7 下一条 gate
 - Risk: 无
-<!-- devcoord:end milestone=m7 -->
 
 ## 2026-03-01 (local) | M7
 - Status: done
@@ -283,5 +281,19 @@
 - Plan: `dev_docs/plans/m4_telegram-channel-integration_2026-03-02.md`
 - Decisions: ADR 0044 (Telegram adapter aiogram same-process)
 - Resilience: 经历 tmux 崩溃 + team 重建 + agent respawn 恢复，验证了 Agent Teams 韧性
-- Next: 按 roadmap_milestones_v3.md 确定下一阶段
-- Risk: 无；Tester LOW findings (MarkdownV2 send 回退等) 可后续 hardening 处理
+- Next: 用户审阅发现 4 项问题 (2×P1, 1×P2, 1×P3) 待修
+- Risk: F1 跨渠道 session 隔离非强约束; F2 超长代码块 Telegram 拒发
+
+## 2026-03-02 (local) | M4 post-review fix
+- Status: done
+- Done: M4 post-review 4 项 Finding 全部修复，用户端到端测试全部通过
+- Detail:
+  - F1 [P1]: WS session_id channel prefix 隔离 — `CHANNEL_EXCLUSIVE_PREFIXES` 拦截 `telegram:` 和 `peer:` 前缀；ChatSendParams/ChatHistoryParams Pydantic validator；`_handle_chat_history` 补 ValidationError→GatewayError 映射
+  - F2 [P1]: code block 超长单行 hard cut — `_split_code_block` 对 `line_len > effective` 的行做 `range(0, len(line), effective)` 分段，每段重新包围 fences
+  - F3 [P2]: polling 异常触发进程退出 — `_on_polling_done` 提取为模块级函数，fatal error 时 `os.kill(SIGTERM)` fail-fast（非静默降级）
+  - F4 [P3]: `message_max_length` 边界校验 — `Field(ge=1, le=4096)` 启动时 fail-fast
+- Evidence: 686 tests passed, ruff clean; 用户 Telegram 端到端测试通过
+- Plan: `dev_docs/plans/m4_post-review-fix_2026-03-02.md` (approved + executed)
+- Resilience: M4 主体实施期间经历 tmux 崩溃导致全部 agent 进程丢失；借助 beads control plane 事件记录（gate state、phase progress、teammate ack），PM 在新会话中完成断点重建（recovery-check + state-sync-ok），所有 teammate 在新 worktree 恢复工作并顺利完成剩余 Phase，验证了 M7 devcoord 协作控制在灾难恢复场景下的实际有效性
+- Next: M4 全部关闭；按 `design_docs/roadmap_milestones_v3.md` 确定下一阶段（M5 触发式进入）
+- Risk: 无

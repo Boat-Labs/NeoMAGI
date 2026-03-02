@@ -13,9 +13,10 @@
 
 ## 项目状态
 
-**当前阶段：M3 已完成（含 post-review 修正），下一阶段 M6（模型迁移验证）。**
+**当前阶段：M4 已完成（含 post-review 修正），M5 触发式进入。**
 
-当前基线：481 tests 全绿，ruff clean，CI 已落地。
+当前基线：686 tests 全绿，ruff clean，CI 已落地。
+已完成里程碑：M0 → M1.x → M2 → M3 → M6 → M7 → M4。
 下一阶段优先级以 `design_docs/roadmap_milestones_v3.md` 为准。
 
 ## 项目结构
