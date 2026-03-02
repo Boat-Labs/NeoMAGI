@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -156,9 +157,44 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         default_provider=registry.default_name,
     )
 
+    # Telegram adapter (optional: only when bot_token is configured)
+    telegram_adapter = None
+    polling_task = None
+    if settings.telegram.bot_token:
+        from src.channels.telegram import TelegramAdapter
+
+        telegram_adapter = TelegramAdapter(
+            bot_token=settings.telegram.bot_token,
+            telegram_settings=settings.telegram,
+            registry=registry,
+            session_manager=session_manager,
+            budget_gate=budget_gate,
+            gateway_settings=settings.gateway,
+        )
+        await telegram_adapter.check_ready()  # fail-fast on bad token
+
+        def _on_polling_done(task: asyncio.Task) -> None:
+            if task.cancelled():
+                return
+            exc = task.exception()
+            if exc:
+                logger.error("telegram_polling_fatal", error=str(exc))
+
+        polling_task = asyncio.create_task(
+            telegram_adapter.start_polling(), name="telegram_polling",
+        )
+        polling_task.add_done_callback(_on_polling_done)
+        logger.info("telegram_adapter_started", username=telegram_adapter._bot_username)
+
     yield
 
-    # Cleanup
+    # Cleanup: Telegram
+    if telegram_adapter:
+        await telegram_adapter.stop()
+    if polling_task and not polling_task.done():
+        polling_task.cancel()
+
+    # Cleanup: DB
     await engine.dispose()
     logger.info("db_engine_disposed")
 
