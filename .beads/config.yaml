@@ -53,3 +53,6 @@
 # - linear.api-key
 # - github.org
 # - github.repo
+
+sync:
+  git-remote: "git@github.com:Boat-Labs/NeoMAGI-beads.git"
