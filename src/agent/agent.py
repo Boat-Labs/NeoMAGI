@@ -221,7 +221,13 @@ class AgentLoop:
             )
 
     async def handle_message(
-        self, session_id: str, content: str, *, lock_token: str | None = None
+        self,
+        session_id: str,
+        content: str,
+        *,
+        lock_token: str | None = None,
+        identity: SessionIdentity | None = None,
+        dm_scope: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Handle an incoming user message and yield agent events.
 
@@ -231,6 +237,9 @@ class AgentLoop:
 
         When lock_token is provided, all append_message calls include atomic
         fencing to reject stale writes after lock takeover.
+
+        identity/dm_scope: when provided, override defaults for scope resolution.
+        None → backward compatible (session_id as dm, SessionSettings.dm_scope).
         """
         # 0. Lazy bootstrap: ensure SOUL.md v0-seed exists (once per loop lifetime)
         if not self._bootstrap_done and self._evolution_engine is not None:
@@ -247,10 +256,11 @@ class AgentLoop:
         current_user_seq = user_msg.seq
 
         # Resolve scope_key ONCE as local variable (concurrency-safe, ADR 0034)
-        identity = SessionIdentity(session_id=session_id, channel_type="dm")
-        scope_key = resolve_scope_key(
-            identity, dm_scope=self._session_settings.dm_scope
+        effective_identity = identity or SessionIdentity(
+            session_id=session_id, channel_type="dm"
         )
+        effective_dm_scope = dm_scope if dm_scope is not None else self._session_settings.dm_scope
+        scope_key = resolve_scope_key(effective_identity, dm_scope=effective_dm_scope)
 
         # Resolve effective mode (fail-closed to chat_safe on error)
         mode = await self._session_manager.get_mode(session_id)
@@ -345,6 +355,7 @@ class AgentLoop:
                         compacted_context=compacted_context,
                         current_user_seq=current_user_seq,
                         lock_token=lock_token,
+                        scope_key=scope_key,
                     )
                     compaction_count += 1
 
@@ -625,6 +636,7 @@ class AgentLoop:
         compacted_context: str | None,
         current_user_seq: int,
         lock_token: str,
+        scope_key: str,
     ) -> CompactionResult | None:
         """Execute compaction with full error handling.
 
@@ -661,7 +673,7 @@ class AgentLoop:
             # Flush candidate persist (Phase 1, M3)
             if result.memory_flush_candidates and self._memory_writer:
                 await self._persist_flush_candidates(
-                    result.memory_flush_candidates, session_id
+                    result.memory_flush_candidates, session_id, scope_key=scope_key
                 )
 
             logger.info(
@@ -812,12 +824,14 @@ class AgentLoop:
         self,
         candidates: list[Any],
         session_id: str,
+        *,
+        scope_key: str,
     ) -> None:
         """Persist flush candidates to daily notes via MemoryWriter.
 
         Boundary mapping: agent-layer MemoryFlushCandidate → memory-side
-        ResolvedFlushCandidate. scope_key resolved per candidate using
-        candidate.source_session_id (NOT current session_id).
+        ResolvedFlushCandidate. scope_key is passed by caller (resolved once
+        per request in handle_message).
 
         Failure is logged but does not block the main flow.
         """
@@ -825,10 +839,7 @@ class AgentLoop:
             resolved = [
                 ResolvedFlushCandidate(
                     candidate_text=c.candidate_text,
-                    scope_key=resolve_scope_key(
-                        SessionIdentity(session_id=c.source_session_id),
-                        dm_scope=self._session_settings.dm_scope,
-                    ),
+                    scope_key=scope_key,
                     source_session_id=c.source_session_id,
                     confidence=c.confidence,
                     constraint_tags=tuple(c.constraint_tags),

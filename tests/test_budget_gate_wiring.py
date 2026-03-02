@@ -1,4 +1,4 @@
-"""Tests for BudgetGate wiring in _handle_chat_send (ADR 0041).
+"""Tests for BudgetGate wiring in dispatch_chat / _handle_chat_send (ADR 0041).
 
 Verifies gateway-level integration: reserve/settle lifecycle, denied paths,
 error handling, and parameter passthrough. Uses mocks (no real DB).
@@ -11,8 +11,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.gateway.app import DEFAULT_RESERVE_EUR, _handle_chat_send
+from src.gateway.app import _handle_chat_send
 from src.gateway.budget_gate import Reservation
+from src.gateway.dispatch import DEFAULT_RESERVE_EUR
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -95,8 +96,7 @@ class TestBudgetDenied:
         gate = _mock_budget_gate(_denied_reservation())
         ws = _make_mock_ws(budget_gate=gate)
 
-        # _handle_chat_send raises GatewayError which is caught by _handle_rpc_message.
-        # Calling directly: the GatewayError propagates up.
+        # _handle_chat_send delegates to dispatch_chat which raises GatewayError.
         from src.infra.errors import GatewayError
 
         with pytest.raises(GatewayError, match="Budget exceeded"):
@@ -177,7 +177,8 @@ class TestSettleErrorLogging:
         gate.settle = AsyncMock(side_effect=RuntimeError("DB down"))
         ws = _make_mock_ws(budget_gate=gate)
 
-        with patch("src.gateway.app.logger") as mock_logger:
+        # settle logging now happens in dispatch.py
+        with patch("src.gateway.dispatch.logger") as mock_logger:
             # settle fails but _handle_chat_send should NOT re-raise
             await _handle_chat_send(ws, "req-1", {"content": "hi", "session_id": "s1"})
 
@@ -248,16 +249,18 @@ class TestReserveParams:
 
 class TestSessionBusyNoReservation:
     @pytest.mark.asyncio
-    async def test_session_busy_no_budget_reservation(self):
+    async def test_session_busy_raises_gateway_error(self):
+        """SESSION_BUSY now propagates as GatewayError (handled by _handle_rpc_message)."""
         gate = _mock_budget_gate()
         ws = _make_mock_ws(budget_gate=gate, try_claim_result=None)
 
-        await _handle_chat_send(ws, "req-1", {"content": "hi", "session_id": "s1"})
+        from src.infra.errors import GatewayError
+
+        with pytest.raises(GatewayError) as exc_info:
+            await _handle_chat_send(ws, "req-1", {"content": "hi", "session_id": "s1"})
+
+        assert exc_info.value.code == "SESSION_BUSY"
 
         # Budget gate should never be touched
         gate.try_reserve.assert_not_called()
         gate.settle.assert_not_called()
-
-        # Should have sent SESSION_BUSY
-        sent = _sent_messages(ws)
-        assert any(m.get("error", {}).get("code") == "SESSION_BUSY" for m in sent)

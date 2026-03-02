@@ -14,6 +14,7 @@ from src.agent.model_client import OpenAICompatModelClient
 from src.agent.provider_registry import AgentLoopRegistry
 from src.config.settings import get_settings
 from src.gateway.budget_gate import BudgetGate
+from src.gateway.dispatch import dispatch_chat
 from src.gateway.protocol import (
     ChatHistoryParams,
     ChatSendParams,
@@ -42,31 +43,6 @@ from src.tools.builtins import register_builtins
 from src.tools.registry import ToolRegistry
 
 logger = structlog.get_logger()
-
-_EVAL_SESSION_PREFIX = "m6_eval_"
-
-# [ADR 0041] Phase 1: fixed per-request cost estimate.
-# Accurate per-model pricing + usage-based settle deferred to a future milestone.
-DEFAULT_RESERVE_EUR: float = 0.05
-
-
-def _extract_eval_run_id(session_id: str) -> str:
-    """Derive eval_run_id from session_id prefix convention.
-
-    Eval script uses session_id = "m6_eval_{provider}_{task}_{timestamp}".
-    Timestamp is always the last '_'-separated segment (numeric epoch).
-    Provider is always the 3rd segment (index 2).
-    Extract "m6_eval_{provider}_{timestamp}" as eval_run_id.
-    Online requests (session_id = "main" or other) return empty string.
-    """
-    if not session_id.startswith(_EVAL_SESSION_PREFIX):
-        return ""
-    parts = session_id.split("_")
-    if len(parts) >= 5:
-        provider = parts[2]
-        timestamp = parts[-1]
-        return f"m6_eval_{provider}_{timestamp}"
-    return session_id  # fallback: use full session_id as run_id
 
 
 @asynccontextmanager
@@ -254,137 +230,61 @@ async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
 async def _handle_chat_send(
     websocket: WebSocket, request_id: str, params: dict
 ) -> None:
-    """Handle chat.send: claim session, invoke agent loop, stream events, release."""
-    # 1. Params validation — ValidationError → GatewayError(INVALID_PARAMS)
+    """Handle chat.send: delegate to dispatch_chat, stream events over WebSocket."""
     try:
         parsed = ChatSendParams.model_validate(params)
     except ValidationError as e:
         raise GatewayError(str(e), code="INVALID_PARAMS") from e
 
-    # 2. Agent-run level provider routing — KeyError → GatewayError(PROVIDER_NOT_AVAILABLE)
     registry: AgentLoopRegistry = websocket.app.state.agent_loop_registry
-    try:
-        entry = registry.get(parsed.provider)
-    except KeyError:
-        raise GatewayError(
-            f"Provider '{parsed.provider}' is not available. "
-            f"Configured: {registry.available_providers()}",
-            code="PROVIDER_NOT_AVAILABLE",
-        )
-
-    agent_loop = entry.agent_loop
-    logger.info(
-        "agent_run_provider_bound",
-        provider=entry.name,
-        model=entry.model,
-        source="request" if parsed.provider else "default",
-    )
-
     session_manager: SessionManager = websocket.app.state.session_manager
+    budget_gate: BudgetGate = websocket.app.state.budget_gate
     settings = get_settings()
 
-    # [Decision 0021] Session-level serialization: try-claim before processing
-    lock_token = await session_manager.try_claim_session(
-        parsed.session_id,
-        ttl_seconds=settings.gateway.session_claim_ttl_seconds,
-    )
-    if lock_token is None:
-        error = RPCError(
-            id=request_id,
-            error=RPCErrorData(
-                code="SESSION_BUSY",
-                message="Session is being processed by another request. Please try again.",
-            ),
-        )
-        await websocket.send_text(error.model_dump_json())
-        return
-
-    budget_gate: BudgetGate = websocket.app.state.budget_gate
-    reservation = None
-    try:
-        # [Decision 0021] Force-reload session from DB before building prompt.
-        # Ensures cross-worker handoff has complete history, not stale local cache.
-        await session_manager.load_session_from_db(parsed.session_id, force=True)
-
-        # [ADR 0041] Budget gate: reserve before model invocation.
-        # Denied → raise immediately; handle_message is never called.
-        reservation = await budget_gate.try_reserve(
-            provider=entry.name,
-            model=entry.model,
-            estimated_cost_eur=DEFAULT_RESERVE_EUR,
-            session_id=parsed.session_id,
-            eval_run_id=_extract_eval_run_id(parsed.session_id),
-        )
-        if reservation.denied:
-            raise GatewayError(reservation.message, code="BUDGET_EXCEEDED")
-
-        async for event in agent_loop.handle_message(
-            session_id=parsed.session_id,
-            content=parsed.content,
-            lock_token=lock_token,
-        ):
-            if isinstance(event, TextChunk):
-                chunk = RPCStreamChunk(
-                    id=request_id,
-                    data=StreamChunkData(content=event.content, done=False),
-                )
-                await websocket.send_text(chunk.model_dump_json())
-            elif isinstance(event, ToolDenied):
-                denied_msg = RPCToolDenied(
-                    id=request_id,
-                    data=ToolDeniedData(
-                        call_id=event.call_id,
-                        tool_name=event.tool_name,
-                        mode=event.mode,
-                        error_code=event.error_code,
-                        message=event.message,
-                        next_action=event.next_action,
-                    ),
-                )
-                await websocket.send_text(denied_msg.model_dump_json())
-            elif isinstance(event, ToolCallInfo):
-                tool_msg = RPCToolCall(
-                    id=request_id,
-                    data=ToolCallData(
-                        tool_name=event.tool_name,
-                        arguments=event.arguments,
-                        call_id=event.call_id,
-                    ),
-                )
-                await websocket.send_text(tool_msg.model_dump_json())
-
-        done_chunk = RPCStreamChunk(
-            id=request_id,
-            data=StreamChunkData(content="", done=True),
-        )
-        await websocket.send_text(done_chunk.model_dump_json())
-    finally:
-        # [ADR 0041] Budget settle: best-effort reconciliation.
-        # Only settle if reservation was created and not denied.
-        if reservation is not None and not reservation.denied:
-            try:
-                await budget_gate.settle(
-                    reservation_id=reservation.reservation_id,
-                    actual_cost_eur=DEFAULT_RESERVE_EUR,
-                )
-            except Exception:
-                logger.exception(
-                    "budget_settle_failed",
-                    reservation_id=reservation.reservation_id,
-                    session_id=parsed.session_id,
-                    provider=entry.name,
-                    model=entry.model,
-                )
-        try:
-            await session_manager.release_session(parsed.session_id, lock_token)
-        except Exception:
-            # [Decision 0022] release is best-effort; TTL recovers stale locks.
-            # Do NOT re-raise — avoid sending INTERNAL_ERROR after done=true.
-            logger.exception(
-                "session_release_failed",
-                session_id=parsed.session_id,
-                msg="Lock will be recovered by TTL expiry",
+    async for event in dispatch_chat(
+        registry=registry,
+        session_manager=session_manager,
+        budget_gate=budget_gate,
+        session_id=parsed.session_id,
+        content=parsed.content,
+        provider=parsed.provider,
+        session_claim_ttl_seconds=settings.gateway.session_claim_ttl_seconds,
+    ):
+        if isinstance(event, TextChunk):
+            chunk = RPCStreamChunk(
+                id=request_id,
+                data=StreamChunkData(content=event.content, done=False),
             )
+            await websocket.send_text(chunk.model_dump_json())
+        elif isinstance(event, ToolDenied):
+            denied_msg = RPCToolDenied(
+                id=request_id,
+                data=ToolDeniedData(
+                    call_id=event.call_id,
+                    tool_name=event.tool_name,
+                    mode=event.mode,
+                    error_code=event.error_code,
+                    message=event.message,
+                    next_action=event.next_action,
+                ),
+            )
+            await websocket.send_text(denied_msg.model_dump_json())
+        elif isinstance(event, ToolCallInfo):
+            tool_msg = RPCToolCall(
+                id=request_id,
+                data=ToolCallData(
+                    tool_name=event.tool_name,
+                    arguments=event.arguments,
+                    call_id=event.call_id,
+                ),
+            )
+            await websocket.send_text(tool_msg.model_dump_json())
+
+    done_chunk = RPCStreamChunk(
+        id=request_id,
+        data=StreamChunkData(content="", done=True),
+    )
+    await websocket.send_text(done_chunk.model_dump_json())
 
 
 async def _handle_chat_history(
