@@ -11,14 +11,6 @@
 - 以"对抗熵增"为核心设计目标：在满足需求的前提下，优先选择更少概念、更少依赖、更短路径的实现。
 - 所有实现在提交前增加一轮"极简审阅"：删除非必要抽象、重复逻辑和可合并配置，以换取长期成长性。
 
-## 项目状态
-
-**当前阶段：M4 已完成（含 post-review 修正），M5 触发式进入。**
-
-当前基线：686 tests 全绿，ruff clean，CI 已落地。
-已完成里程碑：M0 → M1.x → M2 → M3 → M6 → M7 → M4。
-下一阶段优先级以 `design_docs/roadmap_milestones_v3.md` 为准。
-
 ## 项目结构
 
 ```
@@ -80,6 +72,7 @@ neomagi/
 - 开始改动前固定执行：`pwd && git branch --show-current && git status --short`
 - 未经确认禁止执行破坏性操作（强制覆盖、批量删除、历史重写）
 - **Agent Teams worktree 规则**：PM 负责维护，teammate 必须遵守。必须使用 git worktree 隔离并行开发，每个 teammate 独立 worktree，PM 负责创建/合并/清理。分支命名：`feat/<role>-<milestone>-<owner-or-task>`。切换 worktree 后先确认变更已迁移到目标分支。完整治理协议见 `AGENTTEAMS.md`。
+- **Tester review branch 规则**：遵循 `one gate one review branch`。tester 的 review branch 一旦 push 即视为不可变审阅产物；同一 Gate 的 re-review 也必须新开 fresh tester worktree + branch，如 `feat/tester-m4-g0`、`feat/tester-m4-g0-r2`。Claude Code tester 不执行 `git push --force-with-lease`；若 push 需要 force，必须立即停下并回报 `blocked`，由 PM 提供新的 review branch/worktree。
 
 ## Agent Teams 治理
 

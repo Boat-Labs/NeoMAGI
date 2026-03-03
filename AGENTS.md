@@ -67,6 +67,12 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 
 - 每个角色只允许在自己的 worktree 工作，禁止跨目录读写执行态产物。
 - Backend phase 完成后必须先 `commit + push`，再向 PM 回传 `phase` 与 `commit sha`。
+- `one gate one review branch`（强制）：Tester review 分支必须是 fresh、一次性的 review branch，禁止跨多个 Gate/验收轮次复用同一个 tester 分支。
+- 同一 Gate 的 re-review 也必须新开 fresh review branch，不得在上一轮 review branch 上改写历史继续提交。
+- Tester review 产物分支一旦 push，即视为不可变审阅产物；后续补充意见必须在新的 review branch 上提交。
+- 默认做法：PM 为每个 Gate（以及同 Gate 的 re-review）创建新的 tester worktree + branch；建议命名如 `feat/tester-m4-g0`、`feat/tester-m4-g0-r2`、`feat/tester-m4-g1`。
+- Tester 工作流必须设计成只需要普通 `git push`，不依赖 `git push --force-with-lease`。
+- 若当前 tester 分支历史已需要 force-push，tester 必须立即回报 `blocked`；PM 必须改为创建 fresh review branch/worktree，不得要求 tester 在原分支上重写历史。
 - Tester 启动 Gate 验收前必须执行并回传结果：
   - `git fetch --all --prune`
   - `git merge --ff-only origin/<backend-branch>`（或明确约定 rebase）
@@ -127,6 +133,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 每个 teammate 在独立 worktree 中工作，禁止多人共享同一 working directory。
 - PM 负责在 spawn 前创建 worktree，在阶段完成后合并和清理。
 - 分支命名：`feat/<role>-<milestone>-<owner-or-task>`（如 `feat/backend-m1.1-agent-loop`）。
+- Tester review branch 采用一次性命名，按 Gate/轮次切新分支；tester 不改写已 push 的 review 产物分支历史。
 - 开始改动前固定执行：`pwd && git branch --show-current && git status --short`。
 - 清理或切换 worktree 后，先确认变更已迁移到目标分支，再继续开发或测试。
 
@@ -161,14 +168,11 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - devcoord 控制面写操作统一使用 `uv run python scripts/devcoord/coord.py ...`，优先走结构化 payload（`--payload-file` / `--payload-stdin`）。
 - 修复/重构任务提交时需附验证结果摘要（命令与通过概况）。
 
-## Agent 工作日志（临时降级策略）
-- 状态：M1.5 阶段临时降级为“非阻塞”。
-- 作用域：本降级仅适用于 role 经验日志，不适用于协作控制日志。
-- 原因：Agent Teams 当前存在指令未稳定透传到 agent 层的问题。
-- 执行：保留 `dev_docs/logs/{milestone}_{YYYY-MM-DD}/` 目录；协作控制三件套由 `scripts/devcoord/coord.py render` 生成，各 role 日志改为尽力提供。
+## Agent 工作日志策略
+- 作用域：本策略仅适用于 role 经验日志，不适用于协作控制日志。
+- 执行：保留 `dev_docs/logs/{milestone}_{YYYY-MM-DD}/` 目录；协作控制三件套由 `scripts/devcoord/coord.py render` 生成，各 role 经验日志为 best-effort。
+- 门槛：role 经验日志不作为阻塞条件；缺少协作控制日志则阻塞。
 - 协作控制日志（`heartbeat_events.jsonl`、`gate_state.md`、`watchdog_status.md`）仍为强制门槛，必须按“协作控制与活性治理”章节执行。
-- 验收：当前阶段不因缺少单个 role 经验日志而阻塞；缺少协作控制日志则阻塞。
-- 恢复条件：并行流程连续 3 次无透传丢失后，恢复为强制门槛。
 - 如提交 role 日志，仍建议包含：技能/工具名称、调用次数、典型场景、效果评估。
 - 如提交 role 日志，需保持脱敏，禁止记录密钥、token、隐私原文。
 
