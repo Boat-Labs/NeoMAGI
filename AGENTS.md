@@ -250,11 +250,11 @@ bd close bd-42 --reason "Completed" --json
 
 ### Auto-Sync
 
-bd automatically syncs via Dolt:
+bd 的 issue 数据仍存于本地 beads / Dolt 仓库，但本项目**不直接使用** `bd dolt pull` / `bd dolt push` / `bd sync` 做远端同步：
 
-- Each write auto-commits to Dolt history
-- Use `bd dolt push`/`bd dolt pull` for remote sync
-- No manual export/import needed!
+- Each write auto-commits to local Dolt history
+- 由于远端使用 GitHub 承载、路径与本地 Dolt remote 约定不一致，统一通过 `just beads-pull` / `just beads-push` 同步
+- 不要直接运行 `bd dolt pull` / `bd dolt push` / `bd sync`
 
 ### Important Rules
 
@@ -282,7 +282,8 @@ For more details, see README.md and docs/QUICKSTART.md.
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
+   just beads-pull
+   just beads-push
    git push
    git status  # MUST show "up to date with origin"
    ```

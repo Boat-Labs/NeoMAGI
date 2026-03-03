@@ -110,6 +110,7 @@ neomagi/
 - 不确定的设计决策，先写 TODO 注释标记，不要自行决定
 - 常用开发任务优先通过 `just` 执行，避免散落命令；devcoord 控制面协议写操作除外，统一直接调用 `uv run python scripts/devcoord/coord.py`
 - devcoord 协作控制的 append-first 落点是 beads 事件；`dev_docs/logs/*` 和 `dev_docs/progress/project_progress.md` 只作为 `render` 生成的 projection，不直接手写。
+- beads 远端同步统一使用 `just beads-pull` / `just beads-push`；不要使用 `bd sync` 或 `bd dolt pull` / `bd dolt push`。原因：本项目不直接依赖 Dolt remote，GitHub 承载路径与本地 Dolt remote 约定不一致。
 
 ## M0 决策追踪（多管道统一）
 
