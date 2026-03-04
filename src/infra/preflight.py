@@ -77,6 +77,31 @@ async def run_preflight(settings: Settings, db_engine: AsyncEngine) -> Preflight
     return report
 
 
+async def run_readiness_checks(settings: Settings, db_engine: AsyncEngine) -> PreflightReport:
+    """Execute lightweight runtime checks for /health/ready (no side effects).
+
+    Subset of preflight: C3-C9 only. Excludes:
+    - C2 (static config, doesn't change after startup)
+    - C10 (external API call to Telegram)
+    - C11 (has write side effects)
+    """
+    checks: list[CheckResult] = []
+
+    checks.append(_check_workspace_path_consistency(settings))
+    checks.append(_check_workspace_dirs(settings))
+
+    db_result = await _check_db_connection(db_engine)
+    checks.append(db_result)
+
+    if db_result.status != CheckStatus.FAIL:
+        checks.append(await _check_schema_tables(db_engine))
+        checks.append(await _check_search_trigger(db_engine))
+        checks.append(await _check_budget_tables(db_engine))
+        checks.append(await _check_soul_versions_readable(db_engine))
+
+    return PreflightReport(checks=checks)
+
+
 # ── C2: active provider configuration ──
 
 
@@ -173,6 +198,18 @@ def _check_workspace_dirs(settings: Settings) -> CheckResult:
             evidence=f"memory/ subdirectory does not exist: {memory_dir}",
             impact="Cannot store daily notes",
             next_action="Create workspace/memory/ directory",
+        )
+
+    try:
+        with tempfile.NamedTemporaryFile(dir=memory_dir, delete=True):
+            pass
+    except OSError as e:
+        return CheckResult(
+            name="workspace_dirs",
+            status=CheckStatus.FAIL,
+            evidence=f"memory/ subdirectory not writable: {e}",
+            impact="Cannot write daily notes to memory directory",
+            next_action="Fix filesystem permissions on workspace/memory/ directory",
         )
 
     return CheckResult(

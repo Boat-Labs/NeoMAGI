@@ -18,11 +18,10 @@ import pytest
 from src.agent.agent import AgentLoop
 from src.agent.events import TextChunk
 from src.agent.memory_flush import MemoryFlushCandidate
-from src.config.settings import GatewaySettings, MemorySettings, TelegramSettings
+from src.config.settings import MemorySettings
 from src.gateway.budget_gate import Reservation
 from src.gateway.dispatch import DEFAULT_RESERVE_EUR, dispatch_chat
 from src.session.scope_resolver import SessionIdentity, resolve_scope_key, resolve_session_key
-
 
 # ---------------------------------------------------------------------------
 # Helpers

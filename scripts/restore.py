@@ -6,6 +6,7 @@ Steps:
   1. Check pg_restore availability
   2. pg_restore DB truth-source (--clean)
   3. ensure_schema() — guarantee memory_entries table + triggers
+  3.5. Clear workspace memory files before extract
   4. Extract workspace memory archive
   5. reconcile_soul_projection() — rebuild SOUL.md from DB
   6. TRUNCATE memory_entries — clear stale index
@@ -53,6 +54,33 @@ def _get_dsn() -> str:
     return f"postgresql://{db.user}{password_part}@{db.host}:{db.port}/{db.name}"
 
 
+def _assert_workspace_path_consistency() -> Path:
+    """Fail-fast guard: workspace_dir must equal memory.workspace_path.
+
+    ADR 0037: workspace_dir is the single source of truth.
+    backup/restore are standalone CLIs that don't run preflight C3,
+    so they must self-check.
+    """
+    from src.config.settings import get_settings
+
+    settings = get_settings()
+    ws = settings.workspace_dir.resolve()
+    mem_ws = settings.memory.workspace_path.resolve()
+    if ws != mem_ws:
+        logger.error(
+            "workspace_path_mismatch",
+            workspace_dir=str(ws),
+            memory_workspace_path=str(mem_ws),
+        )
+        print(  # noqa: T201
+            f"ERROR: workspace_dir ({ws}) != memory.workspace_path ({mem_ws}).\n"
+            f"Fix configuration. See ADR 0037.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return ws
+
+
 async def run_restore(db_dump: Path, workspace_archive: Path) -> None:
     from sqlalchemy import text
 
@@ -89,16 +117,27 @@ async def run_restore(db_dump: Path, workspace_archive: Path) -> None:
 
     # --- Step 3: ensure_schema ---
     settings = get_settings()
+    workspace = _assert_workspace_path_consistency()
     engine = await create_db_engine(settings.database)
     try:
         await ensure_schema(engine, DB_SCHEMA)
         results.append(("3. ensure_schema", "OK"))
         logger.info("restore_step_3_done")
 
+        # --- Step 3.5: Clear workspace memory files before extract ---
+        memory_dir = workspace / "memory"
+        if memory_dir.is_dir():
+            shutil.rmtree(memory_dir)
+        memory_md = workspace / "MEMORY.md"
+        if memory_md.is_file():
+            memory_md.unlink()
+        results.append(("3.5. Clear workspace memory", "OK"))
+        logger.info("restore_step_3_5_done", cleared_dir=str(workspace))
+
         # --- Step 4: Extract workspace archive ---
         logger.info("restore_step_4_start", archive=str(workspace_archive))
         proc = subprocess.run(
-            ["tar", "xzf", str(workspace_archive)],
+            ["tar", "xzf", str(workspace_archive), "-C", str(workspace)],
             capture_output=True,
             text=True,
             timeout=120,
@@ -113,8 +152,7 @@ async def run_restore(db_dump: Path, workspace_archive: Path) -> None:
 
         # --- Step 5: reconcile_soul_projection ---
         session_factory = make_session_factory(engine)
-        workspace_path = settings.memory.workspace_path
-        evolution = EvolutionEngine(session_factory, workspace_path, settings.memory)
+        evolution = EvolutionEngine(session_factory, workspace, settings.memory)
         reconcile_changed = False
         try:
             await evolution.reconcile_soul_projection()

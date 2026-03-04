@@ -57,6 +57,33 @@ def _get_dsn() -> str:
     return f"postgresql://{db.user}{password_part}@{db.host}:{db.port}/{db.name}"
 
 
+def _assert_workspace_path_consistency() -> Path:
+    """Fail-fast guard: workspace_dir must equal memory.workspace_path.
+
+    ADR 0037: workspace_dir is the single source of truth.
+    backup/restore are standalone CLIs that don't run preflight C3,
+    so they must self-check.
+    """
+    from src.config.settings import get_settings
+
+    settings = get_settings()
+    ws = settings.workspace_dir.resolve()
+    mem_ws = settings.memory.workspace_path.resolve()
+    if ws != mem_ws:
+        logger.error(
+            "workspace_path_mismatch",
+            workspace_dir=str(ws),
+            memory_workspace_path=str(mem_ws),
+        )
+        print(  # noqa: T201
+            f"ERROR: workspace_dir ({ws}) != memory.workspace_path ({mem_ws}).\n"
+            f"Fix configuration. See ADR 0037.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return ws
+
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -71,6 +98,7 @@ def run_backup(output_dir: Path) -> None:
 
     pg_dump = _check_pg_dump()
     dsn = _get_dsn()
+    workspace = _assert_workspace_path_consistency()
 
     # --- Step 1: pg_dump truth-source tables ---
     dump_file = output_dir / f"neomagi_{timestamp}.dump"
@@ -88,18 +116,15 @@ def run_backup(output_dir: Path) -> None:
     logger.info("pg_dump_done", file=str(dump_file))
 
     # --- Step 2: tar workspace memory files ---
-    workspace = Path("workspace")
     archive_file = output_dir / f"workspace_memory_{timestamp}.tar.gz"
     tar_sources: list[str] = []
-    memory_dir = workspace / "memory"
-    memory_md = workspace / "MEMORY.md"
-    if memory_dir.is_dir():
-        tar_sources.append(str(memory_dir))
-    if memory_md.is_file():
-        tar_sources.append(str(memory_md))
+    if (workspace / "memory").is_dir():
+        tar_sources.append("memory")
+    if (workspace / "MEMORY.md").is_file():
+        tar_sources.append("MEMORY.md")
 
     if tar_sources:
-        tar_cmd = ["tar", "czf", str(archive_file), *tar_sources]
+        tar_cmd = ["tar", "czf", str(archive_file), "-C", str(workspace), *tar_sources]
         logger.info("tar_start", sources=tar_sources, output=str(archive_file))
         result = subprocess.run(tar_cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:

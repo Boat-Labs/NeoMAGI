@@ -21,7 +21,6 @@ from src.gateway.dispatch import DEFAULT_RESERVE_EUR, dispatch_chat
 from src.gateway.protocol import ChatHistoryParams, ChatSendParams
 from src.infra.errors import GatewayError
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

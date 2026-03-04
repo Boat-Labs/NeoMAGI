@@ -2,6 +2,7 @@
 
 CheckStatus / CheckResult / PreflightReport — structured evidence output
 for startup checks (preflight) and runtime diagnostics (doctor).
+ComponentHealthTracker — in-process health state for readiness evaluation.
 """
 
 from __future__ import annotations
@@ -71,3 +72,32 @@ class PreflightReport:
         status = "PASS" if self.passed else "FAIL"
         lines.append(f"--- preflight {status} ({len(self.checks)} checks) ---")
         return "\n".join(lines)
+
+
+class ComponentHealthTracker:
+    """In-process health state for readiness evaluation.
+
+    Updated by model_client (provider) and app lifespan (telegram).
+    Read by /health/ready endpoint. No locks needed: single-process asyncio.
+    """
+
+    PROVIDER_FAILURE_THRESHOLD = 5
+
+    def __init__(self) -> None:
+        self.telegram_healthy: bool = True
+        self.telegram_error: str | None = None
+        self.provider_consecutive_failures: int = 0
+
+    @property
+    def provider_healthy(self) -> bool:
+        return self.provider_consecutive_failures < self.PROVIDER_FAILURE_THRESHOLD
+
+    def record_provider_success(self) -> None:
+        self.provider_consecutive_failures = 0
+
+    def record_provider_failure(self) -> None:
+        self.provider_consecutive_failures += 1
+
+    def record_telegram_failure(self, error: str) -> None:
+        self.telegram_healthy = False
+        self.telegram_error = error

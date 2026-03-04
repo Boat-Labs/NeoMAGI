@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.channels.telegram_render import (
     format_for_telegram,
     friendly_error_message,
     split_message,
 )
-
 
 # ── split_message ────────────────────────────────────────────────────────────
 

@@ -64,9 +64,12 @@ def _make_restore_patches(
 
     mock_subprocess = patch("scripts.restore.subprocess.run", side_effect=track_subprocess)
 
+    workspace = tmp_path / "workspace"
+    workspace.mkdir(exist_ok=True)
     mock_settings = MagicMock()
     mock_settings.database = MagicMock()
-    mock_settings.memory.workspace_path = tmp_path / "workspace"
+    mock_settings.workspace_dir = workspace
+    mock_settings.memory.workspace_path = workspace
     mock_get_settings = patch(
         "src.config.settings.get_settings", return_value=mock_settings
     )
@@ -184,6 +187,8 @@ class TestRunRestore:
             "step7_reindex",
             "step8_preflight",
         ]
+        # Step 3.5 (clear workspace memory) is real file I/O, not mocked —
+        # tested separately in test_clear_workspace_before_extract.
 
     @pytest.mark.asyncio
     async def test_preflight_fail_exits(self, tmp_path: Path) -> None:
@@ -242,6 +247,101 @@ class TestRunRestore:
 
         assert pg_restore_idx < ensure_idx < truncate_idx < reindex_idx
 
+    @pytest.mark.asyncio
+    async def test_clear_workspace_before_extract(self, tmp_path: Path) -> None:
+        """Step 3.5: residual memory files must be cleared before tar extract."""
+        from scripts.restore import run_restore
+
+        execution_log: list[str] = []
+        patches = _make_restore_patches(tmp_path, execution_log=execution_log)
+
+        # Pre-create residual files in workspace
+        workspace = tmp_path / "workspace"
+        workspace.mkdir(exist_ok=True)
+        mem_dir = workspace / "memory"
+        mem_dir.mkdir()
+        (mem_dir / "old-note.md").write_text("residual data")
+        (workspace / "MEMORY.md").write_text("old curated memory")
+        # Also create a non-memory file that should NOT be deleted
+        (workspace / "SOUL.md").write_text("soul content")
+
+        db_dump = tmp_path / "test.dump"
+        db_dump.write_bytes(b"fake")
+        ws_archive = tmp_path / "test.tar.gz"
+        ws_archive.write_bytes(b"fake")
+
+        with patches[0], patches[1], patches[2], patches[3], patches[4], \
+             patches[5], patches[6], patches[7], patches[8], patches[9]:
+            await run_restore(db_dump, ws_archive)
+
+        # memory/ dir and MEMORY.md should be cleared (by step 3.5)
+        # tar mock doesn't recreate them, so they should be gone
+        assert not mem_dir.exists()
+        assert not (workspace / "MEMORY.md").exists()
+        # SOUL.md should be preserved
+        assert (workspace / "SOUL.md").exists()
+
+    @pytest.mark.asyncio
+    async def test_tar_uses_workspace_dir(self, tmp_path: Path) -> None:
+        """Step 4 tar must use -C <workspace_dir> from settings."""
+        from scripts.restore import run_restore
+
+        execution_log: list[str] = []
+        tar_commands: list[list] = []
+
+        # Override the patches to capture the exact tar command
+        patches = _make_restore_patches(tmp_path, execution_log=execution_log)
+
+        def track_subprocess_with_tar(cmd, **kwargs):
+            if "tar" in str(cmd[0]):
+                tar_commands.append(list(cmd))
+                execution_log.append("step4_tar_extract")
+            elif "pg_restore" in str(cmd[0]):
+                execution_log.append("step2_pg_restore")
+            return MagicMock(returncode=0, stderr="", stdout="")
+
+        mock_subprocess_override = patch(
+            "scripts.restore.subprocess.run", side_effect=track_subprocess_with_tar
+        )
+
+        db_dump = tmp_path / "test.dump"
+        db_dump.write_bytes(b"fake")
+        ws_archive = tmp_path / "test.tar.gz"
+        ws_archive.write_bytes(b"fake")
+
+        with patches[0], patches[1], mock_subprocess_override, patches[3], patches[4], \
+             patches[5], patches[6], patches[7], patches[8], patches[9]:
+            await run_restore(db_dump, ws_archive)
+
+        assert len(tar_commands) == 1
+        tar_cmd = tar_commands[0]
+        assert "-C" in tar_cmd
+        c_idx = tar_cmd.index("-C")
+        assert tar_cmd[c_idx + 1] == str((tmp_path / "workspace").resolve())
+
+
+class TestWorkspacePathGuard:
+    def test_path_mismatch_exits(self) -> None:
+        from scripts.restore import _assert_workspace_path_consistency
+
+        mock_settings = MagicMock()
+        mock_settings.workspace_dir = Path("/path/a")
+        mock_settings.memory.workspace_path = Path("/path/b")
+        with patch("src.config.settings.get_settings", return_value=mock_settings):
+            with pytest.raises(SystemExit) as exc_info:
+                _assert_workspace_path_consistency()
+            assert exc_info.value.code == 1
+
+    def test_path_match_returns_workspace(self, tmp_path: Path) -> None:
+        from scripts.restore import _assert_workspace_path_consistency
+
+        mock_settings = MagicMock()
+        mock_settings.workspace_dir = tmp_path
+        mock_settings.memory.workspace_path = tmp_path
+        with patch("src.config.settings.get_settings", return_value=mock_settings):
+            result = _assert_workspace_path_consistency()
+            assert result == tmp_path.resolve()
+
 
 class TestRestoreCli:
     def test_restore_help(self) -> None:
@@ -250,7 +350,7 @@ class TestRestoreCli:
             capture_output=True,
             text=True,
             timeout=10,
-            cwd="/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/.claude/worktrees/backend-m5",
+            cwd=str(Path(__file__).resolve().parent.parent),
         )
         assert result.returncode == 0
         assert "--db-dump" in result.stdout
@@ -269,6 +369,6 @@ class TestRestoreCli:
             capture_output=True,
             text=True,
             timeout=10,
-            cwd="/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/.claude/worktrees/backend-m5",
+            cwd=str(Path(__file__).resolve().parent.parent),
         )
         assert result.returncode != 0

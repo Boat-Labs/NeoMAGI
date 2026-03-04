@@ -27,6 +27,7 @@ from src.infra.preflight import (
     _check_workspace_dirs,
     _check_workspace_path_consistency,
 )
+from src.memory.indexer import MemoryIndexer
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -237,7 +238,10 @@ async def _check_memory_index_health(
                 content = filepath.read_text(encoding="utf-8").strip()
                 if content:
                     sections = re.split(r"^---$", content, flags=re.MULTILINE)
-                    file_count += sum(1 for s in sections if s.strip())
+                    file_count += sum(
+                        1 for s in sections
+                        if s.strip() and MemoryIndexer._extract_entry_text(s.strip())
+                    )
 
         memory_md = ws_path / "MEMORY.md"
         if memory_md.is_file():
@@ -509,7 +513,10 @@ async def _check_memory_reindex_dryrun(
                 if not content:
                     continue
                 sections = re.split(r"^---$", content, flags=re.MULTILINE)
-                count = sum(1 for s in sections if s.strip())
+                count = sum(
+                    1 for s in sections
+                    if s.strip() and MemoryIndexer._extract_entry_text(s.strip())
+                )
                 if count:
                     rel = str(filepath.relative_to(ws_path))
                     expected[rel] = count

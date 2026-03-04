@@ -54,7 +54,10 @@ class TestHandleMessageIdentity:
         )
 
         # We patch resolve_scope_key to capture what it receives
-        with patch("src.agent.agent.resolve_scope_key", return_value="telegram:peer:456") as mock_rsk:
+        with patch(
+            "src.agent.agent.resolve_scope_key",
+            return_value="telegram:peer:456",
+        ) as mock_rsk:
             # The LLM call will fail since model_client is a mock — that's OK,
             # we only need to verify scope resolution params.
             try:

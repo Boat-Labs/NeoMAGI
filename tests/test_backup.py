@@ -62,19 +62,16 @@ class TestRunBackup:
         mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
 
         # Create workspace dirs for tar
-        ws = tmp_path / "workspace" / "memory"
-        ws.mkdir(parents=True)
-        (ws / "test.md").write_text("test")
-        (tmp_path / "workspace" / "MEMORY.md").write_text("test")
+        ws = tmp_path / "workspace"
+        (ws / "memory").mkdir(parents=True)
+        (ws / "memory" / "test.md").write_text("test")
+        (ws / "MEMORY.md").write_text("test")
 
         output_dir = tmp_path / "backups"
 
-        ws_patch = patch(
-            "scripts.backup.Path",
-            side_effect=lambda x: tmp_path / x if x == "workspace" else Path(x),
-        )
-        with ws_patch:
-            # Simplified: just test the pg_dump call args
+        with patch(
+            "scripts.backup._assert_workspace_path_consistency", return_value=ws.resolve()
+        ):
             run_backup(output_dir)
 
         # First subprocess.run call should be pg_dump
@@ -97,6 +94,40 @@ class TestRunBackup:
     @patch("scripts.backup.subprocess.run")
     @patch("scripts.backup._check_pg_dump", return_value="/usr/bin/pg_dump")
     @patch("scripts.backup._get_dsn", return_value="postgresql://user@localhost/neomagi")
+    def test_tar_uses_workspace_dir(
+        self,
+        mock_dsn: MagicMock,
+        mock_check: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """tar must use -C <workspace_dir> from settings, not hardcoded Path('workspace')."""
+        from scripts.backup import run_backup
+
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+
+        ws = tmp_path / "custom_ws"
+        (ws / "memory").mkdir(parents=True)
+        (ws / "memory" / "note.md").write_text("test")
+        (ws / "MEMORY.md").write_text("test")
+
+        output_dir = tmp_path / "backups"
+
+        with patch(
+            "scripts.backup._assert_workspace_path_consistency", return_value=ws.resolve()
+        ):
+            run_backup(output_dir)
+
+        # Second subprocess.run call should be tar
+        tar_call = mock_run.call_args_list[1]
+        cmd = tar_call[0][0]
+        assert "-C" in cmd
+        c_idx = cmd.index("-C")
+        assert cmd[c_idx + 1] == str(ws.resolve())
+
+    @patch("scripts.backup.subprocess.run")
+    @patch("scripts.backup._check_pg_dump", return_value="/usr/bin/pg_dump")
+    @patch("scripts.backup._get_dsn", return_value="postgresql://user@localhost/neomagi")
     def test_manifest_created(
         self,
         mock_dsn: MagicMock,
@@ -108,12 +139,12 @@ class TestRunBackup:
 
         mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
         output_dir = tmp_path / "backups"
+        ws = tmp_path / "workspace"
+        ws.mkdir()
 
-        ws_patch = patch(
-            "scripts.backup.Path",
-            side_effect=lambda x: tmp_path / x if x == "workspace" else Path(x),
-        )
-        with ws_patch:
+        with patch(
+            "scripts.backup._assert_workspace_path_consistency", return_value=ws.resolve()
+        ):
             run_backup(output_dir)
 
         manifest_files = list(output_dir.glob("manifest_*.txt"))
@@ -135,10 +166,38 @@ class TestRunBackup:
 
         mock_run.return_value = MagicMock(returncode=1, stderr="connection refused", stdout="")
         output_dir = tmp_path / "backups"
+        ws = tmp_path / "workspace"
+        ws.mkdir()
 
-        with pytest.raises(SystemExit) as exc_info:
-            run_backup(output_dir)
-        assert exc_info.value.code == 1
+        with patch(
+            "scripts.backup._assert_workspace_path_consistency", return_value=ws.resolve()
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                run_backup(output_dir)
+            assert exc_info.value.code == 1
+
+
+class TestBackupWorkspacePathGuard:
+    def test_path_mismatch_exits(self) -> None:
+        from scripts.backup import _assert_workspace_path_consistency
+
+        mock_settings = MagicMock()
+        mock_settings.workspace_dir = Path("/path/a")
+        mock_settings.memory.workspace_path = Path("/path/b")
+        with patch("src.config.settings.get_settings", return_value=mock_settings):
+            with pytest.raises(SystemExit) as exc_info:
+                _assert_workspace_path_consistency()
+            assert exc_info.value.code == 1
+
+    def test_path_match_returns_workspace(self, tmp_path: Path) -> None:
+        from scripts.backup import _assert_workspace_path_consistency
+
+        mock_settings = MagicMock()
+        mock_settings.workspace_dir = tmp_path
+        mock_settings.memory.workspace_path = tmp_path
+        with patch("src.config.settings.get_settings", return_value=mock_settings):
+            result = _assert_workspace_path_consistency()
+            assert result == tmp_path.resolve()
 
 
 class TestBackupCli:
@@ -150,7 +209,7 @@ class TestBackupCli:
             capture_output=True,
             text=True,
             timeout=10,
-            cwd="/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/.claude/worktrees/backend-m5",
+            cwd=str(Path(__file__).resolve().parent.parent),
         )
         assert result.returncode == 0
         assert "--output-dir" in result.stdout

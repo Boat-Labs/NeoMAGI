@@ -292,6 +292,25 @@ class TestCheckMemoryIndexHealth:
         assert r.status == CheckStatus.OK
 
     @pytest.mark.asyncio
+    async def test_metadata_only_entries_not_counted(self, tmp_path: Path) -> None:
+        """Entries with only metadata lines (e.g. [HH:MM] ...) should not be counted."""
+        mem_dir = tmp_path / "memory"
+        mem_dir.mkdir()
+        # 3 sections: 2 with real content, 1 metadata-only
+        (mem_dir / "2026-01-01.md").write_text(
+            "[12:00] (source: test, scope: main)\nReal content here\n"
+            "---\n"
+            "[12:05] (source: test, scope: main)\n"  # metadata-only, no content
+            "---\n"
+            "[12:10] (source: test, scope: main)\nMore real content\n"
+        )
+        # DB has 2 (indexer skips metadata-only), doctor should match
+        engine = _mock_engine_with_responses({"COUNT": [(2,)]})
+        s = _make_settings(workspace_dir=tmp_path, memory_workspace_path=tmp_path)
+        r = await _check_memory_index_health(s, engine)
+        assert r.status == CheckStatus.OK
+
+    @pytest.mark.asyncio
     async def test_exception_is_warn(self) -> None:
         engine = AsyncMock()
         engine.connect = MagicMock(side_effect=RuntimeError("boom"))

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
 import structlog
@@ -34,9 +34,9 @@ from src.gateway.protocol import (
     parse_rpc_request,
 )
 from src.infra.errors import GatewayError, NeoMAGIError
-from src.infra.health import CheckStatus, PreflightReport
+from src.infra.health import CheckResult, CheckStatus, ComponentHealthTracker, PreflightReport
 from src.infra.logging import setup_logging
-from src.infra.preflight import run_preflight
+from src.infra.preflight import run_preflight, run_readiness_checks
 from src.memory.indexer import MemoryIndexer
 from src.memory.searcher import MemorySearcher
 from src.memory.writer import MemoryWriter
@@ -51,15 +51,26 @@ logger = structlog.get_logger()
 _TELEGRAM_SHUTDOWN_TIMEOUT_S = 3.0
 
 
-def _on_polling_done(task: asyncio.Task) -> None:
-    """Callback for telegram polling task: fail-fast on fatal error."""
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc:
-        logger.error("telegram_polling_fatal", error=str(exc))
-        # fail-fast: personal agent should not silently degrade
-        os.kill(os.getpid(), signal.SIGTERM)
+def _make_polling_done_callback(
+    tracker: ComponentHealthTracker,
+) -> Callable[[asyncio.Task], None]:
+    """Create callback for telegram polling task: update tracker + fail-fast on fatal error."""
+
+    def _on_polling_done(task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            tracker.record_telegram_failure(str(exc))
+            logger.error("telegram_polling_fatal", error=str(exc))
+            # fail-fast: personal agent should not silently degrade
+            os.kill(os.getpid(), signal.SIGTERM)
+
+    return _on_polling_done
+
+
+# Backward-compat export for tests/import sites that reference the old symbol directly.
+_on_polling_done = _make_polling_done_callback(ComponentHealthTracker())
 
 
 async def _shutdown_telegram(
@@ -164,6 +175,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             evolution_engine=evolution_engine,
         )
 
+    # In-process component health state (F1 three-layer readiness)
+    health_tracker = ComponentHealthTracker()
+
     # Build registry
     registry = AgentLoopRegistry(default_provider=settings.provider.active)
 
@@ -171,6 +185,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     openai_client = OpenAICompatModelClient(
         api_key=settings.openai.api_key,
         base_url=settings.openai.base_url,
+        health_tracker=health_tracker,
     )
     registry.register(
         "openai",
@@ -183,6 +198,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         gemini_client = OpenAICompatModelClient(
             api_key=settings.gemini.api_key,
             base_url=settings.gemini.base_url,
+            health_tracker=health_tracker,
         )
         registry.register(
             "gemini",
@@ -199,6 +215,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.agent_loop = registry.get().agent_loop
     app.state.session_manager = session_manager
     app.state.budget_gate = budget_gate
+    # Three-layer readiness state (F1)
+    app.state.db_engine = engine
+    app.state.settings = settings
+    app.state.health_tracker = health_tracker
     logger.info(
         "gateway_started",
         host=settings.gateway.host,
@@ -229,7 +249,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             telegram_adapter.start_polling(),
             name="telegram_polling",
         )
-        polling_task.add_done_callback(_on_polling_done)
+        polling_task.add_done_callback(_make_polling_done_callback(health_tracker))
         logger.info("telegram_adapter_started", username=telegram_adapter._bot_username)
 
     yield
@@ -264,20 +284,64 @@ async def health_live() -> dict[str, str]:
 
 @app.get("/health/ready")
 async def health_ready(request: Request) -> dict:
-    report: PreflightReport | None = getattr(request.app.state, "preflight_report", None)
-    if report is None or not report.passed:
+    """Three-layer readiness: real-time checks + startup latched + in-process state."""
+    startup_report: PreflightReport | None = getattr(
+        request.app.state, "preflight_report", None
+    )
+    if startup_report is None or not startup_report.passed:
         checks = {}
-        if report:
+        if startup_report:
             checks = {
                 c.name: {"status": c.status.value, "evidence": c.evidence}
-                for c in report.checks
+                for c in startup_report.checks
             }
         return {"status": "not_ready", "checks": checks}
+
+    settings = request.app.state.settings
+    engine = request.app.state.db_engine
+    tracker: ComponentHealthTracker = request.app.state.health_tracker
+
+    # Layer 1: real-time local checks (C3-C9, no external probes)
+    realtime = await run_readiness_checks(settings, engine)
+
+    # Layer 2: startup latched results (C2 + C11)
+    startup_checks = [
+        c for c in startup_report.checks if c.name in ("active_provider", "soul_reconcile")
+    ]
+
+    # Layer 3: in-process component health
+    component_checks: list[CheckResult] = []
+    if not tracker.telegram_healthy:
+        component_checks.append(
+            CheckResult(
+                name="telegram_runtime",
+                status=CheckStatus.FAIL,
+                evidence=f"Polling fatal: {tracker.telegram_error}",
+                impact="Telegram channel down",
+                next_action="Restart service",
+            )
+        )
+    if not tracker.provider_healthy:
+        component_checks.append(
+            CheckResult(
+                name="provider_runtime",
+                status=CheckStatus.FAIL,
+                evidence=(
+                    f"{tracker.provider_consecutive_failures} consecutive LLM failures"
+                ),
+                impact="LLM requests failing",
+                next_action="Check provider status",
+            )
+        )
+
+    all_checks = realtime.checks + startup_checks + component_checks
+    has_fail = any(c.status == CheckStatus.FAIL for c in all_checks)
+    status = "not_ready" if has_fail else "ready"
+
     return {
-        "status": "ready",
+        "status": status,
         "checks": {
-            c.name: {"status": c.status.value, "evidence": c.evidence}
-            for c in report.checks
+            c.name: {"status": c.status.value, "evidence": c.evidence} for c in all_checks
         },
     }
 

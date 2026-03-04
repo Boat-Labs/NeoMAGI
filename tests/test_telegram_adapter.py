@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,7 +11,6 @@ from src.channels.telegram import TelegramAdapter, _parse_allowed_ids
 from src.config.settings import GatewaySettings, TelegramSettings
 from src.infra.errors import ChannelError
 from src.session.scope_resolver import resolve_session_key
-
 
 # ---------------------------------------------------------------------------
 # Helpers

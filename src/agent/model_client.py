@@ -19,6 +19,7 @@ from openai import (
 from openai.types.chat import ChatCompletionMessage
 
 from src.infra.errors import LLMError
+from src.infra.health import ComponentHealthTracker
 
 logger = structlog.get_logger()
 
@@ -120,27 +121,39 @@ class OpenAICompatModelClient(ModelClient):
         *,
         max_retries: int = 3,
         base_delay: float = 1.0,
+        health_tracker: ComponentHealthTracker | None = None,
     ) -> None:
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self._max_retries = max_retries
         self._base_delay = base_delay
+        self._health_tracker = health_tracker
 
     async def _retry_call(
         self,
         coro_factory: Callable[[], Coroutine[Any, Any, T]],
         *,
         context: str = "",
+        defer_health: bool = False,
     ) -> T:
         """Execute an async call with exponential backoff retry.
 
         Retries on: APIConnectionError, APITimeoutError, RateLimitError.
         Non-retryable API errors are wrapped in LLMError.
+
+        When defer_health=True (streaming calls), success recording is deferred
+        to the caller (stream iteration completion). Failure is always recorded
+        immediately since no iteration phase will follow a creation failure.
         """
         for attempt in range(self._max_retries + 1):
             try:
-                return await coro_factory()
+                result = await coro_factory()
+                if not defer_health and self._health_tracker:
+                    self._health_tracker.record_provider_success()
+                return result
             except _RETRYABLE as e:
                 if attempt == self._max_retries:
+                    if self._health_tracker:
+                        self._health_tracker.record_provider_failure()
                     raise LLMError(
                         f"LLM call failed after {self._max_retries + 1} attempts: {e}"
                     ) from e
@@ -155,6 +168,8 @@ class OpenAICompatModelClient(ModelClient):
                 )
                 await asyncio.sleep(delay)
             except APIStatusError as e:
+                if self._health_tracker:
+                    self._health_tracker.record_provider_failure()
                 raise LLMError(f"LLM API error: {e.status_code} {e.message}") from e
         # Unreachable, but satisfies type checker
         raise LLMError("Retry loop exhausted")  # pragma: no cover
@@ -198,13 +213,21 @@ class OpenAICompatModelClient(ModelClient):
                 **({"temperature": temperature} if temperature is not None else {}),
             ),
             context="chat_stream",
+            defer_health=True,
         )
-        async for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            if delta.content:
-                yield delta.content
+        try:
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    yield delta.content
+            if self._health_tracker:
+                self._health_tracker.record_provider_success()
+        except Exception:
+            if self._health_tracker:
+                self._health_tracker.record_provider_failure()
+            raise
 
     async def chat_completion(
         self,
@@ -272,6 +295,7 @@ class OpenAICompatModelClient(ModelClient):
                 **({"temperature": temperature} if temperature is not None else {}),
             ),
             context="chat_stream_with_tools",
+            defer_health=True,
         )
 
         # Accumulate tool_calls delta fragments.
@@ -282,45 +306,53 @@ class OpenAICompatModelClient(ModelClient):
         fallback_seq = 0
         last_key: str | None = None
 
-        async for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
+        try:
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
 
-            # Content path: yield immediately
-            if delta.content:
-                yield ContentDelta(text=delta.content)
+                # Content path: yield immediately
+                if delta.content:
+                    yield ContentDelta(text=delta.content)
 
-            # Tool calls path: accumulate delta fragments
-            if delta.tool_calls:
-                for tc_delta in delta.tool_calls:
-                    if tc_delta.index is not None:
-                        key = f"idx:{tc_delta.index}"
-                    elif tc_delta.id:
-                        key = f"id:{tc_delta.id}"
-                    elif tc_delta.function and tc_delta.function.name:
-                        key = f"fallback:{fallback_seq}"
-                        fallback_seq += 1
-                    elif last_key is not None:
-                        # Best-effort continuation when provider omits both index and id.
-                        key = last_key
-                    else:
-                        key = f"fallback:{fallback_seq}"
-                        fallback_seq += 1
+                # Tool calls path: accumulate delta fragments
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        if tc_delta.index is not None:
+                            key = f"idx:{tc_delta.index}"
+                        elif tc_delta.id:
+                            key = f"id:{tc_delta.id}"
+                        elif tc_delta.function and tc_delta.function.name:
+                            key = f"fallback:{fallback_seq}"
+                            fallback_seq += 1
+                        elif last_key is not None:
+                            # Best-effort continuation when provider omits both index and id.
+                            key = last_key
+                        else:
+                            key = f"fallback:{fallback_seq}"
+                            fallback_seq += 1
 
-                    if key not in pending_tool_calls:
-                        pending_tool_calls[key] = {"id": "", "name": "", "arguments": ""}
-                        pending_order.append(key)
-                    entry = pending_tool_calls[key]
-                    last_key = key
+                        if key not in pending_tool_calls:
+                            pending_tool_calls[key] = {"id": "", "name": "", "arguments": ""}
+                            pending_order.append(key)
+                        entry = pending_tool_calls[key]
+                        last_key = key
 
-                    if tc_delta.id:
-                        entry["id"] = tc_delta.id
-                    if tc_delta.function:
-                        if tc_delta.function.name:
-                            entry["name"] = tc_delta.function.name
-                        if tc_delta.function.arguments:
-                            entry["arguments"] += tc_delta.function.arguments
+                        if tc_delta.id:
+                            entry["id"] = tc_delta.id
+                        if tc_delta.function:
+                            if tc_delta.function.name:
+                                entry["name"] = tc_delta.function.name
+                            if tc_delta.function.arguments:
+                                entry["arguments"] += tc_delta.function.arguments
+
+            if self._health_tracker:
+                self._health_tracker.record_provider_success()
+        except Exception:
+            if self._health_tracker:
+                self._health_tracker.record_provider_failure()
+            raise
 
         # After stream ends: yield accumulated tool calls if any
         if pending_tool_calls:

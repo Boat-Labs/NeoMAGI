@@ -161,6 +161,18 @@ class TestCheckWorkspaceDirs:
         assert r.status == CheckStatus.FAIL
         assert "memory/" in r.evidence
 
+    def test_memory_dir_not_writable(self, tmp_path: Path) -> None:
+        memory = tmp_path / "memory"
+        memory.mkdir()
+        memory.chmod(0o444)
+        try:
+            s = _make_settings(workspace_dir=tmp_path)
+            r = _check_workspace_dirs(s)
+            assert r.status == CheckStatus.FAIL
+            assert "not writable" in r.evidence
+        finally:
+            memory.chmod(0o755)
+
 
 # ── C5: db_connection ──
 
