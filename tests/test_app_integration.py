@@ -6,6 +6,7 @@ not just unit-level mocks.
 
 Extended (M3 post-review): tests for M3 tool wiring and ADR 0037 path validation.
 Extended (M4 post-review): F3 polling done callback tests.
+Extended (M5): preflight integration — run_preflight mocked for lifespan tests.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.gateway.app import _on_polling_done, _shutdown_telegram, lifespan
+from src.infra.health import PreflightReport
 
 
 def _make_mock_settings(tmp_path: Path) -> MagicMock:
@@ -50,6 +52,11 @@ def _make_mock_settings(tmp_path: Path) -> MagicMock:
     return settings
 
 
+def _mock_preflight_ok() -> PreflightReport:
+    """Return a passing preflight report."""
+    return PreflightReport(checks=[])
+
+
 @pytest.mark.asyncio
 async def test_agent_loop_has_compaction_settings(tmp_path):
     """Real lifespan path: AgentLoop._settings is not None."""
@@ -67,7 +74,8 @@ async def test_agent_loop_has_compaction_settings(tmp_path):
         patch("src.gateway.app.create_db_engine", return_value=fake_engine),
         patch("src.gateway.app.ensure_schema", return_value=None),
         patch("src.gateway.app.make_session_factory", return_value=fake_session_factory),
-        patch("src.gateway.app.EvolutionEngine") as mock_evolution_cls,
+        patch("src.gateway.app.run_preflight", return_value=_mock_preflight_ok()),
+        patch("src.memory.evolution.EvolutionEngine") as mock_evolution_cls,
     ):
         mock_evolution = AsyncMock()
         mock_evolution.reconcile_soul_projection = AsyncMock()
@@ -99,7 +107,8 @@ async def test_m3_tools_registered_and_wired(tmp_path):
         patch("src.gateway.app.create_db_engine", return_value=fake_engine),
         patch("src.gateway.app.ensure_schema", return_value=None),
         patch("src.gateway.app.make_session_factory", return_value=fake_session_factory),
-        patch("src.gateway.app.EvolutionEngine") as mock_evolution_cls,
+        patch("src.gateway.app.run_preflight", return_value=_mock_preflight_ok()),
+        patch("src.memory.evolution.EvolutionEngine") as mock_evolution_cls,
     ):
         mock_evolution = AsyncMock()
         mock_evolution.reconcile_soul_projection = AsyncMock()
@@ -151,7 +160,8 @@ async def test_empty_bot_token_skips_telegram(tmp_path):
         patch("src.gateway.app.create_db_engine", return_value=fake_engine),
         patch("src.gateway.app.ensure_schema", return_value=None),
         patch("src.gateway.app.make_session_factory", return_value=fake_session_factory),
-        patch("src.gateway.app.EvolutionEngine") as mock_evolution_cls,
+        patch("src.gateway.app.run_preflight", return_value=_mock_preflight_ok()),
+        patch("src.memory.evolution.EvolutionEngine") as mock_evolution_cls,
     ):
         mock_evolution = AsyncMock()
         mock_evolution.reconcile_soul_projection = AsyncMock()
@@ -169,20 +179,26 @@ async def test_empty_bot_token_skips_telegram(tmp_path):
 
 @pytest.mark.asyncio
 async def test_workspace_path_mismatch_fails(tmp_path):
-    """ADR 0037: mismatched workspace paths must fail-fast on startup."""
+    """ADR 0037: mismatched workspace paths must fail-fast on startup (via preflight)."""
     app = MagicMock()
     app.state = MagicMock()
+
+    fake_engine = AsyncMock()
+    fake_engine.dispose = AsyncMock()
 
     with (
         patch("src.gateway.app.setup_logging"),
         patch("src.gateway.app.get_settings") as mock_settings,
+        patch("src.gateway.app.create_db_engine", return_value=fake_engine),
+        patch("src.gateway.app.ensure_schema", return_value=None),
+        patch("src.gateway.app.make_session_factory", return_value=MagicMock()),
     ):
         settings = _make_mock_settings(tmp_path)
         # Deliberately set a different workspace_path in MemorySettings
         settings.memory.workspace_path = tmp_path / "different"
         mock_settings.return_value = settings
 
-        with pytest.raises(RuntimeError, match="workspace_path mismatch"):
+        with pytest.raises(RuntimeError, match="Preflight failed"):
             async with lifespan(app):
                 pass
 

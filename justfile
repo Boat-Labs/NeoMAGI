@@ -71,3 +71,27 @@ test-unit:
 # Run frontend tests
 test-frontend:
     cd {{frontend_dir}} && pnpm test -- --run
+
+# Run doctor diagnostic checks
+doctor:
+    uv run python -m src.backend.cli doctor
+
+# Run doctor with deep checks (provider connectivity, etc.)
+doctor-deep:
+    uv run python -m src.backend.cli doctor --deep
+
+# Backup truth-source data (DB tables + workspace memory files)
+backup *ARGS:
+    uv run python scripts/backup.py {{ARGS}}
+
+# Restore from backup (8-step recovery sequence)
+restore *ARGS:
+    uv run python scripts/restore.py {{ARGS}}
+
+# TRUNCATE + full reindex of memory_entries
+reindex *ARGS:
+    uv run python -m src.backend.cli reindex {{ARGS}}
+
+# Reconcile SOUL.md projection from DB
+reconcile:
+    uv run python -m src.backend.cli reconcile

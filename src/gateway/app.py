@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
@@ -34,8 +34,9 @@ from src.gateway.protocol import (
     parse_rpc_request,
 )
 from src.infra.errors import GatewayError, NeoMAGIError
+from src.infra.health import CheckStatus, PreflightReport
 from src.infra.logging import setup_logging
-from src.memory.evolution import EvolutionEngine
+from src.infra.preflight import run_preflight
 from src.memory.indexer import MemoryIndexer
 from src.memory.searcher import MemorySearcher
 from src.memory.writer import MemoryWriter
@@ -93,22 +94,36 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: initialize shared state on startup."""
     setup_logging(json_output=False)
 
-    settings = get_settings()
-
-    # [ADR 0037] workspace_path single source of truth: fail-fast if inconsistent
-    # Use .resolve() to normalize symlinks, .., etc. before comparison
-    if settings.memory.workspace_path.resolve() != settings.workspace_dir.resolve():
-        raise RuntimeError(
-            f"workspace_path mismatch: Settings.workspace_dir={settings.workspace_dir}, "
-            f"MemorySettings.workspace_path={settings.memory.workspace_path}. "
-            "See ADR 0037."
-        )
+    # Settings validation — structured logging on config errors
+    try:
+        settings = get_settings()
+    except ValidationError as e:
+        for err in e.errors():
+            logger.error(
+                "settings_validation_error",
+                field=".".join(str(loc) for loc in err["loc"]),
+                error_type=err["type"],
+                message=err["msg"],
+            )
+        raise
 
     # [Decision 0020] DB is mandatory; startup fails if DB/schema unavailable.
     engine = await create_db_engine(settings.database)
     await ensure_schema(engine, settings.database.schema_)
     db_session_factory = make_session_factory(engine)
     logger.info("db_connected")
+
+    # Preflight checks — unified startup validation (M5)
+    preflight_report = await run_preflight(settings, engine)
+    app.state.preflight_report = preflight_report
+    logger.info("preflight_complete", passed=preflight_report.passed)
+
+    if not preflight_report.passed:
+        failed = [c for c in preflight_report.checks if c.status == CheckStatus.FAIL]
+        raise RuntimeError(
+            f"Preflight failed ({len(failed)} check(s)): "
+            + "; ".join(f"{c.name}: {c.evidence}" for c in failed)
+        )
 
     # Provider-agnostic shared deps
     session_manager = SessionManager(
@@ -120,10 +135,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     memory_indexer = MemoryIndexer(db_session_factory, settings.memory)
     memory_searcher = MemorySearcher(db_session_factory, settings.memory)
     memory_writer = MemoryWriter(settings.workspace_dir, settings.memory, indexer=memory_indexer)
-    evolution_engine = EvolutionEngine(db_session_factory, settings.workspace_dir, settings.memory)
 
-    # [ADR 0036] Startup reconciliation: DB is SSOT, SOUL.md is projection
-    await evolution_engine.reconcile_soul_projection()
+    from src.memory.evolution import EvolutionEngine
+
+    evolution_engine = EvolutionEngine(db_session_factory, settings.workspace_dir, settings.memory)
 
     tool_registry = ToolRegistry()
     register_builtins(
@@ -176,15 +191,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
         logger.info("gemini_provider_registered", model=settings.gemini.model)
 
-    # Validate active provider is registered (fail-fast)
-    try:
-        registry.get()
-    except KeyError as e:
-        raise RuntimeError(
-            f"Active provider '{settings.provider.active}' is not configured. "
-            "Check API key settings."
-        ) from e
-
     # Budget gate (ADR 0041)
     budget_gate = BudgetGate(engine, schema=settings.database.schema_)
 
@@ -202,6 +208,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     )
 
     # Telegram adapter (optional: only when bot_token is configured)
+    # Preflight C10 already verified the token; check_ready() here
+    # initializes adapter internal state (_bot_username).
     telegram_adapter = None
     polling_task = None
     if settings.telegram.bot_token:
@@ -215,7 +223,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             budget_gate=budget_gate,
             gateway_settings=settings.gateway,
         )
-        await telegram_adapter.check_ready()  # fail-fast on bad token
+        await telegram_adapter.check_ready()
 
         polling_task = asyncio.create_task(
             telegram_adapter.start_polling(),
@@ -247,6 +255,31 @@ app.add_middleware(
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/health/live")
+async def health_live() -> dict[str, str]:
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+async def health_ready(request: Request) -> dict:
+    report: PreflightReport | None = getattr(request.app.state, "preflight_report", None)
+    if report is None or not report.passed:
+        checks = {}
+        if report:
+            checks = {
+                c.name: {"status": c.status.value, "evidence": c.evidence}
+                for c in report.checks
+            }
+        return {"status": "not_ready", "checks": checks}
+    return {
+        "status": "ready",
+        "checks": {
+            c.name: {"status": c.status.value, "evidence": c.evidence}
+            for c in report.checks
+        },
+    }
 
 
 @app.websocket("/ws")
