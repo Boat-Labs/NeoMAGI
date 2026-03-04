@@ -30,6 +30,29 @@ class CheckResult:
 
 
 @dataclass
+class DoctorReport:
+    """Aggregated doctor check results."""
+
+    checks: list[CheckResult] = field(default_factory=list)
+    deep: bool = False
+
+    @property
+    def passed(self) -> bool:
+        """True only when no check has FAIL status."""
+        return all(c.status != CheckStatus.FAIL for c in self.checks)
+
+    def summary(self) -> str:
+        """Format a human-readable summary of all checks."""
+        lines: list[str] = []
+        for c in self.checks:
+            lines.append(f"[{c.status.value.upper():4s}] {c.name}: {c.evidence}")
+        mode = "deep" if self.deep else "standard"
+        status = "PASS" if self.passed else "FAIL"
+        lines.append(f"--- doctor {status} ({len(self.checks)} checks, mode={mode}) ---")
+        return "\n".join(lines)
+
+
+@dataclass
 class PreflightReport:
     """Aggregated preflight check results."""
 

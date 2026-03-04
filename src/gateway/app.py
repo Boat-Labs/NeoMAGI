@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import structlog
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
@@ -34,7 +34,7 @@ from src.gateway.protocol import (
     parse_rpc_request,
 )
 from src.infra.errors import GatewayError, NeoMAGIError
-from src.infra.health import CheckStatus
+from src.infra.health import CheckStatus, PreflightReport
 from src.infra.logging import setup_logging
 from src.infra.preflight import run_preflight
 from src.memory.indexer import MemoryIndexer
@@ -255,6 +255,31 @@ app.add_middleware(
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/health/live")
+async def health_live() -> dict[str, str]:
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+async def health_ready(request: Request) -> dict:
+    report: PreflightReport | None = getattr(request.app.state, "preflight_report", None)
+    if report is None or not report.passed:
+        checks = {}
+        if report:
+            checks = {
+                c.name: {"status": c.status.value, "evidence": c.evidence}
+                for c in report.checks
+            }
+        return {"status": "not_ready", "checks": checks}
+    return {
+        "status": "ready",
+        "checks": {
+            c.name: {"status": c.status.value, "evidence": c.evidence}
+            for c in report.checks
+        },
+    }
 
 
 @app.websocket("/ws")

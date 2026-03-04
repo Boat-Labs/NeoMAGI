@@ -71,3 +71,11 @@ test-unit:
 # Run frontend tests
 test-frontend:
     cd {{frontend_dir}} && pnpm test -- --run
+
+# Run doctor diagnostic checks
+doctor:
+    uv run python -m src.backend.cli doctor
+
+# Run doctor with deep checks (provider connectivity, etc.)
+doctor-deep:
+    uv run python -m src.backend.cli doctor --deep
