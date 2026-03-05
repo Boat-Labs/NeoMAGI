@@ -60,7 +60,7 @@ def _pg_container():
 
     from testcontainers.postgres import PostgresContainer
 
-    container = PostgresContainer("postgres:16", dbname="neomagi_test")
+    container = PostgresContainer("postgres:17", dbname="neomagi_test")
     container.start()
 
     host = container.get_container_host_ip()

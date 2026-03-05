@@ -71,7 +71,7 @@ TELEGRAM_MESSAGE_MAX_LENGTH=4096
 - 用户 ID 可通过 `@userinfobot` 获取。
 - 建议保持 `TELEGRAM_MESSAGE_MAX_LENGTH=4096`，不要手动压到极小值做线上验证。
 
-### 2.3 启动 PostgreSQL 16（示例：podman）
+### 2.3 启动 PostgreSQL 17（示例：podman）
 
 ```bash
 podman run --name neomagi-pg \
@@ -79,7 +79,7 @@ podman run --name neomagi-pg \
   -e POSTGRES_PASSWORD=neomagi \
   -e POSTGRES_DB=neomagi \
   -p 5432:5432 \
-  -d postgres:16
+  -d postgres:17
 ```
 
 如果容器已存在：

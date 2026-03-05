@@ -399,7 +399,7 @@ class ChatSendParams(BaseModel):
 ```sql
 -- alembic migration: add budget tables
 -- Note: gen_random_uuid() is a core built-in (no pgcrypto needed).
--- Project baseline: PostgreSQL 16 (ADR 0006).
+-- Project baseline: PostgreSQL 17 (ADR 0046).
 
 CREATE TABLE budget_state (
     id TEXT PRIMARY KEY DEFAULT 'global',

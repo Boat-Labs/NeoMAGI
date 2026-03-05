@@ -30,6 +30,33 @@ from src.infra.logging import setup_logging
 logger = structlog.get_logger()
 
 
+_IGNORABLE_PG_RESTORE_ERROR_SNIPPETS = (
+    'unrecognized configuration parameter "transaction_timeout"',
+)
+
+
+def _split_pg_restore_errors(stderr: str) -> tuple[list[str], list[str]]:
+    """Split pg_restore error lines into (fatal, ignorable).
+
+    pg_restore may return non-zero for warnings and may emit compatibility noise
+    when client/server major versions differ.
+    We tolerate known-benign compatibility errors but fail on all other errors.
+    """
+    fatal: list[str] = []
+    ignorable: list[str] = []
+
+    for line in stderr.splitlines():
+        normalized = line.strip().lower()
+        if "pg_restore: error:" not in normalized:
+            continue
+        if any(snippet in normalized for snippet in _IGNORABLE_PG_RESTORE_ERROR_SNIPPETS):
+            ignorable.append(line.strip())
+        else:
+            fatal.append(line.strip())
+
+    return fatal, ignorable
+
+
 def _check_pg_restore() -> str:
     """Return pg_restore path or exit with guidance."""
     path = shutil.which("pg_restore")
@@ -104,14 +131,18 @@ async def run_restore(db_dump: Path, workspace_archive: Path) -> None:
     logger.info("restore_step_2_start", dump=str(db_dump))
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
     if proc.returncode != 0:
-        # pg_restore returns non-zero for warnings too; check stderr for fatal errors
         stderr = proc.stderr.strip()
-        if stderr and "error" in stderr.lower():
+        fatal_errors, ignorable_errors = _split_pg_restore_errors(stderr)
+        if fatal_errors:
             logger.error("pg_restore_failed", stderr=stderr)
             results.append(("2. pg_restore DB", f"FAIL: {stderr[:200]}"))
             _print_summary(results)
             sys.exit(1)
-        logger.warning("pg_restore_warnings", stderr=stderr)
+        if stderr:
+            event = (
+                "pg_restore_known_compat_warning" if ignorable_errors else "pg_restore_warnings"
+            )
+            logger.warning(event, stderr=stderr, ignored_error_count=len(ignorable_errors))
     results.append(("2. pg_restore DB", "OK"))
     logger.info("restore_step_2_done")
 

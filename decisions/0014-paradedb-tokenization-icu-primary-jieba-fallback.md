@@ -21,7 +21,7 @@
   - 放弃原因：当前阶段运维复杂度过高，不符合最小化实现原则。
 
 ## 影响
-- 该策略基于当前 PostgreSQL 16 + ParadeDB 扩展环境执行与验证。
+- 该策略已在 PostgreSQL + ParadeDB 扩展环境中验证；项目当前数据库版本基线见 ADR 0046（PostgreSQL 17）。
 - 建索引时，Jieba 字段开启 `trim=true` 以减少空白 token 干扰。
 - 查询时采用显式权重策略，确保 ICU 分数权重大于 Jieba，避免重复命中过度加分。
 - 推荐查询权重基线：`title(icu)=2.0`、`content(icu)=1.0`、`content_jieba=0.7`（可按评测微调）。

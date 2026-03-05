@@ -92,7 +92,7 @@ class TestWriteIndexSearchCycle:
             "---\n[10:00] (source: user, scope: main)\n"
             "User prefers dark mode for all applications\n"
             "---\n[11:00] (source: user, scope: main)\n"
-            "Project uses PostgreSQL 16\n",
+            "Project uses PostgreSQL 17\n",
             encoding="utf-8",
         )
 
@@ -204,7 +204,7 @@ class TestCuratedMemoryIndex:
         memory_md = tmp_path / "MEMORY.md"
         memory_md.write_text(
             "## User Preferences\nPrefers dark mode and concise responses\n\n"
-            "## Technical Stack\nProject uses PostgreSQL 16 with pgvector\n",
+            "## Technical Stack\nProject uses PostgreSQL 17 with pgvector\n",
             encoding="utf-8",
         )
 

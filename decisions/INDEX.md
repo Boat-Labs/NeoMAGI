@@ -9,7 +9,7 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0003 | Channel baseline: WebChat first, Telegram second | accepted | 2026-02-16 | `decisions/0003-channel-baseline-webchat-first-telegram-second.md` |
 | 0004 | Use uv as Python package manager | accepted | 2026-02-16 | `decisions/0004-use-uv-as-python-package-manager.md` |
 | 0005 | Use just as command runner | accepted | 2026-02-16 | `decisions/0005-use-just-as-command-runner.md` |
-| 0006 | Use PostgreSQL (pgvector) instead of SQLite | accepted | 2026-02-16 | `decisions/0006-use-postgresql-pgvector-instead-of-sqlite.md` |
+| 0006 | Use PostgreSQL (pgvector) instead of SQLite | superseded | 2026-02-16 | `decisions/0006-use-postgresql-pgvector-instead-of-sqlite.md` |
 | 0007 | Frontend baseline: React + TypeScript + Vite | accepted | 2026-02-16 | `decisions/0007-frontend-baseline-react-typescript-vite.md` |
 | 0008 | Frontend UI system: Tailwind + shadcn/ui | accepted | 2026-02-16 | `decisions/0008-frontend-ui-system-tailwind-shadcn.md` |
 | 0009 | Frontend state management: zustand | accepted | 2026-02-16 | `decisions/0009-frontend-state-management-zustand.md` |
@@ -49,6 +49,7 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0043 | Devcoord direct script entrypoint instead of just wrapper | accepted | 2026-03-01 | `decisions/0043-devcoord-direct-script-entrypoint-instead-of-just-wrapper.md` |
 | 0044 | Telegram adapter: aiogram same-process + per-channel-peer scope | accepted | 2026-03-02 | `decisions/0044-telegram-adapter-aiogram-same-process.md` |
 | 0045 | Reset devcoord beads control-plane history and restart clean | accepted | 2026-03-02 | `decisions/0045-reset-devcoord-beads-control-plane-history.md` |
+| 0046 | Upgrade database baseline to PostgreSQL 17 | accepted | 2026-03-05 | `decisions/0046-upgrade-database-baseline-to-postgresql-17.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。

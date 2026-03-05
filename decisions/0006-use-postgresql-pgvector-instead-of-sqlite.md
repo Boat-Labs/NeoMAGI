@@ -1,6 +1,6 @@
 # 0006-use-postgresql-pgvector-instead-of-sqlite
 
-- Status: accepted
+- Status: superseded by 0046
 - Date: 2026-02-16
 
 ## 选了什么
@@ -28,3 +28,4 @@
   - `DATABASE_NAME`
   - `DATABASE_SCHEMA`
 - 后续涉及数据库的文档与实现默认按 PostgreSQL 16（`pgvector` + ParadeDB `pg_search`）路线推进。
+- 数据库版本基线已由 ADR 0046 更新为 PostgreSQL 17；本决议继续保留“PostgreSQL 替代 SQLite、单库承载持久化与检索”的方向性约束。

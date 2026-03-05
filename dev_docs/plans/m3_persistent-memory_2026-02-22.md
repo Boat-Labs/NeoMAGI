@@ -62,7 +62,7 @@
 
 | 决策项 | 选择 | 依据 |
 |--------|------|------|
-| 记忆数据面 | PostgreSQL 16 + pg_search + pgvector | ADR 0006 |
+| 记忆数据面 | PostgreSQL 17 + pg_search + pgvector | ADR 0006 + ADR 0046 |
 | 分词策略 | ICU 主召回 + Jieba 中文补充 | ADR 0014 |
 | 检索路径 | 先 BM25，后 Hybrid（BM25 + vector 融合） | memory_architecture.md |
 | 记忆源数据 | 文件导向（daily notes + MEMORY.md），DB 仅做检索索引 | memory_architecture.md |
@@ -993,7 +993,7 @@ def _layer_memory_recall(
     Format:
     [Recalled Memories]
     - (2026-02-21, daily_note) User prefers concise responses...
-    - (2026-02-20, curated) Project uses PostgreSQL 16...
+    - (2026-02-20, curated) Project uses PostgreSQL 17...
 
     Constraints:
     - Max injection: memory_recall_max_tokens (default 2000)

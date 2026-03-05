@@ -138,7 +138,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 清理或切换 worktree 后，先确认变更已迁移到目标分支，再继续开发或测试。
 
 ## 实施基线（治理层）
-- 数据库统一使用 PostgreSQL 16（`pgvector` + ParadeDB `pg_search`），不使用 SQLite。
+- 数据库统一使用 PostgreSQL 17（`pgvector` + ParadeDB `pg_search`），不使用 SQLite。
 - 数据库连接信息读取本地 `.env`，共享模板使用 `.env_template`（不提交真实凭据）。
 - Python 包管理器使用 `uv`。
 - Frontend 包管理器使用 `pnpm`。

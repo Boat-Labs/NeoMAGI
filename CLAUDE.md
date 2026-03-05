@@ -32,10 +32,10 @@ neomagi/
 ## 技术栈
 
 **核心**：Python 3.12+ (async/await) · uv · pnpm (frontend) · just（常规开发任务） · FastAPI + WebSocket · `openai` SDK
-**存储**：PostgreSQL 16 + `pgvector` + ParadeDB `pg_search` (BM25, ICU + Jieba) · Embedding: Ollama 优先 → OpenAI fallback
+**存储**：PostgreSQL 17 + `pgvector` + ParadeDB `pg_search` (BM25, ICU + Jieba) · Embedding: Ollama 优先 → OpenAI fallback
 **工具链**：pytest + pytest-asyncio · ruff · Podman · `pydantic-settings` + `.env`
 
-> **重要**：不使用 SQLite，所有持久化走 PostgreSQL 16。数据库连接读 `.env`，模板在 `.env_template`。配置优先级：环境变量 > `.env` > 默认值。容器命令一律 podman，不用 docker。
+> **重要**：不使用 SQLite，所有持久化走 PostgreSQL 17。数据库连接读 `.env`，模板在 `.env_template`。配置优先级：环境变量 > `.env` > 默认值。容器命令一律 podman，不用 docker。
 
 ## 编码规范
 
@@ -85,7 +85,7 @@ neomagi/
 
 - 全局强制基线（所有 agent 默认遵守）只保留在本文件：
   - Python 实现（非 TypeScript）
-  - PostgreSQL 16（非 SQLite）
+  - PostgreSQL 17（非 SQLite）
   - `pydantic-settings` + `.env` 配置
   - Podman 容器命令（非 Docker）
 - 设计细节与外部参考按需读取，不在本文件展开：

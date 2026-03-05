@@ -16,7 +16,7 @@
 
 **Recovery**:
 ```bash
-just restore -- --db-dump ./backups/neomagi_YYYYMMDD_HHMMSS.dump \
+just restore --db-dump ./backups/neomagi_YYYYMMDD_HHMMSS.dump \
                 --workspace-archive ./backups/workspace_memory_YYYYMMDD_HHMMSS.tar.gz
 ```
 
@@ -94,7 +94,7 @@ just reindex
 **Recovery**:
 ```bash
 # 完整 8 步恢复序列
-just restore -- --db-dump ./backups/neomagi_YYYYMMDD_HHMMSS.dump \
+just restore --db-dump ./backups/neomagi_YYYYMMDD_HHMMSS.dump \
                 --workspace-archive ./backups/workspace_memory_YYYYMMDD_HHMMSS.tar.gz
 
 # 可选：深度检查补充验证
@@ -111,7 +111,7 @@ just doctor-deep
 ```bash
 just backup
 # 或指定输出目录
-just backup -- --output-dir /path/to/backup/dir
+just backup --output-dir /path/to/backup/dir
 ```
 
 备份产物：

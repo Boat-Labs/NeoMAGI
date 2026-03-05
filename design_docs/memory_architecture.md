@@ -44,7 +44,7 @@
 │ MEMORY.md                                         │
 ├──────────────────────────────────────────────────┤
 │ Retrieval Data Plane                              │
-│ PostgreSQL 16 + ParadeDB pg_search + pgvector    │
+│ PostgreSQL 17 + ParadeDB pg_search + pgvector    │
 │ (scope-aware indexing + scope-aware filtering)    │
 └──────────────────────────────────────────────────┘
 ```
@@ -82,7 +82,7 @@
   - M4：扩展为 per-channel 覆盖配置。
 
 ## 4. 检索路线（与决议对齐）
-- 决议基线：统一 PostgreSQL 16（`pgvector` + `pg_search`），不使用 SQLite。
+- 决议基线：统一 PostgreSQL 17（`pgvector` + `pg_search`），不使用 SQLite。
 - 阶段策略：
   - 先 BM25（`pg_search`）形成可用检索。
   - 再 Hybrid Search（BM25 + vector）提升召回质量。
@@ -90,6 +90,7 @@
 决议参考：
 - `decisions/0006-use-postgresql-pgvector-instead-of-sqlite.md`
 - `decisions/0014-paradedb-tokenization-icu-primary-jieba-fallback.md`
+- `decisions/0046-upgrade-database-baseline-to-postgresql-17.md`
 
 ## 5. 写入与治理边界
 - 用户显式要求时可写入记忆文件。

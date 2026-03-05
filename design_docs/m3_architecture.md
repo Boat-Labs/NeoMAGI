@@ -2,7 +2,7 @@
 
 > 状态：planned  
 > 对应里程碑：M3 会话外持久记忆  
-> 依据：`design_docs/roadmap_milestones_v3.md`、`design_docs/memory_architecture.md`、ADR 0006/0014/0027/0034/0035
+> 依据：`design_docs/roadmap_milestones_v3.md`、`design_docs/memory_architecture.md`、ADR 0006/0014/0027/0034/0035/0046
 
 ## 1. 目标
 - 建立“可沉淀、可检索、可治理”的会话外记忆闭环。
@@ -56,7 +56,7 @@
 
 ### 3.2 Memory Loop（会话外记忆）
 - 记忆源数据保持文件导向（daily notes + `MEMORY.md`），DB 仅作为检索数据面。
-- 检索数据面与决议对齐：PostgreSQL 16 + `pg_search` + `pgvector`。
+- 检索数据面与决议对齐：PostgreSQL 17 + `pg_search` + `pgvector`。
 - 检索路径按阶段推进：M3 先 BM25，Hybrid Search（BM25 + vector）后续迭代。
 - 记忆操作通过原子工具暴露给 agent：
   - `memory_search`：检索（必须受作用域过滤）。

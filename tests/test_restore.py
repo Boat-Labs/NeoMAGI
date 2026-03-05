@@ -32,6 +32,30 @@ class TestRestorePgRestoreCheck:
             assert result == "/usr/bin/pg_restore"
 
 
+class TestPgRestoreErrorClassification:
+    def test_transaction_timeout_is_ignorable(self) -> None:
+        from scripts.restore import _split_pg_restore_errors
+
+        stderr = (
+            'pg_restore: error: could not execute query: ERROR:  unrecognized '
+            'configuration parameter "transaction_timeout"\n'
+            "Command was: SET transaction_timeout = 0;\n"
+            "pg_restore: warning: errors ignored on restore: 1"
+        )
+
+        fatal, ignorable = _split_pg_restore_errors(stderr)
+        assert fatal == []
+        assert len(ignorable) == 1
+
+    def test_non_ignorable_error_is_fatal(self) -> None:
+        from scripts.restore import _split_pg_restore_errors
+
+        stderr = "pg_restore: error: relation neomagi.sessions does not exist"
+        fatal, ignorable = _split_pg_restore_errors(stderr)
+        assert len(fatal) == 1
+        assert ignorable == []
+
+
 def _make_restore_patches(
     tmp_path: Path,
     *,
@@ -318,6 +342,47 @@ class TestRunRestore:
         assert "-C" in tar_cmd
         c_idx = tar_cmd.index("-C")
         assert tar_cmd[c_idx + 1] == str((tmp_path / "workspace").resolve())
+
+    @pytest.mark.asyncio
+    async def test_pg_restore_transaction_timeout_warning_does_not_abort(
+        self, tmp_path: Path
+    ) -> None:
+        """Known compatibility warning should not fail restore."""
+        from scripts.restore import run_restore
+
+        execution_log: list[str] = []
+        patches = _make_restore_patches(tmp_path, execution_log=execution_log)
+
+        compat_stderr = (
+            'pg_restore: error: could not execute query: ERROR:  unrecognized '
+            'configuration parameter "transaction_timeout"\n'
+            "Command was: SET transaction_timeout = 0;\n"
+            "pg_restore: warning: errors ignored on restore: 1"
+        )
+
+        def track_subprocess_with_known_warning(cmd, **kwargs):
+            if "pg_restore" in str(cmd[0]):
+                execution_log.append("step2_pg_restore")
+                return MagicMock(returncode=1, stderr=compat_stderr, stdout="")
+            if "tar" in str(cmd[0]):
+                execution_log.append("step4_tar_extract")
+                return MagicMock(returncode=0, stderr="", stdout="")
+            return MagicMock(returncode=0, stderr="", stdout="")
+
+        mock_subprocess_override = patch(
+            "scripts.restore.subprocess.run", side_effect=track_subprocess_with_known_warning
+        )
+
+        db_dump = tmp_path / "test.dump"
+        db_dump.write_bytes(b"fake")
+        ws_archive = tmp_path / "test.tar.gz"
+        ws_archive.write_bytes(b"fake")
+
+        with patches[0], patches[1], mock_subprocess_override, patches[3], patches[4], \
+             patches[5], patches[6], patches[7], patches[8], patches[9]:
+            await run_restore(db_dump, ws_archive)
+
+        assert "step8_preflight" in execution_log
 
 
 class TestWorkspacePathGuard:

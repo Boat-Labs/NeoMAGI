@@ -297,3 +297,12 @@
 - Resilience: M4 主体实施期间经历 tmux 崩溃导致全部 agent 进程丢失；借助 beads control plane 事件记录（gate state、phase progress、teammate ack），PM 在新会话中完成断点重建（recovery-check + state-sync-ok），所有 teammate 在新 worktree 恢复工作并顺利完成剩余 Phase，验证了 M7 devcoord 协作控制在灾难恢复场景下的实际有效性
 - Next: M4 全部关闭；按 `design_docs/roadmap_milestones_v3.md` 确定下一阶段（M5 触发式进入）
 - Risk: 无
+
+<!-- devcoord:begin milestone=m5 -->
+## 2026-03-04 (generated) | M5
+- Status: done
+- Done: 最新 gate m5-g2 为 closed (PASS)；backend=done, tester=done
+- Evidence: `dev_docs/logs/m5_2026-03-04/gate_state.md`, `dev_docs/logs/m5_2026-03-04/watchdog_status.md`, `dev_docs/reviews/m5_g2_phase2_review.md` (e71ba67)
+- Next: m5-g2 已关闭，等待 M5 下一条 gate
+- Risk: 无
+<!-- devcoord:end milestone=m5 -->

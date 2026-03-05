@@ -48,7 +48,7 @@ DATABASE_SCHEMA=neomagi
 OPENAI_API_KEY=<YOUR_OPENAI_API_KEY>
 ```
 
-### 2.3 启动 PostgreSQL 16（示例：podman）
+### 2.3 启动 PostgreSQL 17（示例：podman）
 
 ```bash
 podman run --name neomagi-pg \
@@ -56,7 +56,7 @@ podman run --name neomagi-pg \
   -e POSTGRES_PASSWORD=neomagi \
   -e POSTGRES_DB=neomagi \
   -p 5432:5432 \
-  -d postgres:16
+  -d postgres:17
 ```
 
 如果容器已存在：

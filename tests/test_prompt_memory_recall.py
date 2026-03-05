@@ -61,14 +61,14 @@ class TestLayerMemoryRecall:
     def test_normal_injection(self, tmp_path: Path) -> None:
         results = [
             _make_result("User prefers dark mode"),
-            _make_result("Project uses PostgreSQL 16", source_type="curated"),
+            _make_result("Project uses PostgreSQL 17", source_type="curated"),
         ]
         builder = _make_builder(tmp_path)
         result = builder._layer_memory_recall(recall_results=results)
 
         assert "[Recalled Memories]" in result
         assert "User prefers dark mode" in result
-        assert "Project uses PostgreSQL 16" in result
+        assert "Project uses PostgreSQL 17" in result
         assert "daily_note" in result
         assert "curated" in result
 

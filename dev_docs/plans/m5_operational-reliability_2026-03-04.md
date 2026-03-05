@@ -257,11 +257,11 @@ NeoMAGI 已完成 M0~M4 + M6 + M7 全部里程碑（686 tests，ruff clean）。
 
 **2.5 恢复 runbook** — `dev_docs/runbooks/recovery.md`（新建）
 - 场景覆盖：
-  - S1: DB 不可用 → `just restore -- --db-dump <path> --workspace-archive <path>` → 脚本自动完成 8 步恢复（含 ensure_schema、TRUNCATE、reindex、preflight 验证）
+  - S1: DB 不可用 → `just restore --db-dump <path> --workspace-archive <path>` → 脚本自动完成 8 步恢复（含 ensure_schema、TRUNCATE、reindex、preflight 验证）
   - S2: workspace 文件丢失 → 手动恢复 workspace archive → `just reindex`（TRUNCATE + 全量重建）
   - S3: SOUL.md 与 DB 不一致 → `just doctor` 发现 D1 WARN → `just reconcile` 修复
   - S4: memory_entries 缺失或不一致 → `just doctor` 发现 D2 WARN → `just reindex` 修复（TRUNCATE + 全量重建，清除孤儿条目）
-  - S5: 全量恢复 → `just restore -- --db-dump <path> --workspace-archive <path>`（完整 8 步序列，含 preflight 验证）→ 可选 `just doctor --deep` 补充深度检查
+  - S5: 全量恢复 → `just restore --db-dump <path> --workspace-archive <path>`（完整 8 步序列，含 preflight 验证）→ 可选 `just doctor --deep` 补充深度检查
 - 每个场景包含：症状、影响、恢复步骤、验证方法
 
 ### 测试策略
@@ -315,4 +315,4 @@ reindex *ARGS:         uv run python -m src.backend.cli reindex {{ARGS}}
 reconcile:             uv run python -m src.backend.cli reconcile
 ```
 
-> **justfile 参数透传**：`backup`、`restore`、`reindex` 使用 just 的 `*ARGS` 语法，将命令行参数原样透传给底层脚本。示例：`just restore -- --db-dump ./backups/neomagi_20260304.dump --workspace-archive ./backups/workspace_memory_20260304.tar.gz`。`--` 用于分隔 just 自身参数和透传参数。
+> **justfile 参数透传**：`backup`、`restore`、`reindex` 使用 just 的 `*ARGS` 语法，将命令行参数原样透传给底层脚本。示例：`just restore --db-dump ./backups/neomagi_20260304.dump --workspace-archive ./backups/workspace_memory_20260304.tar.gz`。当前 justfile 下无需额外 `--` 分隔符。

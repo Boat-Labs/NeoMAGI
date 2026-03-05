@@ -53,7 +53,7 @@
   - `memory_search` 已注册但仍是占位实现。
   - `memory_append` 尚未实现（当前缺少受控记忆写入原子）。
 - 规划边界：
-  - 记忆数据层对齐 PostgreSQL 16 + `pg_search` + `pgvector`。
+  - 记忆数据层对齐 PostgreSQL 17 + `pg_search` + `pgvector`。
   - 按阶段推进：先 BM25，再 Hybrid Search。
   - 引入记忆原子操作分工：`memory_search`（检索）+ `memory_append`（追加写入）。
   - 检索与 recall 按 `dmScope` 过滤，禁止未授权跨作用域召回。
@@ -65,6 +65,7 @@
 - `src/tools/builtins/memory_search.py`
 - `decisions/0006-use-postgresql-pgvector-instead-of-sqlite.md`
 - `decisions/0014-paradedb-tokenization-icu-primary-jieba-fallback.md`
+- `decisions/0046-upgrade-database-baseline-to-postgresql-17.md`
 - `decisions/0034-openclaw-dmscope-session-and-memory-scope-alignment.md`
 
 ## 5. Tool Registry

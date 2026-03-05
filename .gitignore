@@ -210,6 +210,8 @@ __marimo__/
 .claude/worktrees/
 dev_docs/prompts/
 dev_docs/reports/*.json
+tmp/
+.beads.bak-*/
 
 # Workspace (user-specific agent files)
 workspace/
