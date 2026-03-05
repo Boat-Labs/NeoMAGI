@@ -33,7 +33,7 @@
   - 放弃原因：虽然与产品数据库栈一致，但会重复建设任务图、审计历史、状态查询与多写者能力，当前阶段性价比不足。
 
 ## 影响
-- 新增内部治理里程碑 `M7`，其性质为“开发协作控制面重构”，不属于产品 roadmap 新功能里程碑，不改变 `design_docs/roadmap_milestones_v3.md` 的产品排序。
+- 新增内部治理里程碑 `M7`，其性质为“开发协作控制面重构”，不属于产品 roadmap 新功能里程碑，不改变 `design_docs/phase1/roadmap_milestones_v3.md` 的产品排序。
 - 将新增 `scripts/devcoord/` 命令面与对应 skill 规范，所有协作状态写入统一走 wrapper，不允许直接改 `dev_docs/logs/` 文件。
 - 将新增 `dev_docs/devcoord/beads_control_plane.md` 作为控制面架构文档，定义对象模型、命令面、投影规则、共享 `BEADS_DIR` 拓扑与迁移顺序。
 - M7 Phase 1 将固定通过 `bd ... --json` CLI shell-out 与 beads 交互；不直接写 Dolt SQL，不通过 MCP server。

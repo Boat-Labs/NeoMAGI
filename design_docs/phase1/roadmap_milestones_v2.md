@@ -1,6 +1,6 @@
 # NeoMAGI 项目分阶段规划 v2
 
-> 基于 v1 (`design_docs/roadmap_milestones.md`) 演进。
+> 基于 v1 (`design_docs/phase1/roadmap_milestones.md`) 演进。
 > 变更原因：M1.2 审计延期项需要明确里程碑落点（ADR 0018）。
 > 变更内容：新增 M1.4（审计修复收尾），调整推荐实现顺序。
 

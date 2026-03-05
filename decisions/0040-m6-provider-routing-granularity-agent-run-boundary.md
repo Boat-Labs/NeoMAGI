@@ -7,13 +7,13 @@
 - M6 的 provider 选择粒度定义为 `agent-run`（请求级）绑定：每次 `chat.send` 开始时确定 provider/model，本次 run 执行期间保持不变；下一次 `chat.send` 可重新选择。
 - M6 明确不做会话中途 hot switch，也不做双 provider 并行在线路由。
 - 术语边界（防歧义，作为本 ADR 的约束定义）：
-  - `任务（product task）`：用户目标，可跨多轮对话推进（见 `design_docs/roadmap_milestones_v3.md` 中 M2 “长对话、多轮任务”）。
-  - `turn`：压缩语义中的对话轮次（`user` 消息 + 后续 `assistant/tool` 消息），见 `design_docs/m2_architecture.md` 与 `src/agent/compaction.py`。
+  - `任务（product task）`：用户目标，可跨多轮对话推进（见 `design_docs/phase1/roadmap_milestones_v3.md` 中 M2 “长对话、多轮任务”）。
+  - `turn`：压缩语义中的对话轮次（`user` 消息 + 后续 `assistant/tool` 消息），见 `design_docs/phase1/m2_architecture.md` 与 `src/agent/compaction.py`。
   - `agent-run`：一次 `chat.send` 请求触发的一次完整执行闭环（session claim -> `AgentLoop.handle_message` -> release），见 `src/gateway/app.py`。
 - 为满足成本分级，允许在 run 启动时根据“任务分类/agent 类型/预算策略”选择 provider；该分类仅作为 run 入口路由信号，不改变 `product task` 定义。
 
 ## 为什么
-- 与 M6 边界一致：M6 目标是“可切换、可回退”，不引入高复杂度运行时切换机制（见 `design_docs/m6_architecture.md`）。
+- 与 M6 边界一致：M6 目标是“可切换、可回退”，不引入高复杂度运行时切换机制（见 `design_docs/phase1/m6_architecture.md`）。
 - 保持既有模型路线一致性：延续 ADR 0002（OpenAI 默认 + Gemini 验证）与 ADR 0016（OpenAI SDK 统一接口）。
 - 对 24h harness 场景可直接降本：快任务走低成本 provider，复杂代码/调度任务走高能力 provider；同时避免 hot switch 带来的上下文一致性与可复现性风险。
 - 改动集中在调度入口与配置层，不侵入 tool loop、compaction、session 关键链路。

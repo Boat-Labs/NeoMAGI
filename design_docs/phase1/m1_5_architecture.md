@@ -2,7 +2,7 @@
 
 > 状态：completed  
 > 对应里程碑：M1.5 可控执行闭环（Tool Modes）  
-> 依据：`design_docs/roadmap_milestones_v3.md`、ADR 0024、ADR 0025、已讨论的工具分组与模式化授权
+> 依据：`design_docs/phase1/roadmap_milestones_v3.md`、ADR 0024、ADR 0025、已讨论的工具分组与模式化授权
 
 ## 1. 目标
 - 在不引入复杂权限系统的前提下，建立 mode 授权框架与双闸门，并以 `chat_safe` 验证可控执行边界。

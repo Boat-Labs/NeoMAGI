@@ -2,7 +2,7 @@
 
 > 状态：implemented
 > 对应里程碑：M4 第二渠道适配（Telegram）
-> 依据：`design_docs/roadmap_milestones_v3.md`、ADR 0003、ADR 0034、ADR 0044
+> 依据：`design_docs/phase1/roadmap_milestones_v3.md`、ADR 0003、ADR 0034、ADR 0044
 
 ## 1. 目标
 - 在 WebChat 之外新增 Telegram 入口，保持核心能力和行为策略一致。

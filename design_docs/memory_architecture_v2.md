@@ -2,7 +2,7 @@
 
 > 状态：current  
 > 日期：2026-03-04  
-> 用途：作为 memory 设计的长期原则文档，替代早期偏 M2/M3 规划口径的 `design_docs/memory_architecture.md`
+> 用途：作为 memory 设计的长期原则文档，替代早期偏 M2/M3 规划口径的 `design_docs/phase1/memory_architecture.md`
 
 ## 1. 核心判断
 - Memory 的真源保持在 workspace，而不是数据库。

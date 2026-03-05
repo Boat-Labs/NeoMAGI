@@ -1,7 +1,7 @@
 # 模块架构（当前实现 + 后续边界）
 
-> 本文按“已实现 / 计划中”描述模块状态，作为 roadmap 的技术补充。  
-> 产品目标与优先级请看 `design_docs/roadmap_milestones_v3.md`。
+> 本文按“已实现 / 计划中”描述模块状态，作为跨阶段的技术补充。
+> Phase 1 的产品路线图归档见 `design_docs/phase1/roadmap_milestones_v3.md`；当前默认设计入口见 `design_docs/index.md`。
 
 ## 1. Gateway（控制平面）
 - 状态：M1 已实现
@@ -83,7 +83,7 @@
 - `src/tools/base.py`
 - `src/tools/registry.py`
 - `src/tools/builtins/*.py`
-- `design_docs/m1_5_architecture.md`
+- `design_docs/phase1/m1_5_architecture.md`
 
 ## 6. Channel Adapter
 - 状态：WebChat + Telegram 已实现（M4 完成）

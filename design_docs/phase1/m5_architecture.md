@@ -2,7 +2,7 @@
 
 > 状态：planned（触发式进入）  
 > 对应里程碑：M5 运营可靠性  
-> 依据：`design_docs/roadmap_milestones_v3.md`、M4/M6/M7 已完成后的当前实现基线
+> 依据：`design_docs/phase1/roadmap_milestones_v3.md`、M4/M6/M7 已完成后的当前实现基线
 
 ## 1. 技术目标
 - 在 personal agent 的单机/轻部署形态下，补齐“能发现问题、能判断影响、能按步骤恢复”的最小运行可靠性闭环。

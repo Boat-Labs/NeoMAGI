@@ -2,7 +2,7 @@
 
 > 状态：planned  
 > 对应里程碑：M6 模型迁移验证  
-> 依据：`design_docs/roadmap_milestones_v3.md`、ADR 0002/0016、当前 model client 实现
+> 依据：`design_docs/phase1/roadmap_milestones_v3.md`、ADR 0002/0016、当前 model client 实现
 
 ## 1. 目标
 - 维持 OpenAI 默认路径，同时形成 Gemini 可验证迁移与可回退策略。

@@ -186,8 +186,8 @@ just lint:  All checks passed!
 | 参考文档 | 对齐结果 |
 |----------|---------|
 | m5_operational-reliability_2026-03-04.md Phase 2 节 | ✅ 完全对齐 |
-| design_docs/m5_architecture.md §5 资产分层 | ✅ 5 张真源表 + workspace 文件 |
-| design_docs/m5_architecture.md §6.4 恢复序列 | ✅ 8 步顺序与架构文档一致（plan rev4/rev5 细化了 ensure_schema + TRUNCATE）|
+| design_docs/phase1/m5_architecture.md §5 资产分层 | ✅ 5 张真源表 + workspace 文件 |
+| design_docs/phase1/m5_architecture.md §6.4 恢复序列 | ✅ 8 步顺序与架构文档一致（plan rev4/rev5 细化了 ensure_schema + TRUNCATE）|
 | Plan rev2 F2 修正 (--table 不用 --schema) | ✅ |
 | Plan rev4 F9 修正 (ensure_schema) | ✅ |
 | Plan rev5 F12 修正 (reindex CLI TRUNCATE) | ✅ |

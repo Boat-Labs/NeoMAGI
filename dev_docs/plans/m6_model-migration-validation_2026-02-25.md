@@ -2,7 +2,7 @@
 
 > 状态：approved
 > 日期：2026-02-25
-> 依据：`design_docs/m6_architecture.md`、`design_docs/roadmap_milestones_v3.md`、ADR 0002/0016/0038/0039/0040/0041
+> 依据：`design_docs/phase1/m6_architecture.md`、`design_docs/phase1/roadmap_milestones_v3.md`、ADR 0002/0016/0038/0039/0040/0041
 
 ## 1. 目标
 

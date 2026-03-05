@@ -1,6 +1,6 @@
 # NeoMAGI 产品路线图 v3（Product-Oriented）
 
-> 基于 v2 (`design_docs/roadmap_milestones_v2.md`) 演进。  
+> 基于 v2 (`design_docs/phase1/roadmap_milestones_v2.md`) 演进。
 > 日期：2026-02-23
 
 ## 1. 这份 roadmap 管什么，不管什么

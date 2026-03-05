@@ -2,7 +2,7 @@
 
 > 状态：draft
 > 日期：2026-02-21
-> 依据：`design_docs/m2_architecture.md`、`design_docs/memory_architecture.md`、`design_docs/roadmap_milestones_v3.md`、ADR 0021/0022/0026/0027/0028/0029/0030/0031/0032
+> 依据：`design_docs/phase1/m2_architecture.md`、`design_docs/phase1/memory_architecture.md`、`design_docs/phase1/roadmap_milestones_v3.md`、ADR 0021/0022/0026/0027/0028/0029/0030/0031/0032
 
 ## 1. 目标
 

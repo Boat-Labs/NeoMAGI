@@ -2,7 +2,7 @@
 
 > 状态：planned  
 > 对应里程碑：M3 会话外持久记忆  
-> 依据：`design_docs/roadmap_milestones_v3.md`、`design_docs/memory_architecture.md`、ADR 0006/0014/0027/0034/0035/0046
+> 依据：`design_docs/phase1/roadmap_milestones_v3.md`、`design_docs/phase1/memory_architecture.md`、ADR 0006/0014/0027/0034/0035/0046
 
 ## 1. 目标
 - 建立“可沉淀、可检索、可治理”的会话外记忆闭环。

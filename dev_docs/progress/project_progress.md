@@ -99,7 +99,7 @@
 ## 2026-02-20 (local) | M1.5
 - Status: in_progress
 - Done: roadmap v3 与决议拆分完成（ADR 0023 + 0024），并完成 architecture 文档体系重组（M1 总结 + M1.5~M6 计划 + design_docs/index.md）；新增 ADR 0025 明确 mode 切换权与 M1.5 固定 `chat_safe` 边界
-- Evidence: commit 912bac7, `design_docs/roadmap_milestones_v3.md`, `decisions/0023-roadmap-product-oriented-boundary.md`, `decisions/0024-m1.5-tool-modes-and-priority-reorder.md`, `decisions/0025-mode-switching-user-controlled-chat-safe-default.md`
+- Evidence: commit 912bac7, `design_docs/phase1/roadmap_milestones_v3.md`, `decisions/0023-roadmap-product-oriented-boundary.md`, `decisions/0024-m1.5-tool-modes-and-priority-reorder.md`, `decisions/0025-mode-switching-user-controlled-chat-safe-default.md`
 - Next: 按 ADR 0025 推进 M1.5（Tool Modes）详细方案与实现（固定 `chat_safe`，`coding` 预留）
 - Risk: 无
 
@@ -172,7 +172,7 @@
   - R1(P1): 现有 compaction 锚点校验强度不足（首行探针级），无法覆盖关键约束失真场景；从 M2 结项残余风险重新开放，转入 M3 Phase 0 必修
   - R2(P1): guard 失败后高风险路径仍可能沿 fail-open 继续执行；重新开放为执行闸门问题（高风险工具需 fail-closed）
   - R3(P2): 反漂移证据以离线评估为主，缺少运行时强制防护；重新开放为”验收口径与运行时口径对齐”任务
-- Evidence: working tree updates — `decisions/0035-runtime-anti-drift-guardrail-hardening-and-risk-gated-fail-closed.md`, `decisions/INDEX.md`, `design_docs/roadmap_milestones_v3.md`, `design_docs/m2_architecture.md`, `design_docs/m3_architecture.md`
+- Evidence: working tree updates — `decisions/0035-runtime-anti-drift-guardrail-hardening-and-risk-gated-fail-closed.md`, `decisions/INDEX.md`, `design_docs/phase1/roadmap_milestones_v3.md`, `design_docs/phase1/m2_architecture.md`, `design_docs/phase1/m3_architecture.md`
 - Plan: dev_docs/plans/m3_persistent-memory_2026-02-22.md（Phase 0 增补 ADR 0035 最小防护任务）
 - Decisions: ADR 0035 (proposed)
 - Next: 按 Phase 0~4 推进 M3 实现
@@ -222,7 +222,7 @@
 ## 2026-02-25 14:04 (local) | M3
 - Status: done
 - Done: 用户手工复测完成——T03/T04/T05 全部通过；仅保留 1 条已知检索未命中 case（记忆数据存在但自然语句词法检索 miss）
-- Evidence: `design_docs/m3_user_test_guide.md` (T03/T04/T05), `dev_docs/cases/runtime_casebook.md` (RC-2026-02-25-001, status=deferred), 用户手工验证结果
+- Evidence: `design_docs/phase1/m3_user_test_guide.md` (T03/T04/T05), `dev_docs/cases/runtime_casebook.md` (RC-2026-02-25-001, status=deferred), 用户手工验证结果
 - Next: 启动 M6 规划（模型迁移验证），并在后续统一检索能力优化中处理 RC-2026-02-25-001
 - Risk: 已知 case RC-2026-02-25-001 当前为 deferred，不影响 M6 规划启动
 
@@ -265,7 +265,7 @@
 - Status: done
 - Done: M7 收尾完成并关闭——beads control plane、`scripts/devcoord` 直接入口、Claude Code project skills、PM-first / teammate cutover、幂等护栏、`target_commit` preflight 与 canonical full SHA 规范已全部落地；`coord.py` 已按职责机械拆分为 `model.py` / `service.py` / 薄入口 `coord.py`
 - Evidence: `dev_docs/reviews/m7_summary_2026-03-01.md`, `dev_docs/reviews/m7_phase6_2026-03-01.md`, `dev_docs/logs/m7_2026-03-01/gate_state.md`
-- Next: 按 `design_docs/roadmap_milestones_v3.md` 进入 M4（第二渠道适配）；M5 继续保持触发式进入
+- Next: 按 `design_docs/phase1/roadmap_milestones_v3.md` 进入 M4（第二渠道适配）；M5 继续保持触发式进入
 - Risk: M7 residual risks 已记录于 `dev_docs/reviews/m7_summary_2026-03-01.md`，不阻塞关闭
 
 ## 2026-03-02 (local) | M4
@@ -295,7 +295,7 @@
 - Evidence: 686 tests passed, ruff clean; 用户 Telegram 端到端测试通过
 - Plan: `dev_docs/plans/m4_post-review-fix_2026-03-02.md` (approved + executed)
 - Resilience: M4 主体实施期间经历 tmux 崩溃导致全部 agent 进程丢失；借助 beads control plane 事件记录（gate state、phase progress、teammate ack），PM 在新会话中完成断点重建（recovery-check + state-sync-ok），所有 teammate 在新 worktree 恢复工作并顺利完成剩余 Phase，验证了 M7 devcoord 协作控制在灾难恢复场景下的实际有效性
-- Next: M4 全部关闭；按 `design_docs/roadmap_milestones_v3.md` 确定下一阶段（M5 触发式进入）
+- Next: M4 全部关闭；按 `design_docs/phase1/roadmap_milestones_v3.md` 确定下一阶段（M5 触发式进入）
 - Risk: 无
 
 <!-- devcoord:begin milestone=m5 -->
@@ -313,9 +313,9 @@
 - Detail:
   - 可靠性修复：preflight 追加 `workspace/memory` 可写性检查；restore 在解压前清空 workspace、按配置路径执行恢复；`pg_restore` 已知跨主版本兼容噪音降级为 warning
   - 健康检查修复：provider runtime health 改为按 provider 独立追踪，覆盖非流式、流式创建阶段和 stream-phase 失败；`/health/ready` 输出 provider 级 unhealthy 项
-  - 运维与文档修复：`just restore` / `just backup` 参数示例去掉错误的额外 `--`；补充 `design_docs/m5_user_test_guide.md`；M5 gate/log/progress 投影已入库
+  - 运维与文档修复：`just restore` / `just backup` 参数示例去掉错误的额外 `--`；补充 `design_docs/phase1/m5_user_test_guide.md`；M5 gate/log/progress 投影已入库
   - 基线升级：ADR 0046 生效，`AGENTS.md` / `CLAUDE.md` / `.github/workflows/ci.yml` / design docs / tests 全部切到 PostgreSQL 17
-- Evidence: commit `1019b55`; `dev_docs/plans/m5_post-review-fix_2026-03-04.md`; `design_docs/m5_user_test_guide.md`; `decisions/0046-upgrade-database-baseline-to-postgresql-17.md`
+- Evidence: commit `1019b55`; `dev_docs/plans/m5_post-review-fix_2026-03-04.md`; `design_docs/phase1/m5_user_test_guide.md`; `decisions/0046-upgrade-database-baseline-to-postgresql-17.md`
 - Validation: `just lint`; `just test` (845 passed, 3 existing warnings); `just test-frontend` (16 passed); 用户手工完成 M5 restore/preflight 验证并通过
 - Next: M5 全部关闭；后续里程碑默认按 PostgreSQL 17 基线推进
 - Risk: 无阻塞风险；全量测试仍有 3 个既有 RuntimeWarning，未由本轮引入

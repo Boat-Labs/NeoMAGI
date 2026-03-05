@@ -162,7 +162,7 @@ ruff lint: All checks passed
 | 1.4 CLI 入口 | argparse, doctor [--deep] | PASS |
 | 1.4 justfile 集成 | doctor / doctor-deep | PASS |
 
-### 架构文档对齐 (`design_docs/m5_architecture.md`)
+### 架构文档对齐 (`design_docs/phase1/m5_architecture.md`)
 
 | 文档节 | 要求 | 对齐 |
 |--------|------|------|

@@ -91,8 +91,9 @@ neomagi/
 - 设计细节与外部参考按需读取，不在本文件展开：
   - 统一入口：`design_docs/index.md`
   - Prompt 组装：`design_docs/system_prompt.md`
-  - Memory 架构：`design_docs/memory_architecture.md`
+  - Memory 架构：`design_docs/memory_architecture_v2.md`
   - Session/模块边界：`design_docs/modules.md`
+  - Phase 1 归档：`design_docs/phase1/index.md`
 
 ## 开发约定
 

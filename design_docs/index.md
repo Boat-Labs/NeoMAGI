@@ -1,65 +1,51 @@
 # Design Docs Index
 
 > 目的：为 agent 提供“渐进式披露”的稳定入口，先读必要文档，再按任务补充读取。  
-> 维护原则：新增/重命名 design 文档后，同步更新本索引。
+> 维护原则：根目录只保留跨阶段仍默认需要的设计文档；已完成的 Phase 1 文档归档到 `design_docs/phase1/`。
 
-## 1. 默认读取顺序（最小上下文）
+## 1. 当前状态
 
-1. `design_docs/roadmap_milestones_v3.md`  
-   - 产品目标、阶段边界、验收标准、优先级（当前生效版本）。
+- Phase 1 milestone 设计文档已整体归档到 `design_docs/phase1/`。
+- 根目录当前只保留跨阶段文档与 Phase 2 讨论期草案，目的是减少默认上下文负担。
+- 若任务明确需要历史 milestone 细节、旧验收口径或回归考古，再进入 `design_docs/phase1/`。
 
-2. `design_docs/modules.md`  
-   - 系统模块现状（已实现/计划中）与模块边界。
+## 2. 默认读取顺序（最小上下文）
 
-3. 当前里程碑对应 architecture 文档  
-   - 按 `design_docs/roadmap_milestones_v3.md` 当前阶段读取对应文档。  
-   - 当前建议优先阅读：`design_docs/m4_architecture.md`（第二渠道适配）。
-   - 若任务涉及多代理协作控制或 devcoord，额外读取：`dev_docs/reviews/m7_summary_2026-03-01.md`、`dev_docs/devcoord/beads_control_plane.md`。
+1. `design_docs/modules.md`
+   - 当前系统模块边界、平台基线与主要实现入口。
 
-## 2. 里程碑 Architecture 文档映射
+2. `design_docs/system_prompt.md`
+   - 运行时 prompt 文件加载顺序、优先级与 workspace context 分层。
 
-- `design_docs/m1_architecture.md`：M1 已完成总结（实现基线）
-- `design_docs/m1_5_architecture.md`：M1.5 计划（Tool Modes，可控执行闭环）
-- `design_docs/m2_architecture.md`：M2 计划（会话内连续性）
-- `design_docs/m3_architecture.md`：M3 计划（会话外持久记忆 + 自我进化治理闭环）
-- `design_docs/m4_architecture.md`：M4 计划（Telegram 第二渠道）
-- `design_docs/m5_architecture.md`：M5 计划（运营可靠性，触发式）
-- `design_docs/m6_architecture.md`：M6 计划（模型迁移验证）
-- `M7`：无独立 architecture 文档；以 `dev_docs/plans/m7_devcoord-refactor_2026-02-28_v2.md`、`dev_docs/reviews/m7_summary_2026-03-01.md` 和 `dev_docs/devcoord/beads_control_plane.md` 为依据
+3. `design_docs/memory_architecture_v2.md`
+   - 长期 memory 原则：workspace 真源、retrieval plane、kernel / applications 分层。
 
-## 3. 场景化按需加载
+4. `design_docs/procedure_runtime_draft.md`
+   - Phase 2 方向的 deterministic procedure / runtime control 草案。
 
-- 记忆系统相关：
-  - `design_docs/memory_architecture_v2.md`
-  - 适用：memory 长期原则、workspace 真源、检索层定位、memory kernel / applications 分层
-  - `design_docs/memory_architecture.md`
-  - 适用：M2-M3 阶段的历史规划背景与早期记忆边界讨论
+5. `design_docs/phase1/index.md`
+   - 只有在需要 Phase 1 历史设计细节时再进入。
 
-- Deterministic procedure / runtime control 相关：
-  - `design_docs/procedure_runtime_draft.md`
-  - 适用：讨论高约束多步流程如何从 prompt / skill 下沉到 runtime object、guard、state machine 与 script executor；明确为何不引入通用 workflow engine
+## 3. 根目录文档（当前默认保留）
 
-- Prompt 文件体系相关：
-  - `design_docs/system_prompt.md`
-  - 适用：AGENTS/SOUL/USER/IDENTITY/TOOLS 等注入策略讨论
+- `design_docs/modules.md`
+- `design_docs/system_prompt.md`
+- `design_docs/memory_architecture_v2.md`
+- `design_docs/procedure_runtime_draft.md`
 
-- 用户验收与手工测试相关：
-  - `design_docs/m3_user_test_guide.md`
-  - `design_docs/m4_user_test_guide.md`
-  - `design_docs/m5_user_test_guide.md`
-  - `design_docs/m6_user_test_guide.md`
-  - 适用：M3/M4/M5/M6 完成态下的启动步骤、功能测试脚本、预期结果对照
+## 4. Phase 1 归档入口
 
-## 4. 历史文档（默认不作为当前依据）
-
-- `design_docs/roadmap_milestones.md`（v1）
-- `design_docs/roadmap_milestones_v2.md`（v2）
-- `design_docs/memory_architecture.md`（memory v1）
+- `design_docs/phase1/index.md`
+- `design_docs/phase1/roadmap_milestones_v3.md`
+- `design_docs/phase1/m1_architecture.md`
+- `design_docs/phase1/m1_5_architecture.md`
+- `design_docs/phase1/m2_architecture.md` ~ `design_docs/phase1/m6_architecture.md`
+- `design_docs/phase1/m3_user_test_guide.md` ~ `design_docs/phase1/m6_user_test_guide.md`
+- `design_docs/phase1/memory_architecture.md`
 
 说明：
-- 历史文档用于回溯，不作为当前计划的默认依据。
-- 当前 roadmap 以 `roadmap_milestones_v3.md` 为准。
-- 当前 memory 原则文档以 `design_docs/memory_architecture_v2.md` 为准。
+- `design_docs/phase1/roadmap_milestones_v3.md` 是 Phase 1 收口时的最终产品路线图，不再作为后续阶段默认入口。
+- 当前 memory 原则文档以根目录 `design_docs/memory_architecture_v2.md` 为准。
 
 ## 5. 与其他目录的关系
 

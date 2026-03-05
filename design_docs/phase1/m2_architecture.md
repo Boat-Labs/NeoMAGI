@@ -2,7 +2,7 @@
 
 > 状态：planned  
 > 对应里程碑：M2 会话内连续性  
-> 依据：`design_docs/roadmap_milestones_v3.md`、ADR 0027/0030/0035、现有 Session/Agent 实现、既有记忆规则讨论
+> 依据：`design_docs/phase1/roadmap_milestones_v3.md`、ADR 0027/0030/0035、现有 Session/Agent 实现、既有记忆规则讨论
 
 ## 1. 目标
 - 在单会话长链路中维持上下文连续性，避免“长对话失忆”和角色漂移。

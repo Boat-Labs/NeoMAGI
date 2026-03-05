@@ -99,7 +99,7 @@
   - `memory_search`：检索历史记忆（scope-aware）。
   - `memory_append`：受控追加写入 `memory/YYYY-MM-DD.md`（scope-aware）。
 - 接近 context 上限时，先做 memory flush，再做 compaction（M2/M3 衔接点）。
-- 本文仅定义记忆数据面，不定义 `SOUL.md` 进化治理流程（见 `design_docs/m3_architecture.md` + ADR 0027）。
+- 本文仅定义记忆数据面，不定义 `SOUL.md` 进化治理流程（见 `design_docs/phase1/m3_architecture.md` + ADR 0027）。
 - `memory_append` 仅用于记忆文件，不用于写入 `SOUL.md`。
 
 ## 6. M2/M3 衔接点（Contract）

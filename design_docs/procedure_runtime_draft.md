@@ -2,7 +2,7 @@
 
 > 状态：draft  
 > 日期：2026-03-05  
-> 依据：`design_docs/system_prompt.md`、`design_docs/modules.md`、`design_docs/m1_5_architecture.md`、`design_docs/roadmap_milestones_v3.md`、ADR 0024、ADR 0042、ADR 0043
+> 依据：`design_docs/system_prompt.md`、`design_docs/modules.md`、`design_docs/phase1/m1_5_architecture.md`、`design_docs/phase1/roadmap_milestones_v3.md`、ADR 0024、ADR 0042、ADR 0043
 
 ## 1. 为什么需要这份设计
 

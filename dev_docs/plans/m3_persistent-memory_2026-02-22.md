@@ -2,7 +2,7 @@
 
 > 状态：approved
 > 日期：2026-02-22（rev7 审批 2026-02-23）
-> 依据：`design_docs/m3_architecture.md`、`design_docs/memory_architecture.md`、`design_docs/roadmap_milestones_v3.md`、ADR 0006/0014/0027/0032/0034/0035
+> 依据：`design_docs/phase1/m3_architecture.md`、`design_docs/phase1/memory_architecture.md`、`design_docs/phase1/roadmap_milestones_v3.md`、ADR 0006/0014/0027/0032/0034/0035
 > rev2 变更：修复 ToolContext 主链路、upsert 策略、Evolution 状态机、rollback 工具入口、dmScope 配置归属、recall 参数契约、Use Case E 分层验收
 > rev3 变更：修复 ToolContext 并发串话风险（改为局部参数传递）、定义 scope_resolver 落地模块、统一 flush scope 映射口径、补旧数据兼容规则、硬化 M3-E 验收措辞
 > rev4 变更：dm_scope M3 硬限制为 main（fail-fast）、SessionIdentity 补 channel_id 字段并修正 session key 语义、flush scope 改为显式 ResolvedFlushCandidate wrapper

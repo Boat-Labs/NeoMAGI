@@ -2,7 +2,7 @@
 
 > 状态：approved
 > 日期：2026-03-04
-> 依据：`design_docs/roadmap_milestones_v3.md`（M5）、`design_docs/m5_architecture.md`
+> 依据：`design_docs/phase1/roadmap_milestones_v3.md`（M5）、`design_docs/phase1/m5_architecture.md`
 
 ## Context
 

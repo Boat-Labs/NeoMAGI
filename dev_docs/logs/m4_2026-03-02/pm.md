@@ -37,7 +37,7 @@ M4 Telegram 第二渠道适配五个 Phase 全部通过 Gate 验收，milestone 
 
 **文档（3 个）**
 - `decisions/0044-telegram-adapter-aiogram-same-process.md` — ADR 0044
-- `design_docs/m4_user_test_guide.md` — 手工 E2E 测试指南
+- `design_docs/phase1/m4_user_test_guide.md` — 手工 E2E 测试指南
 
 ### 修改文件（14 个）
 
@@ -47,7 +47,7 @@ M4 Telegram 第二渠道适配五个 Phase 全部通过 Gate 验收，milestone 
 - `src/gateway/app.py` — _handle_chat_send 重构为 dispatch_chat, Telegram lifespan 集成
 - `src/agent/agent.py` — handle_message 增加 identity/dm_scope, _persist_flush_candidates 显式 scope_key
 - `.env_template` — 新增 TELEGRAM_* 环境变量模板
-- `design_docs/m4_architecture.md` — planned → implemented 状态更新
+- `design_docs/phase1/m4_architecture.md` — planned → implemented 状态更新
 - `design_docs/modules.md` — Channel Adapter 段落更新
 - `decisions/INDEX.md` — 新增 ADR 0044 条目
 - `tests/test_scope_resolver.py` — 新增 per-channel-peer 测试

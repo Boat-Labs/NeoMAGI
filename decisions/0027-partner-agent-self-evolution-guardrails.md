@@ -32,7 +32,7 @@
   - 放弃原因：不利于形成可审计的“AI 自主进化 + 人类监督”分工边界。
 
 ## 影响
-- `design_docs/roadmap_milestones_v3.md` 新增长期目标校准小节，并补充 M2/M3 验收用例。
-- `design_docs/m2_architecture.md` 增加“反漂移基线”边界声明，明确 M2 不承接 M3 进化闭环。
+- `design_docs/phase1/roadmap_milestones_v3.md` 新增长期目标校准小节，并补充 M2/M3 验收用例。
+- `design_docs/phase1/m2_architecture.md` 增加“反漂移基线”边界声明，明确 M2 不承接 M3 进化闭环。
 - 后续 `SOUL.md` 相关实现与流程设计需遵循本决议，不得绕过 eval/rollback。
 - 在 M3 管线完成前，`v0-seed` 是唯一允许的人类文本写入例外；切换后回到 AI-only 常态治理。

@@ -31,9 +31,9 @@
 
 ## 影响
 - 需同步更新以下文档口径：
-  - `design_docs/roadmap_milestones_v3.md`
-  - `design_docs/m3_architecture.md`
-  - `design_docs/memory_architecture.md`
+  - `design_docs/phase1/roadmap_milestones_v3.md`
+  - `design_docs/phase1/m3_architecture.md`
+  - `design_docs/phase1/memory_architecture.md`
   - `design_docs/modules.md`（会话模块说明）
 - M3 验收需新增作用域正确性检查：不同 `dmScope` 下，不得发生未授权跨作用域记忆召回。
 - M4 验收需新增渠道映射正确性检查：同一用户在不同渠道的会话隔离行为符合配置策略。
