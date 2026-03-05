@@ -259,7 +259,8 @@ bd close bd-42 --reason "Completed" --json
 bd 的 issue 数据仍存于本地 beads / Dolt 仓库，但本项目**不直接使用** `bd dolt pull` / `bd dolt push` / `bd sync` 做远端同步：
 
 - Each write auto-commits to local Dolt history
-- 由于远端使用 GitHub 承载、路径与本地 Dolt remote 约定不一致，统一通过 `just beads-pull` / `just beads-push` 同步
+- 若本轮改动包含 beads / bd issue 数据或 devcoord control plane 写入，统一通过 `just beads-pull` / `just beads-push` 同步
+- 纯代码 / 文档 / 测试改动、且未改 beads 数据时，不需要运行 beads 同步
 - 不要直接运行 `bd dolt pull` / `bd dolt push` / `bd sync`
 
 ### Important Rules
@@ -288,6 +289,7 @@ For more details, see README.md and docs/QUICKSTART.md.
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
+   # If this session changed beads / bd issue / devcoord control-plane data:
    just beads-pull
    just beads-push
    git push
@@ -299,6 +301,7 @@ For more details, see README.md and docs/QUICKSTART.md.
 
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds
+- `just beads-pull` / `just beads-push` 只在本轮实际改动 beads 数据时才是必需步骤
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
