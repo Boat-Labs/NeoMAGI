@@ -50,6 +50,7 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0044 | Telegram adapter: aiogram same-process + per-channel-peer scope | accepted | 2026-03-02 | `decisions/0044-telegram-adapter-aiogram-same-process.md` |
 | 0045 | Reset devcoord beads control-plane history and restart clean | accepted | 2026-03-02 | `decisions/0045-reset-devcoord-beads-control-plane-history.md` |
 | 0046 | Upgrade database baseline to PostgreSQL 17 | accepted | 2026-03-05 | `decisions/0046-upgrade-database-baseline-to-postgresql-17.md` |
+| 0047 | NeoMAGI multi-agent: single-SOUL execution units | accepted | 2026-03-05 | `decisions/0047-neomagi-multi-agent-single-soul-execution-units.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。
