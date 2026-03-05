@@ -2,7 +2,7 @@
 
 > 状态：current  
 > 日期：2026-03-04  
-> 用途：作为 memory 设计的长期原则文档，替代早期偏 M2/M3 规划口径的 `design_docs/phase1/memory_architecture.md`
+> 用途：作为 memory 设计的长期原则文档，替代早期偏 `P1-M2` / `P1-M3` 规划口径的 `design_docs/phase1/memory_architecture.md`
 
 ## 1. 核心判断
 - Memory 的真源保持在 workspace，而不是数据库。
@@ -76,7 +76,7 @@
 - `memory_entries` 继续视为检索数据面，而非真源。
 - daily notes 与 `MEMORY.md` 继续视为记忆真源。
 - reindex 是正常恢复手段，不是异常补丁。
-- M5 的 `doctor/preflight` 应显式区分：
+- `P1-M5` 的 `doctor/preflight` 应显式区分：
   - memory truth: workspace
   - memory retrieval plane: PostgreSQL
 

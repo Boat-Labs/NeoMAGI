@@ -94,6 +94,7 @@ neomagi/
   - Memory 架构：`design_docs/memory_architecture_v2.md`
   - Session/模块边界：`design_docs/modules.md`
   - Phase 1 归档：`design_docs/phase1/index.md`
+  - Milestone 命名规则：跨 phase 文档统一使用 `P1-M*` / `P2-M*`，避免裸 `M*` 歧义
 
 ## 开发约定
 

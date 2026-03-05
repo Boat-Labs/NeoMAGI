@@ -87,7 +87,7 @@ When in doubt, ask.
 - `SOUL.md` 文本原则上仅允许 agent 写入；人类不直接编辑内容。
 - 任意变更必须先经过 eval，再允许生效。
 - 人类保留 veto/rollback 权限，可回退到最近稳定版本。
-- 新生阶段（bootstrap）例外：若 workspace 不存在 `SOUL.md`，允许人类一次性写入 `v0-seed`；当 M3 的 eval/rollback 管线可用且首个 AI 提案通过 eval 后，切换为 AI-only 写入常态。
+- 新生阶段（bootstrap）例外：若 workspace 不存在 `SOUL.md`，允许人类一次性写入 `v0-seed`；当 `P1-M3` 的 eval/rollback 管线可用且首个 AI 提案通过 eval 后，切换为 AI-only 写入常态。
 
 样例：
 ```markdown

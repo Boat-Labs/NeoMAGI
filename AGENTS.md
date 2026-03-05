@@ -186,6 +186,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 - 运行时 prompt 文件加载顺序、按需加载与优先级：`design_docs/system_prompt.md`
 - Memory 架构与策略：`design_docs/memory_architecture_v2.md`
 - Phase 1 里程碑顺序与产品实现路线（归档）：`design_docs/phase1/roadmap_milestones_v3.md`
+- Milestone 命名规则：跨 phase 文档统一使用 `P1-M*` / `P2-M*`，避免裸 `M*` 歧义
 - 详细开发手册与技术栈摘要：`CLAUDE.md`
 
 <!-- BEGIN BEADS INTEGRATION -->

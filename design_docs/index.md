@@ -7,6 +7,7 @@
 
 - Phase 1 milestone 设计文档已整体归档到 `design_docs/phase1/`。
 - 根目录当前只保留跨阶段文档与 Phase 2 讨论期草案，目的是减少默认上下文负担。
+- 为避免跨 phase 歧义，跨阶段文档中的 milestone 编号默认采用 `P1-M*` / `P2-M*` 形式。
 - 若任务明确需要历史 milestone 细节、旧验收口径或回归考古，再进入 `design_docs/phase1/`。
 
 ## 2. 默认读取顺序（最小上下文）

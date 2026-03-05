@@ -450,7 +450,7 @@ missing hard inputs: report_path, report_commit
 - 在 tool execute 前跑 procedure guard；
 - 在 tool execute 后做状态迁移与 CAS 持久化。
 
-### 13.4 与 M7 devcoord 的关系
+### 13.4 与 `P1-M7` devcoord 的关系
 
 本设计与 ADR 0042 / 0043 一致：
 - 仍坚持“确定性流程下沉到脚本”；
