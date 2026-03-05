@@ -306,3 +306,16 @@
 - Next: m5-g2 已关闭，等待 M5 下一条 gate
 - Risk: 无
 <!-- devcoord:end milestone=m5 -->
+
+## 2026-03-05 (local) | M5 closeout
+- Status: done
+- Done: M5 收尾完成并关闭，post-review findings 全部修复并完成手工验证；同时新增 ADR 0046，将数据库基线从 PostgreSQL 16 升级到 PostgreSQL 17，并同步更新 CI、治理文档、设计文档与测试夹具
+- Detail:
+  - 可靠性修复：preflight 追加 `workspace/memory` 可写性检查；restore 在解压前清空 workspace、按配置路径执行恢复；`pg_restore` 已知跨主版本兼容噪音降级为 warning
+  - 健康检查修复：provider runtime health 改为按 provider 独立追踪，覆盖非流式、流式创建阶段和 stream-phase 失败；`/health/ready` 输出 provider 级 unhealthy 项
+  - 运维与文档修复：`just restore` / `just backup` 参数示例去掉错误的额外 `--`；补充 `design_docs/m5_user_test_guide.md`；M5 gate/log/progress 投影已入库
+  - 基线升级：ADR 0046 生效，`AGENTS.md` / `CLAUDE.md` / `.github/workflows/ci.yml` / design docs / tests 全部切到 PostgreSQL 17
+- Evidence: commit `1019b55`; `dev_docs/plans/m5_post-review-fix_2026-03-04.md`; `design_docs/m5_user_test_guide.md`; `decisions/0046-upgrade-database-baseline-to-postgresql-17.md`
+- Validation: `just lint`; `just test` (845 passed, 3 existing warnings); `just test-frontend` (16 passed); 用户手工完成 M5 restore/preflight 验证并通过
+- Next: M5 全部关闭；后续里程碑默认按 PostgreSQL 17 基线推进
+- Risk: 无阻塞风险；全量测试仍有 3 个既有 RuntimeWarning，未由本轮引入
