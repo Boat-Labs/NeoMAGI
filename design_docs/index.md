@@ -6,29 +6,34 @@
 ## 1. 当前状态
 
 - Phase 1 milestone 设计文档已整体归档到 `design_docs/phase1/`。
-- 根目录当前只保留跨阶段文档与 Phase 2 讨论期草案，目的是减少默认上下文负担。
+- Phase 2 文档已开始进入 `design_docs/phase2/`。
+- 根目录当前只保留跨阶段文档与当前 phase 的高层入口，目的是减少默认上下文负担。
 - 为避免跨 phase 歧义，跨阶段文档中的 milestone 编号默认采用 `P1-M*` / `P2-M*` 形式。
 - 若任务明确需要历史 milestone 细节、旧验收口径或回归考古，再进入 `design_docs/phase1/`。
 
 ## 2. 默认读取顺序（最小上下文）
 
-1. `design_docs/modules.md`
+1. `design_docs/phase2/roadmap_milestones_v1.md`
+   - 当前生效中的 Phase 2 产品路线图草案。
+
+2. `design_docs/modules.md`
    - 当前系统模块边界、平台基线与主要实现入口。
 
-2. `design_docs/system_prompt.md`
+3. `design_docs/system_prompt.md`
    - 运行时 prompt 文件加载顺序、优先级与 workspace context 分层。
 
-3. `design_docs/memory_architecture_v2.md`
+4. `design_docs/memory_architecture_v2.md`
    - 长期 memory 原则：workspace 真源、retrieval plane、kernel / applications 分层。
 
-4. `design_docs/procedure_runtime_draft.md`
+5. `design_docs/procedure_runtime_draft.md`
    - Phase 2 方向的 deterministic procedure / runtime control 草案。
 
-5. `design_docs/phase1/index.md`
+6. `design_docs/phase1/index.md`
    - 只有在需要 Phase 1 历史设计细节时再进入。
 
-## 3. 根目录文档（当前默认保留）
+## 3. 当前默认激活文档
 
+- `design_docs/phase2/roadmap_milestones_v1.md`
 - `design_docs/modules.md`
 - `design_docs/system_prompt.md`
 - `design_docs/memory_architecture_v2.md`
