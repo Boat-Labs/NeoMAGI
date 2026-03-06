@@ -52,6 +52,7 @@ class SoulGovernedObjectAdapter:
             diff_summary=proposal.diff_summary,
             new_content=new_content,
             evidence_refs=list(proposal.evidence_refs),
+            created_by=proposal.proposed_by,
         )
         version = await self._engine.propose(soul_proposal)
         logger.info(

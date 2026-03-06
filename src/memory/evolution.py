@@ -41,6 +41,7 @@ class SoulProposal:
     diff_summary: str
     new_content: str
     evidence_refs: list[str] = field(default_factory=list)
+    created_by: str = "agent"
 
 
 @dataclass
@@ -127,7 +128,7 @@ class EvolutionEngine:
                     "evidence_refs": proposal.evidence_refs,
                 },
                 eval_result=None,
-                created_by="agent",
+                created_by=proposal.created_by,
             )
             db.add(record)
             await db.commit()

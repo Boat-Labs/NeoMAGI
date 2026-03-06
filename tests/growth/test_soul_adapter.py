@@ -127,6 +127,32 @@ class TestPropose:
             await adapter.propose(proposal)
 
     @pytest.mark.asyncio
+    async def test_proposed_by_forwarded(
+        self, adapter: SoulGovernedObjectAdapter, mock_engine: AsyncMock
+    ) -> None:
+        proposal = GrowthProposal(
+            object_kind=GrowthObjectKind.soul,
+            object_id="soul-1",
+            intent="Update",
+            risk_notes="None",
+            diff_summary="Changed",
+            payload={"new_content": "# Soul"},
+            proposed_by="user:zhiliang",
+        )
+        await adapter.propose(proposal)
+        soul_proposal = mock_engine.propose.call_args[0][0]
+        assert soul_proposal.created_by == "user:zhiliang"
+
+    @pytest.mark.asyncio
+    async def test_proposed_by_defaults_to_agent(
+        self, adapter: SoulGovernedObjectAdapter, mock_engine: AsyncMock
+    ) -> None:
+        proposal = _make_growth_proposal()
+        await adapter.propose(proposal)
+        soul_proposal = mock_engine.propose.call_args[0][0]
+        assert soul_proposal.created_by == "agent"
+
+    @pytest.mark.asyncio
     async def test_evidence_refs_forwarded(
         self, adapter: SoulGovernedObjectAdapter, mock_engine: AsyncMock
     ) -> None:

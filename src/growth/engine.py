@@ -48,6 +48,11 @@ class GrowthGovernanceEngine:
 
     async def propose(self, kind: GrowthObjectKind, proposal: GrowthProposal) -> int:
         """Create a governed proposal.  Returns the proposal version number."""
+        if proposal.object_kind != kind:
+            raise UnsupportedGrowthObjectError(
+                f"Proposal object_kind '{proposal.object_kind}' does not match "
+                f"routing kind '{kind}'"
+            )
         adapter = self._require_adapter(kind)
         version = await adapter.propose(proposal)
         logger.info("growth_proposed", kind=kind, version=version, intent=proposal.intent[:80])
