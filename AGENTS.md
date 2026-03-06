@@ -98,7 +98,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 
 ### 事件日志（强制，append-only）
 
-- PM 必须通过 `uv run python scripts/devcoord/coord.py ...` 记录协作控制事件；repo 根 `.beads` 为 SSOT，`dev_docs/logs/{milestone}_{YYYY-MM-DD}/heartbeat_events.jsonl`、`gate_state.md`、`watchdog_status.md` 为 `render` 投影。
+- PM 必须通过 `uv run python scripts/devcoord/coord.py ...` 记录协作控制事件；repo 根 `.beads` 为 SSOT，`dev_docs/logs/<phase>/{milestone}_{YYYY-MM-DD}/heartbeat_events.jsonl`、`gate_state.md`、`watchdog_status.md` 为 `render` 投影。
 - PM 收到任何状态变更消息（含 ACK、Gate、PING、报告同步）后，必须在同一 PM 回合先完成对应 control plane 写入，再发送下一条控制指令（append-first）。
 - 若同回合无法落盘，PM 必须先记录 `LOG_PENDING`（通过 `log-pending`），并在下一 PM 回合第一步补录。
 - 最大允许滞后为 1 个 PM 回合，不得跨 2 个 PM 回合。
@@ -171,7 +171,7 @@ NeoMAGI 是一个开源 personal agent：有持久记忆、代表用户信息利
 
 ## Agent 工作日志策略
 - 作用域：本策略仅适用于 role 经验日志，不适用于协作控制日志。
-- 执行：保留 `dev_docs/logs/{milestone}_{YYYY-MM-DD}/` 目录；协作控制三件套由 `scripts/devcoord/coord.py render` 生成，各 role 经验日志为 best-effort。
+- 执行：保留 `dev_docs/logs/phase1/`、`dev_docs/logs/phase2/` 目录；协作控制三件套由 `scripts/devcoord/coord.py render` 生成，各 role 经验日志为 best-effort。
 - 门槛：role 经验日志不作为阻塞条件；缺少协作控制日志则阻塞。
 - 协作控制日志（`heartbeat_events.jsonl`、`gate_state.md`、`watchdog_status.md`）仍为强制门槛，必须按“协作控制与活性治理”章节执行。
 - 如提交 role 日志，仍建议包含：技能/工具名称、调用次数、典型场景、效果评估。

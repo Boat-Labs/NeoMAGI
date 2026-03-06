@@ -2,6 +2,15 @@
 
 `dev_docs/logs/` 用于保存 milestone 级协作日志目录，但 M7 起协作控制三件套已经降级为 projection。
 
+## 目录结构
+
+- `dev_docs/logs/README.md`
+  - 根入口与命名规则说明。
+- `dev_docs/logs/phase1/`
+  - Phase 1 协作日志与 projection 归档。
+- `dev_docs/logs/phase2/`
+  - Phase 2 协作日志与 projection。
+
 ## Projection 文件
 
 以下文件由 `uv run python scripts/devcoord/coord.py render` 生成，不再作为人工主写入口：
@@ -14,13 +23,14 @@
 
 ## 可选人工日志
 
-各 role 的经验性日志仍可保留为 `dev_docs/logs/{milestone}_{YYYY-MM-DD}/{role}.md`，但它们不是 gate / ACK / heartbeat / recovery 的真源。
+各 role 的经验性日志仍可保留为 `dev_docs/logs/<phase>/{milestone}_{YYYY-MM-DD}/{role}.md`，但它们不是 gate / ACK / heartbeat / recovery 的真源。
 
 ## 路径命名
 
+- phase 子目录：`phase1/`、`phase2/`
 - 目录命名：`{milestone}_{YYYY-MM-DD}`
 - role 经验日志文件命名：`{role}.md`
-- 完整路径：`dev_docs/logs/{milestone}_{YYYY-MM-DD}/{role}.md`
+- 完整路径：`dev_docs/logs/<phase>/{milestone}_{YYYY-MM-DD}/{role}.md`
 
 ## 命名约束
 
@@ -29,9 +39,10 @@
 
 ## 示例
 
-- `dev_docs/logs/m7_2026-03-01/heartbeat_events.jsonl`
-- `dev_docs/logs/m7_2026-03-01/gate_state.md`
-- `dev_docs/logs/m7_2026-03-01/watchdog_status.md`
-- `dev_docs/logs/m1.1_2026-02-17/backend.md`
-- `dev_docs/logs/m1.1_2026-02-17/frontend.md`
-- `dev_docs/logs/m1.1_2026-02-17/pm.md`
+- `dev_docs/logs/phase1/m7_2026-03-01/heartbeat_events.jsonl`
+- `dev_docs/logs/phase1/m7_2026-03-01/gate_state.md`
+- `dev_docs/logs/phase1/m7_2026-03-01/watchdog_status.md`
+- `dev_docs/logs/phase1/m1.1_2026-02-17/backend.md`
+- `dev_docs/logs/phase1/m1.1_2026-02-17/frontend.md`
+- `dev_docs/logs/phase1/m1.1_2026-02-17/pm.md`
+- `dev_docs/logs/phase2/p2-m1_2026-03-06/pm.md`

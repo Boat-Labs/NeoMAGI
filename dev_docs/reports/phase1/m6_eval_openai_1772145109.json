@@ -1,0 +1,29 @@
+{
+  "meta": {
+    "provider": "openai",
+    "timestamp": 1772145109,
+    "gateway_url": "ws://localhost:19789/ws",
+    "total_tasks": 1
+  },
+  "summary": {
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "errored": 0,
+    "total_tokens_est": 546,
+    "total_latency_ms": 20770.9
+  },
+  "tasks": [
+    {
+      "task_id": "T13",
+      "category": "long_context",
+      "description": "12-round context retention test",
+      "status": "PASS",
+      "latency_ms": 20770.9,
+      "tokens_est": 546,
+      "detail": "Context checks: {'name': True, 'city': True, 'cat': True, 'book': True}, 4/4 passed",
+      "tool_calls": [],
+      "rounds": 12
+    }
+  ]
+}

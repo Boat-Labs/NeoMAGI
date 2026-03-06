@@ -22,7 +22,7 @@ M3 模块测试全绿（468 tests），但审阅发现网关装配未接线（P0
 | 7 | `tests/test_evolution.py` | 专项：commit 失败补偿 + 补偿失败 + 对账修复 |
 | 8 | `tests/test_memory_curator.py` | 专项：空输出不覆盖 MEMORY.md |
 | 9 | `tests/test_ensure_schema.py`（新建） | 专项：trigger 幂等 + search_vector 填充 |
-| 10 | `dev_docs/logs/m3_2026-02-24/pm.md` | 修正测试计数和 RiskLevel 描述 |
+| 10 | `dev_docs/logs/phase1/m3_2026-02-24/pm.md` | 修正测试计数和 RiskLevel 描述 |
 
 ## Step 1 — P0: 网关接线
 

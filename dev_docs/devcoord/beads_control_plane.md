@@ -6,7 +6,7 @@
 
 ## 1. 目的
 
-本文定义 NeoMAGI 在 M7 中引入的 beads 控制面架构，用于替代当前由 prompt 驱动、PM 手工维护 `dev_docs/logs/*` 的战术执行层协作流程。
+本文定义 NeoMAGI 在 M7 中引入的 beads 控制面架构，用于替代当前由 prompt 驱动、PM 手工维护 `dev_docs/logs/<phase>/*` 的战术执行层协作流程。
 
 本文只覆盖：
 - PM / backend / tester 的协作控制状态；
@@ -15,7 +15,7 @@
 
 本文不覆盖：
 - 产品运行时 PostgreSQL 数据面；
-- `decisions/`、`design_docs/`、`dev_docs/reviews/`、`dev_docs/reports/` 的存储替换；
+- `decisions/`、`design_docs/`、`dev_docs/reviews/<phase>/`、`dev_docs/reports/<phase>/` 的存储替换；
 - beads federation / remote sync / `beads-sync` 远程分支工作流。
 
 ## 2. 核心原则
@@ -24,7 +24,7 @@
 - LLM 负责思考，程序负责确定性执行。
 - skill 只负责约束 agent 行为与调用规范，不承载复杂状态机，也不作为独立运行时分层。
 - 所有协作状态变更必须先进入 beads，再生成 `dev_docs` 投影。
-- `dev_docs/logs/*` 与 `project_progress.md` 是 projection，不是控制面本体。
+- `dev_docs/logs/<phase>/*` 与 `project_progress.md` 是 projection，不是控制面本体。
 - `scripts/devcoord` 是协议语义唯一实现层；beads 只负责 persistence / query / history。
 - M7 实现的是最小协调内核，不是覆盖所有执行路径的 workflow engine。
 - 治理状态机只约束权限、审计、恢复与对账边界，不规定任务必须按唯一执行路径完成。
@@ -36,7 +36,7 @@
 LLM
   -> scripts/devcoord/*
     -> beads / Dolt
-    -> dev_docs/logs/* + dev_docs/progress/project_progress.md
+    -> dev_docs/logs/<phase>/* + dev_docs/progress/project_progress.md
 ```
 
 ### 3.1 LLM
@@ -281,9 +281,9 @@ Phase 1 固定采用以下实现方式：
 ## 10. Projection 规则
 
 ### 10.1 生成文件
-- `dev_docs/logs/{milestone}_{date}/heartbeat_events.jsonl`
-- `dev_docs/logs/{milestone}_{date}/gate_state.md`
-- `dev_docs/logs/{milestone}_{date}/watchdog_status.md`
+- `dev_docs/logs/<phase>/{milestone}_{date}/heartbeat_events.jsonl`
+- `dev_docs/logs/<phase>/{milestone}_{date}/gate_state.md`
+- `dev_docs/logs/<phase>/{milestone}_{date}/watchdog_status.md`
 - `dev_docs/progress/project_progress.md`
 
 ### 10.2 生成原则
@@ -327,7 +327,7 @@ Phase 1 固定采用以下实现方式：
 - backend / tester 改为通过 skill 调 `scripts/devcoord`。
 
 ### Stage 4：Projection-Only
-- `dev_docs/logs/*` 正式降级为投影层。
+- `dev_docs/logs/<phase>/*` 正式降级为投影层。
 
 ## 13. 与现有治理文档的关系
 

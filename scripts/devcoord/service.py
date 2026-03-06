@@ -1648,9 +1648,10 @@ class CoordService:
         )
         status = "in_progress"
         done_summary = "control plane initialized"
+        phase_subdir = self.paths.phase_subdir(milestone)
         evidence_parts = [
-            f"`dev_docs/logs/{milestone}_{run_date}/gate_state.md`",
-            f"`dev_docs/logs/{milestone}_{run_date}/watchdog_status.md`",
+            f"`dev_docs/logs/{phase_subdir}/{milestone}_{run_date}/gate_state.md`",
+            f"`dev_docs/logs/{phase_subdir}/{milestone}_{run_date}/watchdog_status.md`",
         ]
         next_step = f"等待 {milestone.upper()} 下一条 gate 或 phase 指令"
         risk = "无"

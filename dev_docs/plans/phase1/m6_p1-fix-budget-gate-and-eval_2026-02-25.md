@@ -92,9 +92,9 @@ settle best-effort 不抛异常，但日志必须包含：
 | 文件 | 改动类型 |
 |------|---------|
 | `scripts/m6_eval.py` (run_t11, run_t12) | 核心修复 |
-| `dev_docs/reports/m6_eval_openai_<new_ts>.json` | 新生成（脚本按时间戳命名） |
-| `dev_docs/reports/m6_eval_gemini_<new_ts>.json` | 新生成（脚本按时间戳命名） |
-| `dev_docs/reports/m6_migration_conclusion.md` | 更新，显式引用新报告文件名和时间戳 |
+| `dev_docs/reports/phase1/m6_eval_openai_<new_ts>.json` | 新生成（脚本按时间戳命名） |
+| `dev_docs/reports/phase1/m6_eval_gemini_<new_ts>.json` | 新生成（脚本按时间戳命名） |
+| `dev_docs/reports/phase1/m6_migration_conclusion.md` | 更新，显式引用新报告文件名和时间戳 |
 
 ### 修复内容
 

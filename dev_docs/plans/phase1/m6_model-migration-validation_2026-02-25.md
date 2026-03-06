@@ -735,7 +735,7 @@ Gemini OpenAI-compat 可能返回略有不同的 delta 结构。处理策略：
 - 按 task ID 发送 `chat.send` RPC（附带 `provider` 字段），收集 streaming 响应（text chunks + tool calls + done）
 - 每个 task 使用独立 session_id（`m6_eval_{provider}_{task_id}_{timestamp}`），避免跨任务和跨 provider 污染。同一次 eval run 内所有 task 共享相同的 `{timestamp}`，网关通过 `_extract_eval_run_id()` 从 session_id 前缀推导出 `eval_run_id = "m6_eval_{provider}_{timestamp}"`（详见 §5.2），无需在 `ChatSendParams` 中额外传递
 - 记录：响应内容、延迟(ms)、token 估算、是否通过
-- 输出 JSON 结果文件到 `dev_docs/reports/m6_eval_{provider}_{timestamp}.json`
+- 输出 JSON 结果文件到 `dev_docs/reports/phase1/m6_eval_{provider}_{timestamp}.json`
 - `--dry-run` 模式：仅打印任务列表和预估 token，不连接 Gateway
 
 **与 Phase 2 smoke 的区别**：
@@ -753,7 +753,7 @@ Gemini OpenAI-compat 可能返回略有不同的 delta 结构。处理策略：
 
 **全 provider 统一预算池**（ADR 0041）：所有 provider 的 agent-run 共享同一全局累计值（`budget_state.cumulative_eur`）。`budget_reservations` 表按 provider 分项记录，支持迁移分析。
 
-**报表输出**：eval 脚本从 `budget_reservations` 表查询（`WHERE eval_run_id = $1`，仅含当次 run 的记录），输出到 `dev_docs/reports/m6_eval_{provider}_{timestamp}.json`，包含：
+**报表输出**：eval 脚本从 `budget_reservations` 表查询（`WHERE eval_run_id = $1`，仅含当次 run 的记录），输出到 `dev_docs/reports/phase1/m6_eval_{provider}_{timestamp}.json`，包含：
 - 全局预算累计（闸门依据，读 `budget_state`）
 - 当次 eval run 的 Gemini 分项成本（迁移验证分析，按 `eval_run_id + provider` 过滤）
 - 当次 eval run 的 OpenAI 分项成本（基线对照，同上）
@@ -774,7 +774,7 @@ Gemini OpenAI-compat 可能返回略有不同的 delta 结构。处理策略：
 
 ### 7.4 迁移结论模板
 
-评测完成后生成 `dev_docs/reports/m6_migration_conclusion.md`：
+评测完成后生成 `dev_docs/reports/phase1/m6_migration_conclusion.md`：
 
 ```markdown
 # M6 迁移结论

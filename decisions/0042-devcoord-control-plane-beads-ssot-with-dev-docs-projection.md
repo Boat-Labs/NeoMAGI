@@ -5,9 +5,9 @@
 - Note: devcoord 运行时入口口径已由 ADR 0043 补充修订；本 ADR 的 SSOT / 协议边界不变。
 
 ## 选了什么
-- 将开发协作控制面（PM / backend / tester 的战术执行层）重构为：`beads + Dolt` 作为结构化 SSOT，`dev_docs/logs/` 与 `dev_docs/progress/` 作为兼容投影层。
+- 将开发协作控制面（PM / backend / tester 的战术执行层）重构为：`beads + Dolt` 作为结构化 SSOT，`dev_docs/logs/<phase>/` 与 `dev_docs/progress/` 作为兼容投影层。
 - 将 M7 定位为“最小协调内核（minimal coordination kernel）”建设，而不是全流程 workflow engine；治理状态机只约束推进权限、审计、恢复与对账边界，不规定任务必须按唯一执行路径完成。
-- 保持战略层文档不变：`decisions/`、`design_docs/`、`dev_docs/plans/`、`dev_docs/reviews/`、`dev_docs/reports/` 继续作为人工审阅与长期记忆的主载体。
+- 保持战略层文档不变：`decisions/`、`design_docs/`、`dev_docs/plans/`、`dev_docs/reviews/<phase>/`、`dev_docs/reports/<phase>/` 继续作为人工审阅与长期记忆的主载体。
 - 将运行时调用边界固定为：LLM 负责判断与参数提取；`scripts/devcoord` 负责 deterministic 执行；agent 不直接写 `dev_docs` 日志文件，不自由拼装 `bd` 命令细节。skill 仅作为行为约束与调用规范存在，不作为额外运行时分层。
 - 明确责任边界：`scripts/devcoord` 是协作协议与状态机语义的唯一实现层；`beads + Dolt` 只承担 persistence / query / history，不承担 ACK、生效、恢复握手、超时判定、对账等协议语义。
 - 执行层默认采用 lease / handoff 协作方式，而不是把任务永久锁死在单一路径；后续允许在少量适合的任务上引入 `open_competition`，但不改变 Gate / ACK 等治理边界。
@@ -25,7 +25,7 @@
 - 本次改造聚焦开发协作控制面，不触碰产品运行时 PostgreSQL 数据面，能在不影响用户功能的前提下改善 Agent Teams 的执行可靠性。
 
 ## 放弃了什么
-- 方案 A：继续以 `dev_docs/logs/*.md` + `*.jsonl` 为唯一控制面，仅优化 prompt 约束。
+- 方案 A：继续以 `dev_docs/logs/<phase>/*.md` + `*.jsonl` 为唯一控制面，仅优化 prompt 约束。
   - 放弃原因：核心问题不在文案，而在状态机缺少结构化存储与程序化校验；继续堆 prompt 只能提高复杂度。
 - 方案 B：让 agent 直接自由使用 `bd` / `beads` 命令。
   - 放弃原因：命令拼装、metadata key、状态机顺序、投影刷新都会再次回到模型不稳定区间，无法满足 deterministic 目标。
@@ -34,10 +34,10 @@
 
 ## 影响
 - 新增内部治理里程碑 `M7`，其性质为“开发协作控制面重构”，不属于产品 roadmap 新功能里程碑，不改变 `design_docs/phase1/roadmap_milestones_v3.md` 的产品排序。
-- 将新增 `scripts/devcoord/` 命令面与对应 skill 规范，所有协作状态写入统一走 wrapper，不允许直接改 `dev_docs/logs/` 文件。
+- 将新增 `scripts/devcoord/` 命令面与对应 skill 规范，所有协作状态写入统一走 wrapper，不允许直接改 `dev_docs/logs/<phase>/` 文件。
 - 将新增 `dev_docs/devcoord/beads_control_plane.md` 作为控制面架构文档，定义对象模型、命令面、投影规则、共享 `BEADS_DIR` 拓扑与迁移顺序。
 - M7 Phase 1 将固定通过 `bd ... --json` CLI shell-out 与 beads 交互；不直接写 Dolt SQL，不通过 MCP server。
 - M7 的状态机实现应保持“治理层强约束、执行层弱路径”：前者负责权限与审计，后者保留 lease / handoff / rescue / competition 的弹性空间。
 - 若后续事件量显著增长，可再引入“审计级持久 / 操作级临时”的分级策略；当前阶段仍以 append-only 审计事件为基线，不预先优化到高吞吐协调消息场景。
-- `dev_docs/logs/README.md`、PM Action Plan、teammate tactical prompt 后续需要改写为“调用控制面接口”，而非“直接维护日志文件”。
+- `dev_docs/logs/README.md`、PM Action Plan、teammate tactical prompt 后续需要改写为“调用控制面接口”，而非“直接维护 phase-aware 日志文件”。
 - 需要为“产品运行时 PostgreSQL SSOT”与“开发协作控制面 beads SSOT”做边界澄清：前者仍是产品数据面唯一基线，后者仅是内部治理与执行态控制面。

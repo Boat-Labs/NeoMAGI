@@ -29,7 +29,7 @@ Required: `milestone`, `phase`, `gate_id`, `last_seen_gate`, `task`.
 ## gate-review
 
 ```json
-{"milestone": "m8", "phase": "p1", "gate_id": "m8-g0", "result": "pass", "report_path": "dev_docs/reviews/m8_g0_review.md", "report_commit": "<sha>", "target_commit": "<sha>"}
+{"milestone": "p2-m1", "phase": "p1", "gate_id": "p2-m1-g0", "result": "pass", "report_path": "dev_docs/reviews/phase2/p2-m1_g0_review.md", "report_commit": "<sha>", "target_commit": "<sha>"}
 ```
 
 Required: `milestone`, `phase`, `gate_id`, `result`, `report_path`, `report_commit`, `target_commit`.

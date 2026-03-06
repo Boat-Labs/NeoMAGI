@@ -11,7 +11,7 @@ This skill defines the backend teammate's devcoord write path.
 
 - Only operate from your own worktree and branch.
 - Before any devcoord write, verify `git rev-parse HEAD` matches the PM `target_commit`; if it does not, stop and report the mismatch instead of writing.
-- Never edit `dev_docs/logs/*` or `dev_docs/progress/project_progress.md` directly.
+- Never edit `dev_docs/logs/phase1/*`, `dev_docs/logs/phase2/*`, or `dev_docs/progress/project_progress.md` directly.
 - Never call `bd` directly for control-plane writes.
 - Do not start a new phase without a valid `GATE_OPEN` and `target_commit`.
 - Prefer `uv run python scripts/devcoord/coord.py apply <action> --payload-stdin`.

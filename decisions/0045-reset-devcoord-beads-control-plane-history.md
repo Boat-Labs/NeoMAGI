@@ -7,7 +7,7 @@
 - 将当前 NeoMAGI 的 beads/devcoord 协作控制面视为试验期资产，正式退役其既有本地状态与远端历史，不做迁移、不做兼容保留、不继续修补旧控制面。
 - 从一个全新的 beads 基线重新初始化未来协作控制面；新的 beads 仅承载后续项目治理与执行态，不再承担既往里程碑的长期历史账本职责。
 - 重置后使用 beads 官方默认初始化与默认目录/数据库策略，不再保留 NeoMAGI 私有 beads 配置或私有目录约定。
-- 将历史里程碑、实施教训、治理结论与验收证据的长期依据固定为 Git 提交与 Markdown 文档，包括：`decisions/`、`dev_docs/plans/`、`dev_docs/reviews/`、`dev_docs/logs/`、`design_docs/`。
+- 将历史里程碑、实施教训、治理结论与验收证据的长期依据固定为 Git 提交与 Markdown 文档，包括：`decisions/`、`dev_docs/plans/`、`dev_docs/reviews/<phase>/`、`dev_docs/logs/<phase>/`、`design_docs/`。
 - 将本次调整明确限定为项目治理层重置，不涉及产品代码、功能逻辑、数据库 schema、运行时行为或既有工作分支内容。
 - 新控制面遵循“单项目、单 beads 控制面、轻装运行”的原则；实际数据库物理布局以 beads 当前发布版默认行为为准，项目侧不另行发明目录语义或数据库命名约定。
 

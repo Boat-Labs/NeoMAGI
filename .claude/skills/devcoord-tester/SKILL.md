@@ -12,7 +12,7 @@ This skill defines the tester teammate's devcoord write path.
 - Never review against an unpushed local backend state.
 - Before acceptance, sync to the visible backend commit and confirm `git rev-parse HEAD`.
 - Before any devcoord write, verify the current `HEAD` matches the gate `target_commit`; if not, sync or stop and report the mismatch instead of writing.
-- Never edit `dev_docs/logs/*` or `dev_docs/progress/project_progress.md` directly.
+- Never edit `dev_docs/logs/phase1/*`, `dev_docs/logs/phase2/*`, or `dev_docs/progress/project_progress.md` directly.
 - Never close gates yourself; tester can submit review evidence, PM owns `gate-close`.
 - Prefer `uv run python scripts/devcoord/coord.py apply <action> --payload-stdin`.
 

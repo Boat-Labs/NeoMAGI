@@ -12,7 +12,7 @@
 
 - `beads + Dolt` 作为开发协作控制面 SSOT；
 - `scripts/devcoord` 作为唯一运行时写入口；
-- `dev_docs/logs/` 与 `dev_docs/progress/` 降级为兼容投影层；
+- `dev_docs/logs/<phase>/` 与 `dev_docs/progress/` 降级为兼容投影层；
 - M7 只实现“最小协调内核”，不试图在本阶段做成覆盖全部执行路径的 workflow engine；
 - 在不改变战略层文档与产品运行时数据库路线的前提下，提升协作状态机的可追溯性、可验证性与 deterministic 程度。
 
@@ -30,14 +30,14 @@
   - 对应 skill
   - 结构化 payload（JSON file / stdin）调用约定
 - 兼容投影：
-  - `dev_docs/logs/{milestone}_{date}/heartbeat_events.jsonl`
-  - `dev_docs/logs/{milestone}_{date}/gate_state.md`
-  - `dev_docs/logs/{milestone}_{date}/watchdog_status.md`
+  - `dev_docs/logs/phase1/{milestone}_{date}/heartbeat_events.jsonl`
+  - `dev_docs/logs/phase1/{milestone}_{date}/gate_state.md`
+  - `dev_docs/logs/phase1/{milestone}_{date}/watchdog_status.md`
   - `dev_docs/progress/project_progress.md`
 
 ### 2.2 Out of Scope
 - 产品运行时 PostgreSQL 数据面
-- `decisions/`、`design_docs/`、`dev_docs/reviews/`、`dev_docs/reports/` 的主存储语义
+- `decisions/`、`design_docs/`、`dev_docs/reviews/phase1/`、`dev_docs/reports/phase1/` 的主存储语义
 - beads 远程 sync / federation / `beads-sync` 分支工作流
 - 自定义 beads schema 或 fork beads
 - 让 agent 或人类直接自由写 `bd` 来表达协议状态
@@ -85,7 +85,7 @@
 ### Phase 3：PM First
 - 产物：
   - `.claude/skills/devcoord-pm/SKILL.md`
-  - `dev_docs/prompts/PM_ActionPlan_M7.md`
+  - `dev_docs/prompts/phase1/PM_ActionPlan_M7.md`
 - 要求：
   - PM 停止手写控制日志
   - PM 全部改为调用 `scripts/devcoord`
@@ -99,7 +99,7 @@
   - `dev_docs/devcoord/claude_code_skill_triggering.md`
 - 要求：
   - `ACK`、`HEARTBEAT`、`PHASE_COMPLETE`、`RECOVERY_CHECK` 统一走 wrapper
-  - 禁止直接编辑 `dev_docs/logs/*`
+  - 禁止直接编辑 `dev_docs/logs/phase1/*`
   - 用 Claude Code CLI debug 日志验证 skill 实际命中，而不是只看自然语言回答
   - teammate cutover 默认用 slash 形式 skill 触发（如 `/devcoord-backend`、`/devcoord-tester`），降低同名/近义语义污染
   - teammate 写操作前必须先校验 `git rev-parse HEAD == target_commit`；若不一致，只允许回报阻塞，不允许写控制面
@@ -111,13 +111,13 @@
   - 更新后的 `dev_docs/logs/README.md`
   - 更新后的协作文档说明
 - 要求：
-  - `dev_docs/logs/*` 明确为 projection
+  - `dev_docs/logs/phase1/*` 明确为 projection
   - 人工维护入口彻底收敛到 `scripts/devcoord`
 
 ## 5. 验收标准
 
 - 任一协作状态变更都能在 beads 中查询到结构化记录。
-- `dev_docs/logs/*` 可由 `scripts/devcoord` 完整重建，不依赖人工补写。
+- `dev_docs/logs/phase1/*` 可由 `scripts/devcoord` 完整重建，不依赖人工补写。
 - skill 不直接修改日志文件，不直接自由拼装 `bd` 命令。
 - 共享 `BEADS_DIR` 下，多 worktree 可以基于同一控制面协作，不出现各自独立状态。
 - 使用 M6 回放时，能生成与既有 `heartbeat_events.jsonl`、`gate_state.md`、`watchdog_status.md` 语义一致的投影。
@@ -153,4 +153,4 @@
 ## 8. 下一步建议
 
 1. 用新建的 teammate skills 跑一次真实 backend/tester 会话，验证 `ACK / HEARTBEAT / PHASE_COMPLETE / RECOVERY_CHECK / gate-review` 不再依赖 PM 手工转录。
-2. 完成 projection-only 收口，后续协作文档不再把 `dev_docs/logs/*` 当作人工主写入口。
+2. 完成 projection-only 收口，后续协作文档不再把 `dev_docs/logs/phase1/*` 当作人工主写入口。

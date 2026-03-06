@@ -2,7 +2,7 @@
 
 > 日期：2026-03-04
 > 状态：draft v3，待用户审阅
-> 关联：`dev_docs/logs/m5_2026-03-04/pm.md` §4 用户 Post-Review 汇总
+> 关联：`dev_docs/logs/phase1/m5_2026-03-04/pm.md` §4 用户 Post-Review 汇总
 > v2 变更：F1 三层 readiness 语义重写、F3 tar 布局统一、测试命令修正
 > v3 变更：F1c provider 健康接线落实到 ModelClient._retry_call()、F3 增加脚本入口路径守卫 + restore Step 5/7 全链路统一 workspace_dir
 > v4 变更：F1c 流式调用接线修正——_retry_call defer_health 分离创建/迭代阶段，failure 始终立即记录

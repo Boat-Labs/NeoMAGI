@@ -11,7 +11,7 @@ PM-side operating contract for NeoMAGI devcoord after the control plane has been
 
 - Always write control-plane state through `uv run python scripts/devcoord/coord.py`.
 - Prefer `apply <action> --payload-stdin` with JSON payloads.
-- Never edit `dev_docs/logs/*`, `dev_docs/progress/project_progress.md`, or gate projections by hand.
+- Never edit `dev_docs/logs/phase1/*`, `dev_docs/logs/phase2/*`, `dev_docs/progress/project_progress.md`, or gate projections by hand.
 - Never write devcoord state by calling `bd` directly.
 - Treat repo-root `.beads` as the only default shared control plane.
 

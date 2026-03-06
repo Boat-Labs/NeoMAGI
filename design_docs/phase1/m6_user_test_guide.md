@@ -216,7 +216,7 @@ uv run python scripts/m6_eval.py --provider openai
 
 预期：
 - 总结行为 `7/7 passed`。
-- 生成报告：`dev_docs/reports/m6_eval_openai_<timestamp>.json`。
+- 生成报告：`dev_docs/reports/phase1/m6_eval_openai_<timestamp>.json`。
 
 ### 5.3 运行 Gemini 全量评测（T10-T16）
 
@@ -226,7 +226,7 @@ uv run python scripts/m6_eval.py --provider gemini
 
 预期（当前已知基线）：
 - `6/7 passed`，`T13` 可能 FAIL（长上下文 + 工具历史场景）。
-- 生成报告：`dev_docs/reports/m6_eval_gemini_<timestamp>.json`。
+- 生成报告：`dev_docs/reports/phase1/m6_eval_gemini_<timestamp>.json`。
 - 注意：脚本只要存在 FAIL/ERROR 就返回非 0，这里属于“已知限制场景”，需要结合任务明细判读。
 
 ### 5.4 只重跑工具判定关键项（T11/T12）
@@ -331,8 +331,8 @@ SQL
 
 完成后可检查：
 
-- `dev_docs/reports/m6_eval_openai_<timestamp>.json`
-- `dev_docs/reports/m6_eval_gemini_<timestamp>.json`
+- `dev_docs/reports/phase1/m6_eval_openai_<timestamp>.json`
+- `dev_docs/reports/phase1/m6_eval_gemini_<timestamp>.json`
 - `${DATABASE_SCHEMA}.budget_state`（全局累计）
 - `${DATABASE_SCHEMA}.budget_reservations`（provider 分项、审计流水）
 

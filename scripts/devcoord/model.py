@@ -29,8 +29,20 @@ class CoordPaths:
     def lock_file(self) -> Path:
         return self.git_common_dir / "coord.lock"
 
+    def phase_subdir(self, milestone: str) -> str:
+        normalized = milestone.strip().lower()
+        if normalized.startswith("p2-"):
+            return "phase2"
+        return "phase1"
+
     def log_dir(self, milestone: str, run_date: str) -> Path:
-        return self.workspace_root / "dev_docs" / "logs" / f"{milestone}_{run_date}"
+        return (
+            self.workspace_root
+            / "dev_docs"
+            / "logs"
+            / self.phase_subdir(milestone)
+            / f"{milestone}_{run_date}"
+        )
 
     @property
     def progress_file(self) -> Path:

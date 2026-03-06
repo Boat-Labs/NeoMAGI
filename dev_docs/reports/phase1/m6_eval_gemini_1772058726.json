@@ -1,0 +1,109 @@
+{
+  "meta": {
+    "provider": "gemini",
+    "timestamp": 1772058726,
+    "gateway_url": "ws://localhost:19789/ws",
+    "total_tasks": 7
+  },
+  "summary": {
+    "passed": 6,
+    "failed": 1,
+    "skipped": 0,
+    "errored": 0,
+    "total_tokens_est": 992,
+    "total_latency_ms": 55925.9
+  },
+  "tasks": [
+    {
+      "task_id": "T10",
+      "category": "basic_conversation",
+      "description": "Multi-turn bilingual conversation (5 rounds)",
+      "status": "PASS",
+      "latency_ms": 8268.2,
+      "tokens_est": 259,
+      "detail": "All 5 rounds replied, language switching OK",
+      "tool_calls": [],
+      "rounds": 5
+    },
+    {
+      "task_id": "T11",
+      "category": "tool_call",
+      "description": "Single tool call (current_time)",
+      "status": "PASS",
+      "latency_ms": 1818.0,
+      "tokens_est": 13,
+      "detail": "current_time tool triggered, response len=54",
+      "tool_calls": [
+        {
+          "tool_name": "current_time",
+          "arguments": {},
+          "call_id": "function-call-5794167564445856251"
+        }
+      ],
+      "rounds": 1
+    },
+    {
+      "task_id": "T12",
+      "category": "tool_chain",
+      "description": "Multi-step tool chain (memory_search → answer)",
+      "status": "PASS",
+      "latency_ms": 1915.6,
+      "tokens_est": 41,
+      "detail": "memory_search triggered, tool_calls=1, response len=166",
+      "tool_calls": [
+        {
+          "tool_name": "memory_search",
+          "arguments": {
+            "query": "project goals"
+          },
+          "call_id": "function-call-12848680656068273268"
+        }
+      ],
+      "rounds": 1
+    },
+    {
+      "task_id": "T13",
+      "category": "long_context",
+      "description": "12-round context retention test",
+      "status": "FAIL",
+      "latency_ms": 27732.7,
+      "tokens_est": 0,
+      "detail": "Round 12 error: [{'code': 'LLM_ERROR', 'message': \"LLM API error: 400 Error code: 400 - [{'error': {'code': 400, 'message': 'Request contains an invalid argument.', 'status': 'INVALID_ARGUMENT'}}]\"}]",
+      "tool_calls": [],
+      "rounds": 0
+    },
+    {
+      "task_id": "T14",
+      "category": "cjk_processing",
+      "description": "Complex Chinese input with quotes, punctuation, code",
+      "status": "PASS",
+      "latency_ms": 6583.4,
+      "tokens_est": 257,
+      "detail": "CJK output OK, len=1031, has_cjk=True",
+      "tool_calls": [],
+      "rounds": 1
+    },
+    {
+      "task_id": "T15",
+      "category": "role_adherence",
+      "description": "System prompt constraint adherence across turns",
+      "status": "PASS",
+      "latency_ms": 7012.7,
+      "tokens_est": 379,
+      "detail": "All 4 rounds replied, role stable (pirate_indicators=0)",
+      "tool_calls": [],
+      "rounds": 4
+    },
+    {
+      "task_id": "T16",
+      "category": "error_recovery",
+      "description": "Graceful recovery after tool error",
+      "status": "PASS",
+      "latency_ms": 2595.4,
+      "tokens_est": 43,
+      "detail": "Recovered after tool error, answered follow-up correctly",
+      "tool_calls": [],
+      "rounds": 2
+    }
+  ]
+}

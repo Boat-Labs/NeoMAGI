@@ -715,7 +715,7 @@ class SessionManager:
   - 压缩后连续 3 轮任务推进无明显断层
   - 安全边界违规数 = 0
 - 产出一次离线评估记录（命中率、丢失项、失败样例）。
-- 验收结果记录在 `dev_docs/reviews/m2_anti-drift-evaluation_YYYY-MM-DD.md` 中。
+- 验收结果记录在 `dev_docs/reviews/phase1/m2_anti-drift-evaluation_YYYY-MM-DD.md` 中。
 
 ### 5.10 涉及文件
 

@@ -13,7 +13,7 @@
 
 - `beads + Dolt` 作为开发协作控制面 SSOT；
 - `just -> scripts/devcoord` 作为唯一运行时写入口；
-- `dev_docs/logs/` 与 `dev_docs/progress/` 降级为兼容投影层；
+- `dev_docs/logs/<phase>/` 与 `dev_docs/progress/` 降级为兼容投影层；
 - M7 只实现“最小协调内核”，不试图在本阶段做成覆盖全部执行路径的 workflow engine；
 - 在不改变战略层文档与产品运行时数据库路线的前提下，提升协作状态机的可追溯性、可验证性与 deterministic 程度。
 
@@ -31,14 +31,14 @@
   - `scripts/devcoord/*`
   - 对应 skill
 - 兼容投影：
-  - `dev_docs/logs/{milestone}_{date}/heartbeat_events.jsonl`
-  - `dev_docs/logs/{milestone}_{date}/gate_state.md`
-  - `dev_docs/logs/{milestone}_{date}/watchdog_status.md`
+  - `dev_docs/logs/phase1/{milestone}_{date}/heartbeat_events.jsonl`
+  - `dev_docs/logs/phase1/{milestone}_{date}/gate_state.md`
+  - `dev_docs/logs/phase1/{milestone}_{date}/watchdog_status.md`
   - `dev_docs/progress/project_progress.md`
 
 ### 2.2 Out of Scope
 - 产品运行时 PostgreSQL 数据面
-- `decisions/`、`design_docs/`、`dev_docs/reviews/`、`dev_docs/reports/` 的主存储语义
+- `decisions/`、`design_docs/`、`dev_docs/reviews/phase1/`、`dev_docs/reports/phase1/` 的主存储语义
 - beads 远程 sync / federation / `beads-sync` 分支工作流
 - 自定义 beads schema 或 fork beads
 - 将 beads 原生业务语义（如原生 gate / wisp 生命周期）直接等同于 NeoMAGI 协作协议语义
@@ -124,20 +124,20 @@
   - backend/tester tactical prompt 更新
 - 要求：
   - `ACK`、`HEARTBEAT`、`PHASE_COMPLETE`、`RECOVERY_CHECK` 统一走 wrapper
-  - 禁止直接编辑 `dev_docs/logs/*`
+  - 禁止直接编辑 `dev_docs/logs/phase1/*`
 
 ### Phase 5：Projection-Only 收口
 - 产物：
   - 更新后的 `dev_docs/logs/README.md`
   - 更新后的协作文档说明
 - 要求：
-  - `dev_docs/logs/*` 明确为 projection
+  - `dev_docs/logs/phase1/*` 明确为 projection
   - 人工维护入口彻底收敛到 control plane wrapper
 
 ## 6. 验收标准
 
 - 任一协作状态变更都能在 beads 中查询到结构化记录。
-- `dev_docs/logs/*` 可由 `scripts/devcoord` 完整重建，不依赖人工补写。
+- `dev_docs/logs/phase1/*` 可由 `scripts/devcoord` 完整重建，不依赖人工补写。
 - skill 不直接修改日志文件，不直接自由拼装 `bd` 命令。
 - 共享 `BEADS_DIR` 下，多 worktree 可以基于同一控制面协作，不出现各自独立状态。
 - 使用 M6 回放时，能生成与既有 `heartbeat_events.jsonl`、`gate_state.md`、`watchdog_status.md` 语义一致的投影。
@@ -188,7 +188,7 @@
 
 ## 9. 回滚策略
 
-- 若 beads 控制面未稳定，可回退到“wrapper 停用 + 继续人工维护 `dev_docs/logs/*`”。
+- 若 beads 控制面未稳定，可回退到“wrapper 停用 + 继续人工维护 `dev_docs/logs/phase1/*`”。
 - `dev_docs` 文件保持兼容输出，确保回滚不需要恢复旧格式。
 - M7 任一阶段失败，不影响产品主链路功能与产品数据面。
 

@@ -30,7 +30,7 @@ from websockets.asyncio.client import ClientConnection
 # ---------------------------------------------------------------------------
 
 GATEWAY_WS_URL = "ws://localhost:19789/ws"
-REPORTS_DIR = Path(__file__).resolve().parent.parent / "dev_docs" / "reports"
+REPORTS_DIR = Path(__file__).resolve().parent.parent / "dev_docs" / "reports" / "phase1"
 
 
 # ---------------------------------------------------------------------------
@@ -620,7 +620,7 @@ async def _run_eval(provider: str, task_ids: list[str]) -> list[TaskResult]:
 
 
 def _write_report(provider: str, results: list[TaskResult]) -> Path:
-    """Write JSON report to dev_docs/reports/."""
+    """Write JSON report to dev_docs/reports/phase1/."""
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     ts = int(time.time())

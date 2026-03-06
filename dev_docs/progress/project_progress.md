@@ -31,7 +31,7 @@
 ## 2026-02-17 (local) | M1.1
 - Status: in_progress
 - Done: M1.1 实现评审完成，结论为"条件通过，有阻塞待修"；发现 3 项问题：F1 DB schema 配置冲突(HIGH)、F2 tool call 参数解析缺保护(HIGH)、F3 历史消息未过滤 system/tool(MEDIUM)
-- Evidence: dev_docs/reviews/m1.1_implementation-review_2026-02-17.md
+- Evidence: dev_docs/reviews/phase1/m1.1_implementation-review_2026-02-17.md
 - Next: 按优先级修复 F1 → F2 → F3
 - Risk: F1 导致默认配置下 DB 静默退化为内存模式，影响持久化稳定性
 
@@ -119,7 +119,7 @@
   - P1: 前端 tool_denied 双状态 — tool_denied handler 从 append 改为 call_id findIndex update-or-insert；done handler 对 denied 状态做 preserve 而非覆写 complete
   - P1: 未注册工具误分类 — agent.py gate 条件增加 `registry.get(name) is not None` 前置检查，未知工具跳过 mode gate 直接走 `_execute_tool` 的 UNKNOWN_TOOL 路径
   - P2: structlog 测试恒真断言 — 从 caplog + `len(caplog.records) >= 0` 换为 `structlog.testing.capture_logs`
-  - P3: M1.5 milestone 日志 — 创建 `dev_docs/logs/m1.5_2026-02-21/developer.md`
+  - P3: M1.5 milestone 日志 — 创建 `dev_docs/logs/phase1/m1.5_2026-02-21/developer.md`
 - Evidence: commit cb3c4d3..5e53407 (merge), 123 unit tests + 26 integration tests + 16 frontend tests passed, ruff clean
 - Plan: dev_docs/plans/phase1/m1.5_review-fixes_2026-02-21.md
 - Next: 进入 M2（会话内连续性）规划
@@ -187,7 +187,7 @@
   - Phase 2: Memory Index & Search — Alembic migration, tsvector + GIN index, MemoryIndexer, MemorySearcher
   - Phase 3: Memory Curation + Prompt Recall — MemoryCurator (LLM-assisted), recall layer, keyword extraction
   - Phase 4: Evolution Loop — soul_versions table, EvolutionEngine (propose/evaluate/apply/rollback/veto/bootstrap/audit), Soul tools
-- Evidence: 468 tests passed, ruff clean; PM 报告 `dev_docs/logs/m3_2026-02-24/pm.md`
+- Evidence: 468 tests passed, ruff clean; PM 报告 `dev_docs/logs/phase1/m3_2026-02-24/pm.md`
 - Decisions: ADR 0034, 0035
 - Next: 用户审阅后进入 post-review 修正
 - Risk: 网关接线、搜索触发器、Evolution 一致性等审阅发现待修
@@ -250,23 +250,23 @@
   - Eval 全量重跑: OpenAI 7/7 PASS, Gemini 6/7 PASS (T13 不变); 预算审计 52 reservations, 全部 settled, €2.60 cumulative
 - Evidence: PR #4 (feat/m6-p1-fix) merged to main, commit bc303e7; 562 tests passed, ruff clean
 - Plan: `dev_docs/plans/phase1/m6_p1-fix-budget-gate-and-eval_2026-02-25.md`
-- Reports: `dev_docs/reports/m6_eval_openai_1772064537.json`, `dev_docs/reports/m6_eval_gemini_1772064602.json`, `dev_docs/reports/m6_migration_conclusion.md`
+- Reports: `dev_docs/reports/phase1/m6_eval_openai_1772064537.json`, `dev_docs/reports/phase1/m6_eval_gemini_1772064602.json`, `dev_docs/reports/phase1/m6_migration_conclusion.md`
 - Next: M6 关闭，参考 roadmap_milestones_v3.md 确定下一阶段
 - Risk: Gemini T13 长上下文 + 工具历史场景 400 INVALID_ARGUMENT 为已知限制，可通过 compaction 阈值调优缓解
 
 ## 2026-03-01 (generated) | M7
 - Status: done
 - Done: 最新 gate G-M7-P6-POS 为 closed (PASS)；backend=working, tester=done
-- Evidence: `dev_docs/logs/m7_2026-03-01/gate_state.md`, `dev_docs/logs/m7_2026-03-01/watchdog_status.md`, `dev_docs/reviews/m7_phase6_2026-03-01.md` (0a300c2)
+- Evidence: `dev_docs/logs/phase1/m7_2026-03-01/gate_state.md`, `dev_docs/logs/phase1/m7_2026-03-01/watchdog_status.md`, `dev_docs/reviews/phase1/m7_phase6_2026-03-01.md` (0a300c2)
 - Next: G-M7-P6-POS 已关闭，等待 M7 下一条 gate
 - Risk: 无
 
 ## 2026-03-01 (local) | M7
 - Status: done
 - Done: M7 收尾完成并关闭——beads control plane、`scripts/devcoord` 直接入口、Claude Code project skills、PM-first / teammate cutover、幂等护栏、`target_commit` preflight 与 canonical full SHA 规范已全部落地；`coord.py` 已按职责机械拆分为 `model.py` / `service.py` / 薄入口 `coord.py`
-- Evidence: `dev_docs/reviews/m7_summary_2026-03-01.md`, `dev_docs/reviews/m7_phase6_2026-03-01.md`, `dev_docs/logs/m7_2026-03-01/gate_state.md`
+- Evidence: `dev_docs/reviews/phase1/m7_summary_2026-03-01.md`, `dev_docs/reviews/phase1/m7_phase6_2026-03-01.md`, `dev_docs/logs/phase1/m7_2026-03-01/gate_state.md`
 - Next: 按 `design_docs/phase1/roadmap_milestones_v3.md` 进入 M4（第二渠道适配）；M5 继续保持触发式进入
-- Risk: M7 residual risks 已记录于 `dev_docs/reviews/m7_summary_2026-03-01.md`，不阻塞关闭
+- Risk: M7 residual risks 已记录于 `dev_docs/reviews/phase1/m7_summary_2026-03-01.md`，不阻塞关闭
 
 ## 2026-03-02 (local) | M4
 - Status: done
@@ -277,7 +277,7 @@
   - Phase 2: Telegram Adapter — aiogram 3.x, check_ready/start_polling/stop, 鉴权门控 (fail-closed), Gateway lifespan 集成
   - Phase 3: Response Rendering — split_message (代码块保护), format_for_telegram (MarkdownV2 + 回退), 错误消息中文映射
   - Phase 4: E2E + Docs + ADR — test_channel_isolation.py (11 tests), ADR 0044, 文档更新
-- Evidence: 668 tests passed, ruff clean; merge commit 549253f; PM 报告 `dev_docs/logs/m4_2026-03-02/pm.md`; 验收报告 `dev_docs/reviews/m4_phase{0-4}_2026-03-02.md`
+- Evidence: 668 tests passed, ruff clean; merge commit 549253f; PM 报告 `dev_docs/logs/phase1/m4_2026-03-02/pm.md`; 验收报告 `dev_docs/reviews/phase1/m4_phase{0-4}_2026-03-02.md`
 - Plan: `dev_docs/plans/phase1/m4_telegram-channel-integration_2026-03-02.md`
 - Decisions: ADR 0044 (Telegram adapter aiogram same-process)
 - Resilience: 经历 tmux 崩溃 + team 重建 + agent respawn 恢复，验证了 Agent Teams 韧性
@@ -302,7 +302,7 @@
 ## 2026-03-04 (generated) | M5
 - Status: done
 - Done: 最新 gate m5-g2 为 closed (PASS)；backend=done, tester=done
-- Evidence: `dev_docs/logs/m5_2026-03-04/gate_state.md`, `dev_docs/logs/m5_2026-03-04/watchdog_status.md`, `dev_docs/reviews/m5_g2_phase2_review.md` (e71ba67)
+- Evidence: `dev_docs/logs/phase1/m5_2026-03-04/gate_state.md`, `dev_docs/logs/phase1/m5_2026-03-04/watchdog_status.md`, `dev_docs/reviews/phase1/m5_g2_phase2_review.md` (e71ba67)
 - Next: m5-g2 已关闭，等待 M5 下一条 gate
 - Risk: 无
 <!-- devcoord:end milestone=m5 -->

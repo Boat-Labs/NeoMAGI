@@ -53,7 +53,7 @@ Required: `milestone`, `gate_id`, `reason`.
 ## gate-close
 
 ```json
-{"milestone": "m8", "gate_id": "m8-g0", "phase": "p1", "result": "pass", "review_commit": "<sha>", "review_path": "dev_docs/reviews/m8_g0_review.md"}
+{"milestone": "p2-m1", "gate_id": "p2-m1-g0", "phase": "p1", "result": "pass", "review_commit": "<sha>", "review_path": "dev_docs/reviews/phase2/p2-m1_g0_review.md"}
 ```
 
 Required: `milestone`, `gate_id`, `phase`, `result`, `review_commit`, `review_path`.
@@ -72,7 +72,7 @@ Required: `milestone`.
 {"milestone": "m8"}
 ```
 
-Required: `milestone`. Generates `dev_docs/logs/` and `dev_docs/progress/project_progress.md`.
+Required: `milestone`. Generates a phase-aware log projection under `dev_docs/logs/phase1/` or `dev_docs/logs/phase2/`, plus `dev_docs/progress/project_progress.md`.
 
 ## audit
 
