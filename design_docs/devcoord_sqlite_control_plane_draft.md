@@ -24,6 +24,7 @@
 
 - 不改变产品运行时 PostgreSQL 基线。
 - 不把产品数据或 memory 数据迁入 SQLite。
+- 不把既有 `beads` control-plane 历史数据迁入 SQLite；cutover 时直接从空的 `.devcoord/control.db` 启动。
 - 不削弱 `AGENTTEAMS.md` 的协议要求。
 - 不重新引入手写 `dev_docs` 控制状态的做法。
 - 不把 `devcoord` 再降级回 prompt-only 流程。
@@ -82,6 +83,7 @@ beads / bd
 - `scripts/devcoord` 仍然是唯一的协议运行时。
 - SQLite 只是协调状态的持久化层。
 - `beads` 不再被查询或写入任何 control-plane 状态。
+- 历史 `coord` beads 记录不导入 SQLite；它们只作为已完成的实验审计痕迹被关闭或归档。
 
 ## 6. 最小数据模型
 
@@ -438,7 +440,7 @@ coord.py apply ...
 
 不要一次性打断现有 prompt。
 
-迁移顺序：
+切换顺序：
 
 1. 先保留现有扁平命令作为 compatibility aliases
 2. 再把分组命令实现成 canonical form
@@ -446,6 +448,10 @@ coord.py apply ...
 4. 最后再逐步废弃旧的 flat aliases
 
 这样可以在缩小公开命令面的同时，保持现有 `devcoord` 使用路径稳定。
+
+说明：
+
+- 这里的“切换”仅指命令面与实现后端切换，不指历史数据迁移。
 
 ## 10. Service 层形态
 
@@ -490,6 +496,7 @@ coord.py apply ...
 - 新增 `.devcoord/control.db`
 - 实现 `SQLiteCoordStore`
 - 让 `render/audit` 改为从 SQLite 读取
+- 新 store 必须支持 fresh bootstrap，不依赖旧 `beads` control-plane 数据导入
 
 ### Stage 3: Command regrouping
 
@@ -501,6 +508,7 @@ coord.py apply ...
 
 - 停止把 control-plane 对象写入 `beads`
 - `beads` 只保留 backlog tasks
+- 历史 `coord` beads 记录统一关闭或归档，不导入 SQLite
 - 归档或 supersede `beads_control_plane.md`
 
 ## 12. 验收

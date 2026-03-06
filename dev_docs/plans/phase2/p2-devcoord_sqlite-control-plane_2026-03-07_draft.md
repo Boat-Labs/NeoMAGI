@@ -74,6 +74,7 @@
 
 - 不改变产品运行时 PostgreSQL 17 基线。
 - 不把产品数据、memory 数据或运行时 user data 写入 SQLite。
+- 不迁移既有 `beads` control-plane 历史数据到 SQLite；切换时直接从空的 `.devcoord/control.db` 开始。
 - 不修改 `AGENTTEAMS.md` 的协议规则本身。
 - 不把 `devcoord` 降级回文档驱动。
 - 不在本计划内引入多机分布式协调。
@@ -126,6 +127,7 @@
 
 - service 层不再依赖 `IssueRecord` 风格的数据结构。
 - 任何 `bd ... --json` 细节都必须被收拢在 `BeadsCoordStore` 内部，而不是继续泄漏到 service 层。
+- `BeadsCoordStore` 的作用仅限于代码层渐进切换，不承担历史 control-plane 数据导入职责。
 
 ### 3. SQLite Data Model
 
@@ -218,6 +220,8 @@ SQLite 可接受的前提是写入规则明确：
 - 要让 `beads` 退回 backlog 角色，但不能丢失审计链
 - 要精简命令面，但不能一次性打断现有 prompts / skills / runbooks
 
+这里的“渐进切换”只指代码与命令面的渐进切换，不指历史 control-plane 数据迁移。历史 `coord` 记录在 cutover 时直接关闭/归档，不导入 SQLite。
+
 因此不建议一次性大切换。对应设计草案中的 `Stage 0` 是 “ADR 0050 accepted”，本计划只覆盖其后的 4 个实施阶段：
 
 1. `Stage A` Store abstraction
@@ -301,6 +305,7 @@ SQLite 可接受的前提是写入规则明确：
   - `render -> audit`
 - 增加至少一个多 worktree / shared-root 路径 smoke test
 - 增加至少一个写冲突 smoke test，验证 `busy_timeout + retry-once + fail-closed`
+- 验证空 SQLite store bootstrap 可直接支撑 fresh milestone，不依赖旧 `beads` control-plane 数据预热
 
 验收：
 
@@ -369,6 +374,7 @@ SQLite 可接受的前提是写入规则明确：
 - `beads` 仅保留 backlog/work issue
 - closeout 流程改为 SQLite store closeout
 - `milestone-close` 语义对齐新后端
+- 历史 `coord` beads 记录统一关闭或归档，不导入 `.devcoord/control.db`
 - `CoordPaths.beads_dir` 退役或重命名
 - `--beads-dir` / `--bd-bin` / `--dolt-bin` 进入 deprecated -> remove 流程
 - 文档中的 “repo 根 `.beads` 为 SSOT” 全部改为 `.devcoord/control.db`

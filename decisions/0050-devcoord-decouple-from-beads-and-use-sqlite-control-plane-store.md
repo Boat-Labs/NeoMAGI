@@ -23,6 +23,7 @@
 - 保持 `scripts/devcoord` 作为协议语义唯一实现层；继续禁止 agent 直接手写控制状态。
 - 保持 `dev_docs/logs/<phase>/` 与 `dev_docs/progress/project_progress.md` 为 projection，而不是控制面真源。
 - 保持 `AGENTTEAMS.md` 中的 Gate / ACK / recovery / audit / closeout 协议边界不变；本 ADR 只替换 control-plane backend，不降级治理强度。
+- 不迁移既有 `beads` control-plane 历史数据到 SQLite；cutover 时直接从空的 `.devcoord/control.db` 启动，历史 `coord` 记录仅做关闭/归档。
 - 协议语义保持稳定，但 `coord.py` 的人类可见命令面应收敛为更少的分组命令，`apply` 保留为 machine-first 入口。
 - 对应技术草案见 `design_docs/devcoord_sqlite_control_plane_draft.md`。
 - SQLite 仅用于内部开发协作控制面，不进入产品运行时数据面；产品运行时数据库仍保持 PostgreSQL 17 基线。
@@ -42,6 +43,7 @@
   - 避免把 `.env`、连接可用性、schema 演进和产品数据面耦合进内部协作控制；
   - 保持“产品 SSOT”和“开发协作 SSOT”之间的概念隔离。
 - 不退回文档驱动的原因是：那会重新把 ACK 生效、恢复握手、对账与 gate close 条件交还给 prompt 和记忆，失去 `devcoord` 建立的最小确定性保证。
+- 不做历史数据迁移的原因是：现有 `coord` 记录本质上是开发阶段实验产物，继续为兼容这些旧记录而设计导入链路，只会增加 SQLite cutover 的复杂度和负担，而不会提高 NeoMAGI 编程智能体的长期能力沉淀质量。
 
 ## 放弃了什么
 
@@ -66,3 +68,4 @@
   - 先保留命令面与 projection；
   - 再切换 store adapter；
   - 最后停止将 control-plane 对象写入 `beads`。
+- 这里的“迁移”仅指代码与命令面切换，不包括把历史 `beads` control-plane 数据导入 SQLite。
