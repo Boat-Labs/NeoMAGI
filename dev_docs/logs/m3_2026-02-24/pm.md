@@ -111,7 +111,7 @@ M3 交付物审阅后发现 4 类缺陷，经 3 轮修正全部闭合：
 
 最终测试总数：481 tests，0 failures，ruff clean。
 ADR 新增：0036（Evolution DB-SSOT + 投影对账）、0037（workspace_path 单一真源）。
-计划正稿：`dev_docs/plans/m3_post-review-fix_2026-02-24.md`。
+计划正稿：`dev_docs/plans/phase1/m3_post-review-fix_2026-02-24.md`。
 
 ## 6. 未完成项
 

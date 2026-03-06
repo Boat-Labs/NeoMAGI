@@ -29,7 +29,7 @@
 - `design_docs/phase1/m6_architecture.md`：`P1-M6`
 
 说明：
-- `P1-M7` 无独立 architecture 文档；如需回溯，查看 `dev_docs/plans/m7_devcoord-refactor_2026-02-28_v2.md`、`dev_docs/reviews/m7_summary_2026-03-01.md`、`dev_docs/devcoord/beads_control_plane.md`。
+- `P1-M7` 无独立 architecture 文档；如需回溯，查看 `dev_docs/plans/phase1/m7_devcoord-refactor_2026-02-28_v2.md`、`dev_docs/reviews/m7_summary_2026-03-01.md`、`dev_docs/devcoord/beads_control_plane.md`。
 
 ## 4. 用户验收与手工测试（归档）
 

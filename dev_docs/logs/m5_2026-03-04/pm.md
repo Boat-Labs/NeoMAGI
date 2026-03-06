@@ -110,4 +110,4 @@ M5 运营可靠性三个 Phase 全部通过 Gate 验收，代码已合并到 mai
 
 ## 8. 未完成项
 
-用户 post-review 发现 3 个 P1 + 2 个 P2，需要修复后才能认为 M5 真正闭环。修复计划见 `dev_docs/plans/m5_post-review-fix_2026-03-04_draft.md`。
+用户 post-review 发现 3 个 P1 + 2 个 P2，需要修复后才能认为 M5 真正闭环。修复计划见 `dev_docs/plans/phase1/m5_post-review-fix_2026-03-04.md`。

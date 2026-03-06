@@ -33,4 +33,4 @@
 
 - 所有 `P2-M*` architecture 文档当前状态均为 `planned`。
 - 这些文档只定义目标、当前基线、目标架构、边界、验收与建议拆分。
-- 具体 task 拆分、owner、工期和测试文件清单应进入 `dev_docs/plans/`。
+- 具体 task 拆分、owner、工期和测试文件清单应进入 `dev_docs/plans/phase2/`。

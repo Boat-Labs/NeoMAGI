@@ -28,7 +28,7 @@
 ## 2026-02-18 21:30 (local) | Mx.y
 - Status: in_progress
 - Done: 完成 X 模块最小闭环并通过基础测试
-- Evidence: commit abc1234, dev_docs/plans/mx.y_xxx_2026-02-18.md, uv run pytest tests/test_x.py -v
+- Evidence: commit abc1234, dev_docs/plans/phase2/p2-m1a_growth-governance-kernel_2026-03-06_draft.md, uv run pytest tests/test_x.py -v
 - Next: 合并 Y 模块并补齐回归测试
 - Risk: 无
 ```

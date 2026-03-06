@@ -118,10 +118,10 @@ neomagi/
 
 ## Plan 持久化
 
-- 计划文件统一放 `dev_docs/plans/`，禁止写入其他路径。
+- 计划文件统一放在 `dev_docs/plans/` 体系下；实际计划按 phase 写入 `dev_docs/plans/phase1/`、`dev_docs/plans/phase2/`，禁止直接写到根目录。
 - 草稿命名：`{milestone}_{目标简述}_{YYYY-MM-DD}_draft.md`；讨论阶段持续更新同一 `_draft` 文件。
 - 用户批准后生成正稿：`{milestone}_{目标简述}_{YYYY-MM-DD}.md`，并删除 `_draft`。`_v2`/`_v3` 仅用于上一版已审批且已执行后的再次修订。
-- 这是项目的持久记忆，后续 PM 重启时首先读取最新 plan。
+- 这是项目的持久记忆；后续 PM 重启时先读取当前 active phase 子目录中的最新 plan，再按需回溯其他 phase。
 - 产出计划前先对齐 `AGENTTEAMS.md`、`AGENTS.md`、`CLAUDE.md`、`decisions/`、`design_docs/` 约束。
 
 ## 评审与迭代协议

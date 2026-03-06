@@ -38,14 +38,14 @@
 ## 2026-02-18 08:44 (local) | M1.1
 - Status: in_progress
 - Done: 评审问题修复 v3 完成 — F1: DB_SCHEMA 常量统一 + validator + fail-fast + ADR 0017 对齐；F2: _safe_parse_args 双层 dict 校验；F3: chat.history 过滤 system/tool 消息；含 3 个测试文件
-- Evidence: commit 01b1085 (F1) + 472a6a1 (F2) + 3103e1c (F3), dev_docs/plans/m1.1_review-fixes_2026-02-17_v3.md
+- Evidence: commit 01b1085 (F1) + 472a6a1 (F2) + 3103e1c (F3), dev_docs/plans/phase1/m1.1_review-fixes_2026-02-17_v3.md
 - Next: v3 实现的 code review
 - Risk: 无
 
 ## 2026-02-18 13:12 (local) | M1.1
 - Status: in_progress
 - Done: v3 code review 发现 2 项问题并修复 — R1(HIGH): 日志行 `tc.function.arguments[:200]` 对 None 崩溃，用 `str(...)[:200]` 修复；R2(LOW): 5 个测试文件未使用导入清理
-- Evidence: commit 2cf91a1 (R1) + b94a6d3 (R2), dev_docs/plans/m1.1_review-fixes_2026-02-18_v4.md
+- Evidence: commit 2cf91a1 (R1) + b94a6d3 (R2), dev_docs/plans/phase1/m1.1_review-fixes_2026-02-18_v4.md
 - Next: M1.1 待最终确认通过；M1.2/M1.3 待评审
 - Risk: M1.2 和 M1.3 尚未经过独立评审
 
@@ -59,7 +59,7 @@
 ## 2026-02-18 23:50 (local) | M1.2
 - Status: done
 - Done: M1.2 深审完成，6 项发现（F1-F6）；F2/F3 已在 M1.1 修复周期中解决；本轮修复 F1(P1) read_file `startswith` 边界绕过（换 `is_relative_to` + 类型校验）、F5(P2) model_client `choices[]` 空防护（`_first_choice` + stream 跳过）、F6a(P3) 补齐安全测试（10 组 read_file + 5 组 model_client）；F4(P2) 流式回退和 F6b(P3) 集成测试延至 M1.4（owner=backend, due=2026-03-04）
-- Evidence: commit 1e48eed (F1) + 5360c80 (F5) + 3078a69 (F6a-1) + 00b0bfb (F6a-2), 43 tests passed, ruff clean, dev_docs/plans/m1.2_audit-fixes_2026-02-18.md
+- Evidence: commit 1e48eed (F1) + 5360c80 (F5) + 3078a69 (F6a-1) + 00b0bfb (F6a-2), 43 tests passed, ruff clean, dev_docs/plans/phase1/m1.2_audit-fixes_2026-02-18.md
 - Next: M1.3 评审
 - Risk: F4 流式回退为已知体验回退，已排入 M1.4 跟踪
 
@@ -74,7 +74,7 @@
   - Review round 1 fixes: chat.history 强制 DB reload (P1)；迁移加约束前去重 (P1)；AsyncMock 协程警告消除 (P3)
   - Review round 2 fixes: ruff lint 全绿 (E501/I001/F401/F841)
 - Evidence: PR `feat/session-m1.3-review-fixes` merged to main, 64 tests passed, 0 warnings, ruff clean, pnpm build 通过
-- Plan: dev_docs/plans/m1.3_review-fixes_2026-02-18.md
+- Plan: dev_docs/plans/phase1/m1.3_review-fixes_2026-02-18.md
 - Decisions: ADR 0019 + 0020 + 0021 + 0022
 - Next: 进入 M1.4（审计修复收尾）
 - Risk: P2 follow-up 待 M1.4 前置完成 — conftest.py PG fixture + 3 条集成测试 (claim/release, seq 原子分配, force reload) + CI PostgreSQL job
@@ -92,7 +92,7 @@
   - T7/F6b: WebSocket + tool loop flow 集成测试 — 12 组 (streaming chat, history, tool loop, SESSION_BUSY, unknown method, invalid JSON, single/multi-round tool calls, mixed content, tool failure, max iterations, fencing mid-loop)
   - Review fixes: SESSION_BUSY 实测、unawaited coroutine 消除、PARSE_ERROR 语义对齐
 - Evidence: 8 commits on feat/m1.4-audit-test-infra, 82 tests passed (64 unit + 18 integration), 10 frontend tests passed, ruff clean
-- Plan: dev_docs/plans/m1.4_audit-test-infra_2026-02-18.md
+- Plan: dev_docs/plans/phase1/m1.4_audit-test-infra_2026-02-18.md
 - Next: M1 审计全部完成，进入 M2 规划
 - Risk: 无
 
@@ -107,7 +107,7 @@
 - Status: in_progress
 - Done: M1.5 Tool Modes 主体实现交付 — dual-gate mode 授权框架（暴露闸门 + 执行闸门）、ToolGroup/ToolMode enum、BaseTool fail-closed defaults、ToolRegistry mode-aware filtering/override/check_mode、3 个 builtin 工具 metadata 声明、AgentLoop 执行闸门 ToolDenied 路径、PromptBuilder mode-filtered tooling + safety layer、SessionManager.get_mode fail-closed + M1.5 guardrail、SessionSettings config validation、前端 tool_denied WebSocket 消息处理与 UI
 - Evidence: commit e0759b2..0a555b1, 123 unit tests + 24 integration tests + 13 frontend tests passed, ruff clean
-- Plan: dev_docs/plans/m1.5_tool-modes_2026-02-19.md
+- Plan: dev_docs/plans/phase1/m1.5_tool-modes_2026-02-20.md
 - Decisions: ADR 0025 + 0026
 - Next: code review 后修复发现的问题
 - Risk: code review 发现 4 项问题待修
@@ -121,7 +121,7 @@
   - P2: structlog 测试恒真断言 — 从 caplog + `len(caplog.records) >= 0` 换为 `structlog.testing.capture_logs`
   - P3: M1.5 milestone 日志 — 创建 `dev_docs/logs/m1.5_2026-02-21/developer.md`
 - Evidence: commit cb3c4d3..5e53407 (merge), 123 unit tests + 26 integration tests + 16 frontend tests passed, ruff clean
-- Plan: dev_docs/plans/m1.5_review-fixes_2026-02-21.md
+- Plan: dev_docs/plans/phase1/m1.5_review-fixes_2026-02-21.md
 - Next: 进入 M2（会话内连续性）规划
 - Risk: 无
 
@@ -145,7 +145,7 @@
   - P2-1: Remove early-exit when min_preserved_turns=1, always attempt emergency trim
   - P2-2: Strengthen F2 test assertions with spy verification + model-not-called checks
 - Evidence: PR #3 (fix/m2-post-review-fixes), 258 tests passed, ruff clean
-- Plan: dev_docs/plans/m2_post-review-fixes_2026-02-22.md
+- Plan: dev_docs/plans/phase1/m2_post-review-fixes_2026-02-22.md
 - Next: PR merge 后进入 M2 验收或 M3 规划
 - Risk: 无
 
@@ -159,8 +159,8 @@
 ## 2026-02-23 (local) | M3
 - Status: in_progress (planning done, implementation pending)
 - Done: M3 持久记忆实现计划完成并审批（rev6）— 5 Phase 拆分（Phase 0: ToolContext + dmScope 基础设施 → Phase 1: Memory Write Path → Phase 2: BM25 Index & Search → Phase 3: Memory Curation + Prompt Recall → Phase 4: Evolution Loop）；dmScope 策略对齐 roadmap 与 architecture；ADR 0034 落地
-- Evidence: commit f2a69b8, `dev_docs/plans/m3_persistent-memory_2026-02-22.md` (status: approved)
-- Plan: dev_docs/plans/m3_persistent-memory_2026-02-22.md
+- Evidence: commit f2a69b8, `dev_docs/plans/phase1/m3_persistent-memory_2026-02-22.md` (status: approved)
+- Plan: dev_docs/plans/phase1/m3_persistent-memory_2026-02-22.md
 - Decisions: ADR 0034 (dmScope)
 - Next: 按 Phase 0 → 1 → 2 → 3 → 4 顺序推进 M3 实现；Phase 2 前需完成 ParadeDB pg_search spike 验证
 - Risk: ParadeDB pg_search tokenizer 兼容性待 spike 验证
@@ -173,7 +173,7 @@
   - R2(P1): guard 失败后高风险路径仍可能沿 fail-open 继续执行；重新开放为执行闸门问题（高风险工具需 fail-closed）
   - R3(P2): 反漂移证据以离线评估为主，缺少运行时强制防护；重新开放为”验收口径与运行时口径对齐”任务
 - Evidence: working tree updates — `decisions/0035-runtime-anti-drift-guardrail-hardening-and-risk-gated-fail-closed.md`, `decisions/INDEX.md`, `design_docs/phase1/roadmap_milestones_v3.md`, `design_docs/phase1/m2_architecture.md`, `design_docs/phase1/m3_architecture.md`
-- Plan: dev_docs/plans/m3_persistent-memory_2026-02-22.md（Phase 0 增补 ADR 0035 最小防护任务）
+- Plan: dev_docs/plans/phase1/m3_persistent-memory_2026-02-22.md（Phase 0 增补 ADR 0035 最小防护任务）
 - Decisions: ADR 0035 (proposed)
 - Next: 按 Phase 0~4 推进 M3 实现
 - Risk: 若 Phase 0 未先完成该防护，M3 后续记忆写入/召回链会放大误执行风险并增加返工成本
@@ -200,7 +200,7 @@
   - Round 2 (7836a50): P1 ensure_schema 显式导入 memory models、P1 补偿覆盖全部 DB 异常、P2 双层 try/except 结构化日志、P3 路径 .resolve() 规范化
   - Round 3 (8585be2): P2 补偿日志断言（mock logger 验证）、P2 rollback 对称失败路径测试
 - Evidence: 481 tests passed, ruff clean; commit 2cbd3c4 (closure)
-- Plan: dev_docs/plans/m3_post-review-fix_2026-02-24.md (approved + executed)
+- Plan: dev_docs/plans/phase1/m3_post-review-fix_2026-02-24.md (approved + executed)
 - Decisions: ADR 0036 (Evolution DB-SSOT + 投影对账), 0037 (workspace_path 单一真源)
 - Next: 进入 M6（模型迁移验证）
 - Risk: 无；ParadeDB pg_search BM25 为已知 R1 风险，当前 tsvector + GIN fallback 功能等价
@@ -215,7 +215,7 @@
 ## 2026-02-25 13:56 (local) | M3
 - Status: done
 - Done: 进度口径消歧义完成——M3 修复项已完成并验证；T03/T04/T05 复测定义为收尾验收任务，不阻塞 M6 规划启动
-- Evidence: commit 0935834, commit 178882c, `dev_docs/plans/m3_post-review-fix_2026-02-24.md`, `dev_docs/cases/runtime_casebook.md`
+- Evidence: commit 0935834, commit 178882c, `dev_docs/plans/phase1/m3_post-review-fix_2026-02-24.md`, `dev_docs/cases/runtime_casebook.md`
 - Next: 启动 M6 规划，同时并行完成 T03/T04/T05 手工复测并回填结果
 - Risk: 若复测出现回归，需先完成 M3 hotfix 闭环再进入 M6 实施
 
@@ -235,7 +235,7 @@
   - Phase 2: BudgetGate + Gemini smoke test — PG atomic reserve/settle, CAS idempotent, Gemini API 端到端验证
   - Phase 3: Eval 脚本 + 迁移结论 — WebSocket 客户端走 Gateway 全链路, T10-T16 双 provider 评测
 - Evidence: commit fbae58d..d76d0d0, 540 tests passed, ruff clean; eval results: OpenAI 7/7 PASS, Gemini 6/7 PASS (T13 长上下文 FAIL)
-- Plan: `dev_docs/plans/m6_model-migration-validation_2026-02-25.md`
+- Plan: `dev_docs/plans/phase1/m6_model-migration-validation_2026-02-25.md`
 - Decisions: ADR 0038, 0040, 0041
 - Next: 用户审阅发现 2 项 P1 问题待修
 - Risk: P1-1 BudgetGate 未接入 chat.send 主链路; P1-2 eval T11/T12 判定过宽（false positive）
@@ -249,7 +249,7 @@
   - 测试基础设施: StubBudgetGate 适配 3 个现有集成测试 fixture; 新增 17 unit tests (test_budget_gate_wiring.py) + 5 E2E tests (test_budget_gate_e2e.py) + 6 eval judgment tests (test_eval_judgment.py)
   - Eval 全量重跑: OpenAI 7/7 PASS, Gemini 6/7 PASS (T13 不变); 预算审计 52 reservations, 全部 settled, €2.60 cumulative
 - Evidence: PR #4 (feat/m6-p1-fix) merged to main, commit bc303e7; 562 tests passed, ruff clean
-- Plan: `dev_docs/plans/m6_p1-fix-budget-gate-and-eval_2026-02-25.md`
+- Plan: `dev_docs/plans/phase1/m6_p1-fix-budget-gate-and-eval_2026-02-25.md`
 - Reports: `dev_docs/reports/m6_eval_openai_1772064537.json`, `dev_docs/reports/m6_eval_gemini_1772064602.json`, `dev_docs/reports/m6_migration_conclusion.md`
 - Next: M6 关闭，参考 roadmap_milestones_v3.md 确定下一阶段
 - Risk: Gemini T13 长上下文 + 工具历史场景 400 INVALID_ARGUMENT 为已知限制，可通过 compaction 阈值调优缓解
@@ -278,7 +278,7 @@
   - Phase 3: Response Rendering — split_message (代码块保护), format_for_telegram (MarkdownV2 + 回退), 错误消息中文映射
   - Phase 4: E2E + Docs + ADR — test_channel_isolation.py (11 tests), ADR 0044, 文档更新
 - Evidence: 668 tests passed, ruff clean; merge commit 549253f; PM 报告 `dev_docs/logs/m4_2026-03-02/pm.md`; 验收报告 `dev_docs/reviews/m4_phase{0-4}_2026-03-02.md`
-- Plan: `dev_docs/plans/m4_telegram-channel-integration_2026-03-02.md`
+- Plan: `dev_docs/plans/phase1/m4_telegram-channel-integration_2026-03-02.md`
 - Decisions: ADR 0044 (Telegram adapter aiogram same-process)
 - Resilience: 经历 tmux 崩溃 + team 重建 + agent respawn 恢复，验证了 Agent Teams 韧性
 - Next: 用户审阅发现 4 项问题 (2×P1, 1×P2, 1×P3) 待修
@@ -293,7 +293,7 @@
   - F3 [P2]: polling 异常触发进程退出 — `_on_polling_done` 提取为模块级函数，fatal error 时 `os.kill(SIGTERM)` fail-fast（非静默降级）
   - F4 [P3]: `message_max_length` 边界校验 — `Field(ge=1, le=4096)` 启动时 fail-fast
 - Evidence: 686 tests passed, ruff clean; 用户 Telegram 端到端测试通过
-- Plan: `dev_docs/plans/m4_post-review-fix_2026-03-02.md` (approved + executed)
+- Plan: `dev_docs/plans/phase1/m4_post-review-fix_2026-03-02.md` (approved + executed)
 - Resilience: M4 主体实施期间经历 tmux 崩溃导致全部 agent 进程丢失；借助 beads control plane 事件记录（gate state、phase progress、teammate ack），PM 在新会话中完成断点重建（recovery-check + state-sync-ok），所有 teammate 在新 worktree 恢复工作并顺利完成剩余 Phase，验证了 M7 devcoord 协作控制在灾难恢复场景下的实际有效性
 - Next: M4 全部关闭；按 `design_docs/phase1/roadmap_milestones_v3.md` 确定下一阶段（M5 触发式进入）
 - Risk: 无
@@ -315,7 +315,7 @@
   - 健康检查修复：provider runtime health 改为按 provider 独立追踪，覆盖非流式、流式创建阶段和 stream-phase 失败；`/health/ready` 输出 provider 级 unhealthy 项
   - 运维与文档修复：`just restore` / `just backup` 参数示例去掉错误的额外 `--`；补充 `design_docs/phase1/m5_user_test_guide.md`；M5 gate/log/progress 投影已入库
   - 基线升级：ADR 0046 生效，`AGENTS.md` / `CLAUDE.md` / `.github/workflows/ci.yml` / design docs / tests 全部切到 PostgreSQL 17
-- Evidence: commit `1019b55`; `dev_docs/plans/m5_post-review-fix_2026-03-04.md`; `design_docs/phase1/m5_user_test_guide.md`; `decisions/0046-upgrade-database-baseline-to-postgresql-17.md`
+- Evidence: commit `1019b55`; `dev_docs/plans/phase1/m5_post-review-fix_2026-03-04.md`; `design_docs/phase1/m5_user_test_guide.md`; `decisions/0046-upgrade-database-baseline-to-postgresql-17.md`
 - Validation: `just lint`; `just test` (845 passed, 3 existing warnings); `just test-frontend` (16 passed); 用户手工完成 M5 restore/preflight 验证并通过
 - Next: M5 全部关闭；后续里程碑默认按 PostgreSQL 17 基线推进
 - Risk: 无阻塞风险；全量测试仍有 3 个既有 RuntimeWarning，未由本轮引入

@@ -64,7 +64,7 @@
 ## 5. 与其他目录的关系
 
 - 产品与阶段进度：`dev_docs/progress/project_progress.md`
-- 计划执行细节：`dev_docs/plans/`
+- 计划执行细节：当前阶段优先看 `dev_docs/plans/phase2/`；Phase 1 归档计划看 `dev_docs/plans/phase1/`
 - 关键技术取舍：`decisions/`（含 `decisions/INDEX.md`）
 
 ## 6. 外部参考（按需）

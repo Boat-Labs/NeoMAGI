@@ -3,7 +3,7 @@
 ## Session Info
 - Start: 2026-02-25
 - Baseline commit: 3276e70
-- Plan: dev_docs/plans/m6_model-migration-validation_2026-02-25.md (approved)
+- Plan: dev_docs/plans/phase1/m6_model-migration-validation_2026-02-25.md (approved)
 - Action plan: dev_docs/prompts/PM_ActionPlan_M6.md (approved)
 
 ## Phase Progress

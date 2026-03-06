@@ -71,8 +71,8 @@
 - 修复 M1.2/M1.3 审计延期项，恢复流式输出体验，补齐集成测试与 CI 基础设施。
 
 **来源**
-- M1.2 审计计划 (`dev_docs/plans/m1.2_audit-fixes_2026-02-18.md`) 中延期的 F4 + F6b。
-- M1.3 评审修复 (`dev_docs/plans/m1.3_review-fixes_2026-02-18.md`) 中延期的测试基础设施与可靠性增强。
+- M1.2 审计计划 (`dev_docs/plans/phase1/m1.2_audit-fixes_2026-02-18.md`) 中延期的 F4 + F6b。
+- M1.3 评审修复 (`dev_docs/plans/phase1/m1.3_review-fixes_2026-02-18.md`) 中延期的测试基础设施与可靠性增强。
 
 **范围**
 | 编号 | 内容 | owner | due |
@@ -185,5 +185,5 @@
 | 版本 | 日期 | 变更 | 决策依据 |
 |------|------|------|----------|
 | v1 | 2026-02-16 | 初始版本 | — |
-| v2 | 2026-02-18 | 新增 M1.4（审计修复收尾：F4 流式恢复 + F6b 集成测试） | ADR 0018, `dev_docs/plans/m1.2_audit-fixes_2026-02-18.md` |
-| v3 | 2026-02-18 | 扩展 M1.4 范围：纳入 M1.3 延期项（PG 集成测试、CI、vitest、history 超时、锁 fencing） | M1.3 review findings, `dev_docs/plans/m1.3_review-fixes_2026-02-18.md` |
+| v2 | 2026-02-18 | 新增 M1.4（审计修复收尾：F4 流式恢复 + F6b 集成测试） | ADR 0018, `dev_docs/plans/phase1/m1.2_audit-fixes_2026-02-18.md` |
+| v3 | 2026-02-18 | 扩展 M1.4 范围：纳入 M1.3 延期项（PG 集成测试、CI、vitest、history 超时、锁 fencing） | M1.3 review findings, `dev_docs/plans/phase1/m1.3_review-fixes_2026-02-18.md` |

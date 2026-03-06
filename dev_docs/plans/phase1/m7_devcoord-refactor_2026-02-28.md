@@ -1,6 +1,6 @@
 # M7 DevCoord 重构计划
 
-> 状态：superseded by `dev_docs/plans/m7_devcoord-refactor_2026-02-28_v2.md`
+> 状态：superseded by `dev_docs/plans/phase1/m7_devcoord-refactor_2026-02-28_v2.md`
 > 说明：本版保留为历史记录；devcoord 运行时入口口径已由 ADR 0043 与 v2 计划修订为 `scripts/devcoord` 直接入口。
 > 原始状态：approved
 > 原始日期：2026-02-28
