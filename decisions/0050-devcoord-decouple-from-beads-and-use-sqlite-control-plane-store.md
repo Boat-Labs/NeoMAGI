@@ -23,23 +23,8 @@
 - 保持 `scripts/devcoord` 作为协议语义唯一实现层；继续禁止 agent 直接手写控制状态。
 - 保持 `dev_docs/logs/<phase>/` 与 `dev_docs/progress/project_progress.md` 为 projection，而不是控制面真源。
 - 保持 `AGENTTEAMS.md` 中的 Gate / ACK / recovery / audit / closeout 协议边界不变；本 ADR 只替换 control-plane backend，不降级治理强度。
-- 保持 `coord.py` 命令面尽量稳定：
-  - `init`
-  - `open-gate`
-  - `ack`
-  - `heartbeat`
-  - `phase-complete`
-  - `recovery-check`
-  - `state-sync-ok`
-  - `ping`
-  - `unconfirmed-instruction`
-  - `stale-detected`
-  - `log-pending`
-  - `gate-review`
-  - `gate-close`
-  - `render`
-  - `audit`
-  - `milestone-close`
+- 协议语义保持稳定，但 `coord.py` 的人类可见命令面应收敛为更少的分组命令，`apply` 保留为 machine-first 入口。
+- 对应技术草案见 `design_docs/devcoord_sqlite_control_plane_draft.md`。
 - SQLite 仅用于内部开发协作控制面，不进入产品运行时数据面；产品运行时数据库仍保持 PostgreSQL 17 基线。
 
 ## 为什么
@@ -74,6 +59,7 @@
 - 若本 ADR 被接受，ADR 0042 中“`beads + Dolt` 作为 devcoord control-plane SSOT”这一存储选择将被 supersede；但其关于“`scripts/devcoord` 负责协议语义、`dev_docs` 只是 projection”的边界仍保留。
 - `beads` 的职责将收敛为 backlog / issue graph；日常 `bd list --status open` 将重新可读。
 - `scripts/devcoord` 将需要引入新的 SQLite store 适配层，并逐步移除对 `bd ... --json` 的依赖。
+- `coord.py` 后续应从“扁平的多命令面”收敛为 grouped command surface，同时保留一段兼容期。
 - `dev_docs/devcoord/beads_control_plane.md` 后续应演化为更中性的 `devcoord_control_plane.md`，不再把 `beads` 写成控制面真源。
 - `AGENTTEAMS.md` 与相关 PM/backend/tester skill 的协议内容大体不变，但 closeout 语义将从 “beads sync + milestone-close” 调整为 “SQLite store closeout + render/audit/milestone-close”。
 - 迁移应采用最小风险路径：

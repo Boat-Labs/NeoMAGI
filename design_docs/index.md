@@ -34,7 +34,10 @@
 7. `design_docs/skill_objects_runtime_draft.md`
    - `2+1` 中第二层：skill object 的结构、程序化投影与学习草案。
 
-8. `design_docs/phase1/index.md`
+8. `design_docs/devcoord_sqlite_control_plane_draft.md`
+   - `devcoord` 从 `beads` 解耦后的 SQLite control-plane store 与精简命令面草案。
+
+9. `design_docs/phase1/index.md`
    - 只有在需要 Phase 1 历史设计细节时再进入。
 
 ## 3. 当前默认激活文档
@@ -46,6 +49,7 @@
 - `design_docs/memory_architecture_v2.md`
 - `design_docs/procedure_runtime_draft.md`
 - `design_docs/skill_objects_runtime_draft.md`
+- `design_docs/devcoord_sqlite_control_plane_draft.md`（仅在需要 devcoord / 协作控制面重构时）
 
 ## 4. Phase 1 归档入口
 
