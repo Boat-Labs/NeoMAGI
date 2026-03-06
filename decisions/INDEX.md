@@ -51,6 +51,7 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0045 | Reset devcoord beads control-plane history and restart clean | accepted | 2026-03-02 | `decisions/0045-reset-devcoord-beads-control-plane-history.md` |
 | 0046 | Upgrade database baseline to PostgreSQL 17 | accepted | 2026-03-05 | `decisions/0046-upgrade-database-baseline-to-postgresql-17.md` |
 | 0047 | NeoMAGI multi-agent: single-SOUL execution units | accepted | 2026-03-05 | `decisions/0047-neomagi-multi-agent-single-soul-execution-units.md` |
+| 0048 | Skill objects as runtime experience layer | accepted | 2026-03-06 | `decisions/0048-skill-objects-as-runtime-experience-layer.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。

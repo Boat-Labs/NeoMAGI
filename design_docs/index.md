@@ -28,7 +28,10 @@
 5. `design_docs/procedure_runtime_draft.md`
    - Phase 2 方向的 deterministic procedure / runtime control 草案。
 
-6. `design_docs/phase1/index.md`
+6. `design_docs/skill_objects_runtime_draft.md`
+   - `2+1` 中第二层：skill object 的结构、程序化投影与学习草案。
+
+7. `design_docs/phase1/index.md`
    - 只有在需要 Phase 1 历史设计细节时再进入。
 
 ## 3. 当前默认激活文档
@@ -38,6 +41,7 @@
 - `design_docs/system_prompt.md`
 - `design_docs/memory_architecture_v2.md`
 - `design_docs/procedure_runtime_draft.md`
+- `design_docs/skill_objects_runtime_draft.md`
 
 ## 4. Phase 1 归档入口
 
