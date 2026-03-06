@@ -53,11 +53,15 @@
 - 修改 `AGENTTEAMS.md` 协议本身
 - 扩大 `devcoord` 能力边界
 
+前置条件：
+
+- 对应 [`design_docs/devcoord_sqlite_control_plane_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/devcoord_sqlite_control_plane_draft.md) 的 `Stage 0`，ADR 0050 必须先从 `proposed` 进入 `accepted`，再启动本计划的实施阶段。
+
 ## Goals
 
 - 将 `devcoord` 的控制面真源从 `beads` 切换为 SQLite。
 - 保持 `AGENTTEAMS.md` 的关键协议语义不回归：
-  - `GATE_OPEN` 需 ACK 才生效
+  - 所有需 ACK 的指令 `STOP / WAIT / RESUME / GATE_OPEN / PING` 仍需 ACK 才生效
   - `target_commit` pin
   - `RECOVERY_CHECK / STATE_SYNC_OK`
   - `render -> audit -> GATE_CLOSE`
@@ -101,7 +105,29 @@
 - SQLite 只是控制面存储后端。
 - `dev_docs` 不是控制面真源。
 
-### 2. SQLite Data Model
+### 2. Store Abstraction Strategy
+
+`Stage A` 不应再把 `CoordService` 继续绑定在 `IssueStore` 语义上。
+
+新的过渡口径：
+
+- `CoordStore` 成为 `CoordService` 的正式依赖接口。
+- 现有 [`IssueStore`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/scripts/devcoord/model.py#L121) 仅作为迁移期遗留概念，不再继续扩张。
+- 迁移期提供两个适配器：
+  - `BeadsCoordStore`
+    - 取代当前 `CliIssueStore`
+    - 负责把 `beads` 上的 control-plane 对象翻译为 `CoordStore` 所需的持久化/查询操作
+  - `MemoryCoordStore`
+    - 取代当前 `MemoryIssueStore`
+    - 继续服务快速单元测试
+- `SQLiteCoordStore` 是 `CoordStore` 的目标后端，不再复用 issue-oriented 记录模型。
+
+关键约束：
+
+- service 层不再依赖 `IssueRecord` 风格的数据结构。
+- 任何 `bd ... --json` 细节都必须被收拢在 `BeadsCoordStore` 内部，而不是继续泄漏到 service 层。
+
+### 3. SQLite Data Model
 
 最小对象面固定为 6 类：
 
@@ -115,7 +141,7 @@
 其中三类最关键：
 
 - `messages`
-  - 保存需要 ACK 的 command，例如 `GATE_OPEN`、`PING`
+  - 保存需要 ACK 的 command，例如 `STOP`、`WAIT`、`RESUME`、`GATE_OPEN`、`PING`
 - `events`
   - append-only 审计事件流
 - `gates`
@@ -123,17 +149,31 @@
 
 本计划内不追求通用 schema 平台，只追求当前 `devcoord` 协议的最小闭环。
 
-### 3. Transaction Semantics
+### 4. Transaction Semantics
 
 SQLite 可接受的前提是写入规则明确：
 
 - 使用 `sqlite3` 标准库
 - 开启 WAL mode
+- `busy_timeout` 固定为 `5000ms`
 - 所有命令写入在单事务内完成
 - `event_seq` 分配与聚合状态更新同事务提交
 - `ACK`、`gate-close`、`milestone-close` 都必须保留 fail-closed 行为
+- 遇到 `SQLITE_BUSY` 时，仅允许一次短退避重试（例如 `250ms`）；再次失败则 fail-closed 并要求操作者重试，避免静默吞掉写冲突
 
-### 4. Command Surface
+### 5. Shared Path Resolution
+
+`.devcoord/control.db` 的共享路径解析必须显式基于 `git-common-dir` 对应的共享仓库根，而不是依赖当前 worktree 的 `--show-toplevel` 结果。
+
+约束：
+
+- 多 worktree 必须指向同一个 shared root `.devcoord/control.db`
+- `render` 输出仍写入当前共享仓库下的 `dev_docs/`
+- `CoordPaths` 后续应从 `beads_dir` 迁移到 `control_root` / `control_db` 一类更直接的字段命名
+
+### 6. Command Surface
+
+`apply` 是并行保留的 machine-first 入口，不属于 grouped subcommands。
 
 机器入口：
 
@@ -147,21 +187,20 @@ SQLite 可接受的前提是写入规则明确：
 - `coord.py event ...`
 - `coord.py projection ...`
 - `coord.py milestone ...`
-- `coord.py apply ...`
 
 关键口径：
 
 - 精简的是 CLI 形状，不是协议事件语义。
 - `open-gate`、`ack`、`heartbeat` 等旧命令在迁移期继续存在，但降级为 alias。
 
-### 5. Projection Compatibility
+### 7. Projection Compatibility
 
 继续生成：
 
-- `heartbeat_events.jsonl`
-- `gate_state.md`
-- `watchdog_status.md`
-- `project_progress.md`
+- `dev_docs/logs/<phase>/<milestone>_<run-date>/heartbeat_events.jsonl`
+- `dev_docs/logs/<phase>/<milestone>_<run-date>/gate_state.md`
+- `dev_docs/logs/<phase>/<milestone>_<run-date>/watchdog_status.md`
+- `dev_docs/progress/project_progress.md`
 
 迁移要求：
 
@@ -179,7 +218,7 @@ SQLite 可接受的前提是写入规则明确：
 - 要让 `beads` 退回 backlog 角色，但不能丢失审计链
 - 要精简命令面，但不能一次性打断现有 prompts / skills / runbooks
 
-因此不建议一次性大切换，建议拆成 4 个窄阶段：
+因此不建议一次性大切换。对应设计草案中的 `Stage 0` 是 “ADR 0050 accepted”，本计划只覆盖其后的 4 个实施阶段：
 
 1. `Stage A` Store abstraction
 2. `Stage B` SQLite backend + render/audit cutover
@@ -195,23 +234,35 @@ SQLite 可接受的前提是写入规则明确：
 目标：
 
 - 在不改变外部行为的前提下，为 `CoordService` 引入 `CoordStore` 抽象
+- 将 `CoordService` 对 [`IssueStore`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/scripts/devcoord/model.py#L121) 的依赖替换为 `CoordStore`
 
 建议文件：
 
 - `scripts/devcoord/store.py`（新）
 - `scripts/devcoord/service.py`
 - `scripts/devcoord/model.py`
+- `tests/devcoord/*`
 
 产出：
 
 - `CoordStore` interface
-- 当前 `beads` 路径的 store adapter 明确化
+- `BeadsCoordStore`
+  - 作为 `CliIssueStore` 的迁移替代
+- `MemoryCoordStore`
+  - 作为 `MemoryIssueStore` 的迁移替代
 - service 不再直接依赖 `bd ... --json` 细节
+- service 层不再直接依赖 `IssueRecord` 风格数据结构
+
+测试方法：
+
+- 现有 `MemoryIssueStore` 路径的测试迁移为 `MemoryCoordStore`
+- 保留 fast unit tests，验证 service 行为在 store 抽象切换后不回归
 
 验收：
 
 - 现有命令面行为不变
 - 现有 tests / projection 输出不回归
+- `CoordStore` 与 `BeadsCoordStore / MemoryCoordStore` 关系清晰，后续 Stage B 不需要继续触碰 `IssueStore`
 
 ### Stage B: SQLite Backend
 
@@ -220,6 +271,7 @@ SQLite 可接受的前提是写入规则明确：
 - 新增 `.devcoord/control.db`
 - 实现 `SQLiteCoordStore`
 - 让 `render/audit` 读 SQLite 而不是 `beads`
+- 固定共享路径解析：所有 worktree 都经由 shared root 指向同一 `.devcoord/control.db`
 
 建议文件：
 
@@ -227,6 +279,8 @@ SQLite 可接受的前提是写入规则明确：
 - `scripts/devcoord/service.py`
 - `scripts/devcoord/coord.py`
 - `.gitignore`（如需要）
+- `tests/devcoord/*`
+- `tests/integration/*`
 
 产出：
 
@@ -234,12 +288,28 @@ SQLite 可接受的前提是写入规则明确：
 - transaction helper
 - SQLite-backed query/write path
 - `render/audit` 读 SQLite
+- `.devcoord/` 本地状态目录落位
+
+测试方法：
+
+- 新增 SQLite 单元测试
+  - schema bootstrap
+  - 单事务写入
+  - `ACK` / `gate-close` / `milestone-close` fail-closed
+- 新增 SQLite 集成测试
+  - `gate open -> ack -> review -> close`
+  - `render -> audit`
+- 增加至少一个多 worktree / shared-root 路径 smoke test
+- 增加至少一个写冲突 smoke test，验证 `busy_timeout + retry-once + fail-closed`
 
 验收：
 
 - `gate open -> ack -> review -> close` 在不写 `beads` 的情况下成立
 - `audit.reconciled` 行为与当前一致
 - projection 仍能生成
+- 所有需 ACK 的指令 `STOP / WAIT / RESUME / GATE_OPEN / PING` 在 SQLite 后端上仍保持 “pending -> effective” 语义
+- `target_commit` 写入、读取、projection 与 audit 结果一致
+- 多 worktree 指向同一 shared `.devcoord/control.db`
 
 ### Stage C: Grouped CLI Surface
 
@@ -252,12 +322,23 @@ SQLite 可接受的前提是写入规则明确：
 
 - `scripts/devcoord/coord.py`
 - `dev_docs/devcoord/...`（后续文档适配）
+- `.claude/skills/devcoord-pm/SKILL.md`
+- `.claude/skills/devcoord-backend/SKILL.md`
+- `.claude/skills/devcoord-tester/SKILL.md`
 
 产出：
 
 - `gate / command / event / projection / milestone` 分组命令
 - `apply` 保持 machine-first 入口
 - 旧命令映射表与 deprecation 注记
+- `gate open` 作为 canonical path
+- `open-gate` 仅保留兼容 alias
+
+测试方法：
+
+- CLI smoke tests 覆盖 grouped commands
+- compatibility smoke tests 覆盖旧 flat aliases
+- 以最小 PM/backend/tester prompt 样例验证 skill 不需要一次性重写
 
 验收：
 
@@ -279,27 +360,41 @@ SQLite 可接受的前提是写入规则明确：
 - `AGENTS.md`
 - `CLAUDE.md`
 - `dev_docs/devcoord/...`
+- `.claude/skills/devcoord-pm/SKILL.md`
+- `.claude/skills/devcoord-backend/SKILL.md`
+- `.claude/skills/devcoord-tester/SKILL.md`
 
 产出：
 
 - `beads` 仅保留 backlog/work issue
 - closeout 流程改为 SQLite store closeout
 - `milestone-close` 语义对齐新后端
+- `CoordPaths.beads_dir` 退役或重命名
+- `--beads-dir` / `--bd-bin` / `--dolt-bin` 进入 deprecated -> remove 流程
+- 文档中的 “repo 根 `.beads` 为 SSOT” 全部改为 `.devcoord/control.db`
+- `beads_control_plane.md` 被 supersede 或归档说明清楚
+
+测试方法：
+
+- 端到端 closeout smoke test
+- 手动检查 `bd list --status open`
+- 手动检查 `render -> audit -> milestone-close`
 
 验收：
 
 - `bd list --status open` 不再被 `coord` 对象污染
 - `devcoord` closeout 不再依赖 beads sync
 - 旧 control-plane 文档被 supersede 或归档说明清楚
+- `AGENTTEAMS.md`、`AGENTS.md`、`CLAUDE.md` 与 3 个 devcoord skills 已切换到 SQLite control-plane 口径
 
 ## Risks
 
 | # | 风险 | 影响 | 概率 | 缓解 |
 | --- | --- | --- | --- | --- |
 | R1 | store 切换导致协议语义回归 | Gate / ACK / recovery 失真 | 中 | 先做 abstraction，再做 backend cutover；保留旧命令与 projection 验证 |
-| R2 | SQLite 锁语义处理不当 | 多 worktree 写入冲突、假死 | 中 | WAL + busy timeout + 单事务写入；针对 ACK / gate-close 增加并发测试 |
+| R2 | SQLite 锁语义处理不当 | 多 worktree 写入冲突、假死 | 中 | WAL + `busy_timeout=5000ms` + 单事务写入；遇到 `SQLITE_BUSY` 仅重试一次后 fail-closed；针对 ACK / gate-close 增加并发测试 |
 | R3 | grouped CLI 一次性切换过猛 | skill / prompt / PM runbook 失效 | 中 | 保留 aliases；分阶段切换文档和 skill |
-| R4 | beads cutover 不彻底 | backlog 与 control-plane 继续混杂 | 高 | Stage D 明确 hard cutover；closeout 后检查 `bd open` 视图 |
+| R4 | beads cutover 不彻底 | backlog 与 control-plane 继续混杂 | 中 | Stage D 明确 hard cutover checklist；移除 beads 参数/路径后再检查 `bd open` 视图 |
 | R5 | projection 与真源不一致 | 审计链失真 | 中 | `render -> audit` 继续作为 gate-close 前硬条件 |
 | R6 | 把 devcoord 过度做成平台 | 范围蔓延、延误主线开发 | 中 | 只服务当前协议，不为未来多机/通用调度预建设计 |
 
@@ -309,16 +404,20 @@ SQLite 可接受的前提是写入规则明确：
 - [ ] `beads / bd` 重新只承载 backlog / issue graph 语义
 - [ ] `.devcoord/control.db` 成为新的控制面真源
 - [ ] `AGENTTEAMS.md` 协议关键路径不回归：
-  - [ ] `GATE_OPEN` 需 ACK 才生效
+  - [ ] `STOP / WAIT / RESUME / GATE_OPEN / PING` 均需 ACK 才生效
+  - [ ] `target_commit` 写入、读取、projection 与 audit 一致
   - [ ] `RECOVERY_CHECK / STATE_SYNC_OK` 继续成立
   - [ ] `render -> audit -> GATE_CLOSE` 继续成立
-- [ ] projection 继续生成 `heartbeat_events.jsonl`、`gate_state.md`、`watchdog_status.md`、`project_progress.md`
+- [ ] projection 继续生成 `dev_docs/logs/<phase>/<milestone>_<run-date>/heartbeat_events.jsonl`、`dev_docs/logs/<phase>/<milestone>_<run-date>/gate_state.md`、`dev_docs/logs/<phase>/<milestone>_<run-date>/watchdog_status.md`、`dev_docs/progress/project_progress.md`
 - [ ] `coord.py` 顶层命令面比当前更少、更易记
 - [ ] 旧 flat commands 在兼容期内继续可用
 - [ ] `bd list --status open` 不再被 `coord` 对象污染
 
-## Open Questions
+## Resolved Positions
 
-- `.devcoord/control.db` 是否需要进入 `.gitignore`，还是已有 ignore 规则已足够表达“本地控制面状态不入库”？
-- `schema_version` 只保留在 SQLite metadata 中，还是保留 sidecar `schema_version.json` 方便人工检查？
-- `gate open` 是先作为 alias 过渡，还是直接成为替代 `open-gate` 的 canonical path？
+- `.devcoord/` 进入 `.gitignore`
+  - 理由：它是本地控制面状态，不应进入仓库历史
+- `schema_version` 只保留在 SQLite metadata / schema 内部
+  - 理由：sidecar `json` 会重复表达同一事实，增加维护成本
+- `gate open` 作为 canonical path
+  - 理由：Stage C 的目标就是收敛命令面，`open-gate` 仅作为兼容 alias 保留一段过渡期
