@@ -239,6 +239,31 @@ Phase 1 固定采用以下实现方式：
 - `render`：从 beads 投影到 `dev_docs`。
 - `audit`：只读输出 append-first / projection 对账快照，供关 gate 前自检。
 
+### 8.1 Grouped CLI (Stage C)
+
+Stage C 将上述 flat 命令收敛为 grouped CLI surface：
+
+| Flat command | Grouped canonical path |
+| --- | --- |
+| `open-gate` | `gate open` |
+| `ack` | `command ack` |
+| `heartbeat` | `event heartbeat` |
+| `phase-complete` | `event phase-complete` |
+| `recovery-check` | `event recovery-check` |
+| `state-sync-ok` | `event state-sync-ok` |
+| `ping` | `command send --name PING` |
+| `unconfirmed-instruction` | `event unconfirmed-instruction` |
+| `log-pending` | `event log-pending` |
+| `stale-detected` | `event stale-detected` |
+| `gate-review` | `gate review` |
+| `gate-close` | `gate close` |
+| `render` | `projection render` |
+| `audit` | `projection audit` |
+| `milestone-close` | `milestone close` |
+
+Flat commands 保留为兼容 aliases，通过 argv normalization 在解析前重写为 grouped 形式。
+`apply <action> --payload-stdin` 继续作为 machine-first 入口不变。
+
 当前最小闭环已经包含 `LOG_PENDING` 与 `audit`。后者是 read-only helper，不承担状态写入，只负责输出 `received_events`、`logged_events`、`pending_ack_messages`、`open_gates`、`log_pending_events` 等审计视图。
 - `render -> audit -> read projection` 必须串行执行；并行执行时可能读到旧投影，形成假性的 gate/projection 偏差判断。
 后续若需要引入 `claim`、`handoff` 或开放竞争相关命令，也应作为执行层原语补充，而不是把执行路径反推回治理状态机。

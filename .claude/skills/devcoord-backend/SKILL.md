@@ -14,26 +14,26 @@ This skill defines the backend teammate's devcoord write path.
 - Never edit `dev_docs/logs/phase1/*`, `dev_docs/logs/phase2/*`, or `dev_docs/progress/project_progress.md` directly.
 - Never call `bd` directly for control-plane writes.
 - Do not start a new phase without a valid `GATE_OPEN` and `target_commit`.
-- Prefer `uv run python scripts/devcoord/coord.py apply <action> --payload-stdin`.
+- Prefer grouped CLI commands (e.g., `command ack`, `event heartbeat`). For machine-first payloads, use `apply <action> --payload-stdin`.
 - Compute `HEAD` once in the same shell block you use for the write payload, and reuse that verified SHA for `commit` fields.
 
 ## Required actions
 
 1. Before any write, run `git rev-parse --show-toplevel`, `git rev-parse --abbrev-ref HEAD`, and `git rev-parse HEAD`; only continue if `HEAD == target_commit`.
-2. On `GATE_OPEN` or `PING`, send `ack`.
-3. On long-running work, send `heartbeat` at least every 15 minutes and at meaningful interrupt points.
-4. After `commit + push`, send `phase-complete` and include the current `branch`.
-5. After context loss or restart, send `recovery-check` before doing any coding.
+2. On `GATE_OPEN` or `PING`, send `command ack`.
+3. On long-running work, send `event heartbeat` at least every 15 minutes and at meaningful interrupt points.
+4. After `commit + push`, send `event phase-complete` and include the current `branch`.
+5. After context loss or restart, send `event recovery-check` before doing any coding.
 
 ## Role boundaries
 
-- Backend may record: `ack`, `heartbeat`, `phase-complete`, `recovery-check`.
-- Backend must not record: `open-gate`, `state-sync-ok`, `ping`, `stale-detected`, `gate-close`.
+- Backend may record: `command ack`, `event heartbeat`, `event phase-complete`, `event recovery-check`.
+- Backend must not record: `gate open`, `event state-sync-ok`, `command send`, `event stale-detected`, `gate close`.
 - If a PM asks for a phase you are not authorized to enter, stop and wait.
 
 ## Payload reference
 
-See [references/payloads.md](references/payloads.md) for required fields and example JSON for each action.
+See [references/payloads.md](references/payloads.md) for required fields and example JSON for each `apply` action.
 
 ## Error handling
 

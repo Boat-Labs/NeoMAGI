@@ -51,11 +51,69 @@ __all__ = [
     "CoordStore",
     "MemoryCoordStore",
     "SQLiteCoordStore",
+    "_normalize_argv",
     "build_parser",
     "main",
     "run_cli",
     "_resolve_paths",
 ]
+
+# ---------------------------------------------------------------------------
+# Argv normalization: flat alias -> grouped canonical form
+# ---------------------------------------------------------------------------
+
+_ROOT_FLAGS_WITH_VALUE = frozenset({"--backend", "--beads-dir", "--bd-bin", "--dolt-bin"})
+
+_FLAT_ALIAS_MAP: dict[str, list[str]] = {
+    "open-gate": ["gate", "open"],
+    "ack": ["command", "ack"],
+    "heartbeat": ["event", "heartbeat"],
+    "phase-complete": ["event", "phase-complete"],
+    "recovery-check": ["event", "recovery-check"],
+    "state-sync-ok": ["event", "state-sync-ok"],
+    "ping": ["command", "send", "--name", "PING"],
+    "unconfirmed-instruction": ["event", "unconfirmed-instruction"],
+    "log-pending": ["event", "log-pending"],
+    "stale-detected": ["event", "stale-detected"],
+    "gate-review": ["gate", "review"],
+    "gate-close": ["gate", "close"],
+    "render": ["projection", "render"],
+    "audit": ["projection", "audit"],
+    "milestone-close": ["milestone", "close"],
+}
+
+
+def _normalize_argv(argv: Sequence[str]) -> list[str]:
+    """Rewrite legacy flat commands to grouped canonical tokens.
+
+    Only the first command-position token is inspected; option values
+    are never touched.
+    """
+    result = list(argv)
+    idx = 0
+    while idx < len(result):
+        token = result[idx]
+        if token.startswith("--") and "=" in token:
+            flag = token.split("=", 1)[0]
+            if flag in _ROOT_FLAGS_WITH_VALUE:
+                idx += 1
+                continue
+        if token in _ROOT_FLAGS_WITH_VALUE:
+            idx += 2
+            continue
+        if token.startswith("-"):
+            idx += 1
+            continue
+        break
+    if idx < len(result) and result[idx] in _FLAT_ALIAS_MAP:
+        return result[:idx] + _FLAT_ALIAS_MAP[result[idx]] + result[idx + 1:]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Parser
+# ---------------------------------------------------------------------------
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="NeoMAGI devcoord control plane wrapper")
@@ -83,149 +141,177 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    init_parser = subparsers.add_parser("init", help="Initialize the shared control plane")
-    init_parser.add_argument("--milestone", required=True)
-    init_parser.add_argument("--run-date", default=date.today().isoformat())
-    init_parser.add_argument("--roles", default=",".join(DEFAULT_ROLES))
+    # --- init (top-level) ---
+    init_p = subparsers.add_parser("init", help="Initialize the shared control plane")
+    init_p.set_defaults(_action="init")
+    init_p.add_argument("--milestone", required=True)
+    init_p.add_argument("--run-date", default=date.today().isoformat())
+    init_p.add_argument("--roles", default=",".join(DEFAULT_ROLES))
 
-    open_gate_parser = subparsers.add_parser("open-gate", help="Create a pending GATE_OPEN command")
-    open_gate_parser.add_argument("--milestone", required=True)
-    open_gate_parser.add_argument("--phase", required=True)
-    open_gate_parser.add_argument("--gate", required=True)
-    open_gate_parser.add_argument("--allowed-role", required=True)
-    open_gate_parser.add_argument("--target-commit", required=True)
-    open_gate_parser.add_argument(
-        "--task",
-        default="gate open pending",
+    # --- gate group ---
+    gate_p = subparsers.add_parser("gate", help="Gate lifecycle commands")
+    gate_sub = gate_p.add_subparsers(dest="subcommand", required=True)
+
+    gate_open_p = gate_sub.add_parser("open", help="Create a pending GATE_OPEN command")
+    gate_open_p.set_defaults(_action="open-gate")
+    gate_open_p.add_argument("--milestone", required=True)
+    gate_open_p.add_argument("--phase", required=True)
+    gate_open_p.add_argument("--gate", required=True)
+    gate_open_p.add_argument("--allowed-role", required=True)
+    gate_open_p.add_argument("--target-commit", required=True)
+    gate_open_p.add_argument("--task", default="gate open pending")
+
+    gate_review_p = gate_sub.add_parser("review", help="Record a GATE_REVIEW_COMPLETE event")
+    gate_review_p.set_defaults(_action="gate-review")
+    gate_review_p.add_argument("--milestone", required=True)
+    gate_review_p.add_argument("--role", required=True)
+    gate_review_p.add_argument("--phase", required=True)
+    gate_review_p.add_argument("--gate", required=True)
+    gate_review_p.add_argument("--result", required=True)
+    gate_review_p.add_argument("--report-commit", required=True)
+    gate_review_p.add_argument("--report-path", required=True)
+    gate_review_p.add_argument("--task", required=True)
+
+    gate_close_p = gate_sub.add_parser("close", help="Close a gate after review is complete")
+    gate_close_p.set_defaults(_action="gate-close")
+    gate_close_p.add_argument("--milestone", required=True)
+    gate_close_p.add_argument("--phase", required=True)
+    gate_close_p.add_argument("--gate", required=True)
+    gate_close_p.add_argument("--result", required=True)
+    gate_close_p.add_argument("--report-commit", required=True)
+    gate_close_p.add_argument("--report-path", required=True)
+    gate_close_p.add_argument("--task", required=True)
+
+    # --- command group ---
+    cmd_p = subparsers.add_parser("command", help="Command dispatch (ack, send)")
+    cmd_sub = cmd_p.add_subparsers(dest="subcommand", required=True)
+
+    cmd_ack_p = cmd_sub.add_parser("ack", help="ACK a pending command and mark it effective")
+    cmd_ack_p.set_defaults(_action="ack")
+    cmd_ack_p.add_argument("--milestone", required=True)
+    cmd_ack_p.add_argument("--role", required=True)
+    cmd_ack_p.add_argument("--cmd", required=True)
+    cmd_ack_p.add_argument("--gate", required=True)
+    cmd_ack_p.add_argument("--commit", required=True)
+    cmd_ack_p.add_argument("--phase")
+    cmd_ack_p.add_argument("--task", default="ACK command")
+
+    cmd_send_p = cmd_sub.add_parser("send", help="Send a named command (currently: PING)")
+    cmd_send_p.set_defaults(_action="ping")
+    cmd_send_p.add_argument("--name", required=True, choices=["PING"])
+    cmd_send_p.add_argument("--milestone", required=True)
+    cmd_send_p.add_argument("--role", required=True)
+    cmd_send_p.add_argument("--phase", required=True)
+    cmd_send_p.add_argument("--gate", required=True)
+    cmd_send_p.add_argument("--task", required=True)
+    cmd_send_p.add_argument("--target-commit")
+
+    # --- event group ---
+    event_p = subparsers.add_parser("event", help="Protocol events")
+    event_sub = event_p.add_subparsers(dest="subcommand", required=True)
+
+    event_hb_p = event_sub.add_parser("heartbeat", help="Record a heartbeat event")
+    event_hb_p.set_defaults(_action="heartbeat")
+    event_hb_p.add_argument("--milestone", required=True)
+    event_hb_p.add_argument("--role", required=True)
+    event_hb_p.add_argument("--phase", required=True)
+    event_hb_p.add_argument("--status", required=True)
+    event_hb_p.add_argument("--task", required=True)
+    event_hb_p.add_argument("--eta-min", type=int)
+    event_hb_p.add_argument("--gate")
+    event_hb_p.add_argument("--target-commit")
+    event_hb_p.add_argument("--branch")
+
+    event_pc_p = event_sub.add_parser("phase-complete", help="Record a PHASE_COMPLETE event")
+    event_pc_p.set_defaults(_action="phase-complete")
+    event_pc_p.add_argument("--milestone", required=True)
+    event_pc_p.add_argument("--role", required=True)
+    event_pc_p.add_argument("--phase", required=True)
+    event_pc_p.add_argument("--gate", required=True)
+    event_pc_p.add_argument("--commit", required=True)
+    event_pc_p.add_argument("--task", required=True)
+    event_pc_p.add_argument("--branch")
+
+    event_rc_p = event_sub.add_parser(
+        "recovery-check", help="Record a RECOVERY_CHECK event after restart or context loss"
     )
+    event_rc_p.set_defaults(_action="recovery-check")
+    event_rc_p.add_argument("--milestone", required=True)
+    event_rc_p.add_argument("--role", required=True)
+    event_rc_p.add_argument("--last-seen-gate", required=True)
+    event_rc_p.add_argument("--task", required=True)
 
-    ack_parser = subparsers.add_parser("ack", help="ACK a pending command and mark it effective")
-    ack_parser.add_argument("--milestone", required=True)
-    ack_parser.add_argument("--role", required=True)
-    ack_parser.add_argument("--cmd", required=True)
-    ack_parser.add_argument("--gate", required=True)
-    ack_parser.add_argument("--commit", required=True)
-    ack_parser.add_argument("--phase")
-    ack_parser.add_argument("--task", default="ACK command")
-
-    heartbeat_parser = subparsers.add_parser("heartbeat", help="Record a heartbeat event")
-    heartbeat_parser.add_argument("--milestone", required=True)
-    heartbeat_parser.add_argument("--role", required=True)
-    heartbeat_parser.add_argument("--phase", required=True)
-    heartbeat_parser.add_argument("--status", required=True)
-    heartbeat_parser.add_argument("--task", required=True)
-    heartbeat_parser.add_argument("--eta-min", type=int)
-    heartbeat_parser.add_argument("--gate")
-    heartbeat_parser.add_argument("--target-commit")
-    heartbeat_parser.add_argument("--branch")
-
-    phase_complete_parser = subparsers.add_parser(
-        "phase-complete",
-        help="Record a PHASE_COMPLETE event",
+    event_ss_p = event_sub.add_parser(
+        "state-sync-ok", help="Record a STATE_SYNC_OK response from PM"
     )
-    phase_complete_parser.add_argument("--milestone", required=True)
-    phase_complete_parser.add_argument("--role", required=True)
-    phase_complete_parser.add_argument("--phase", required=True)
-    phase_complete_parser.add_argument("--gate", required=True)
-    phase_complete_parser.add_argument("--commit", required=True)
-    phase_complete_parser.add_argument("--task", required=True)
-    phase_complete_parser.add_argument("--branch")
+    event_ss_p.set_defaults(_action="state-sync-ok")
+    event_ss_p.add_argument("--milestone", required=True)
+    event_ss_p.add_argument("--role", required=True)
+    event_ss_p.add_argument("--gate", required=True)
+    event_ss_p.add_argument("--target-commit", required=True)
+    event_ss_p.add_argument("--task", required=True)
 
-    recovery_check_parser = subparsers.add_parser(
-        "recovery-check",
-        help="Record a RECOVERY_CHECK event after restart or context loss",
+    event_sd_p = event_sub.add_parser(
+        "stale-detected", help="Record a suspected stale role after timeout checks"
     )
-    recovery_check_parser.add_argument("--milestone", required=True)
-    recovery_check_parser.add_argument("--role", required=True)
-    recovery_check_parser.add_argument("--last-seen-gate", required=True)
-    recovery_check_parser.add_argument("--task", required=True)
+    event_sd_p.set_defaults(_action="stale-detected")
+    event_sd_p.add_argument("--milestone", required=True)
+    event_sd_p.add_argument("--role", required=True)
+    event_sd_p.add_argument("--phase", required=True)
+    event_sd_p.add_argument("--task", required=True)
+    event_sd_p.add_argument("--gate")
+    event_sd_p.add_argument("--target-commit")
+    event_sd_p.add_argument("--ping-count", type=int)
 
-    state_sync_ok_parser = subparsers.add_parser(
-        "state-sync-ok",
-        help="Record a STATE_SYNC_OK response from PM",
+    event_lp_p = event_sub.add_parser(
+        "log-pending", help="Record a LOG_PENDING event when append-first logging is deferred"
     )
-    state_sync_ok_parser.add_argument("--milestone", required=True)
-    state_sync_ok_parser.add_argument("--role", required=True)
-    state_sync_ok_parser.add_argument("--gate", required=True)
-    state_sync_ok_parser.add_argument("--target-commit", required=True)
-    state_sync_ok_parser.add_argument("--task", required=True)
+    event_lp_p.set_defaults(_action="log-pending")
+    event_lp_p.add_argument("--milestone", required=True)
+    event_lp_p.add_argument("--phase", required=True)
+    event_lp_p.add_argument("--task", required=True)
+    event_lp_p.add_argument("--gate")
+    event_lp_p.add_argument("--target-commit")
 
-    ping_parser = subparsers.add_parser(
-        "ping",
-        help="Send a PING message that requires ACK",
-    )
-    ping_parser.add_argument("--milestone", required=True)
-    ping_parser.add_argument("--role", required=True)
-    ping_parser.add_argument("--phase", required=True)
-    ping_parser.add_argument("--gate", required=True)
-    ping_parser.add_argument("--task", required=True)
-    ping_parser.add_argument("--target-commit")
-
-    unconfirmed_instruction_parser = subparsers.add_parser(
+    event_ui_p = event_sub.add_parser(
         "unconfirmed-instruction",
         help="Record an unconfirmed instruction after repeated PING attempts",
     )
-    unconfirmed_instruction_parser.add_argument("--milestone", required=True)
-    unconfirmed_instruction_parser.add_argument("--role", required=True)
-    unconfirmed_instruction_parser.add_argument("--cmd", required=True)
-    unconfirmed_instruction_parser.add_argument("--phase", required=True)
-    unconfirmed_instruction_parser.add_argument("--gate", required=True)
-    unconfirmed_instruction_parser.add_argument("--task", required=True)
-    unconfirmed_instruction_parser.add_argument("--target-commit")
-    unconfirmed_instruction_parser.add_argument("--ping-count", type=int)
+    event_ui_p.set_defaults(_action="unconfirmed-instruction")
+    event_ui_p.add_argument("--milestone", required=True)
+    event_ui_p.add_argument("--role", required=True)
+    event_ui_p.add_argument("--cmd", required=True)
+    event_ui_p.add_argument("--phase", required=True)
+    event_ui_p.add_argument("--gate", required=True)
+    event_ui_p.add_argument("--task", required=True)
+    event_ui_p.add_argument("--target-commit")
+    event_ui_p.add_argument("--ping-count", type=int)
 
-    log_pending_parser = subparsers.add_parser(
-        "log-pending",
-        help="Record a LOG_PENDING event when append-first logging is deferred",
-    )
-    log_pending_parser.add_argument("--milestone", required=True)
-    log_pending_parser.add_argument("--phase", required=True)
-    log_pending_parser.add_argument("--task", required=True)
-    log_pending_parser.add_argument("--gate")
-    log_pending_parser.add_argument("--target-commit")
+    # --- projection group ---
+    proj_p = subparsers.add_parser("projection", help="Projection rendering and audit")
+    proj_sub = proj_p.add_subparsers(dest="subcommand", required=True)
 
-    stale_detected_parser = subparsers.add_parser(
-        "stale-detected",
-        help="Record a suspected stale role after timeout checks",
-    )
-    stale_detected_parser.add_argument("--milestone", required=True)
-    stale_detected_parser.add_argument("--role", required=True)
-    stale_detected_parser.add_argument("--phase", required=True)
-    stale_detected_parser.add_argument("--task", required=True)
-    stale_detected_parser.add_argument("--gate")
-    stale_detected_parser.add_argument("--target-commit")
-    stale_detected_parser.add_argument("--ping-count", type=int)
+    proj_render_p = proj_sub.add_parser("render", help="Render dev_docs projection files")
+    proj_render_p.set_defaults(_action="render")
+    proj_render_p.add_argument("--milestone", required=True)
 
-    gate_review_parser = subparsers.add_parser(
-        "gate-review",
-        help="Record a GATE_REVIEW_COMPLETE event",
+    proj_audit_p = proj_sub.add_parser(
+        "audit", help="Report append-first / projection reconciliation status"
     )
-    gate_review_parser.add_argument("--milestone", required=True)
-    gate_review_parser.add_argument("--role", required=True)
-    gate_review_parser.add_argument("--phase", required=True)
-    gate_review_parser.add_argument("--gate", required=True)
-    gate_review_parser.add_argument("--result", required=True)
-    gate_review_parser.add_argument("--report-commit", required=True)
-    gate_review_parser.add_argument("--report-path", required=True)
-    gate_review_parser.add_argument("--task", required=True)
+    proj_audit_p.set_defaults(_action="audit")
+    proj_audit_p.add_argument("--milestone", required=True)
 
-    gate_close_parser = subparsers.add_parser(
-        "gate-close",
-        help="Close a gate after review is complete",
-    )
-    gate_close_parser.add_argument("--milestone", required=True)
-    gate_close_parser.add_argument("--phase", required=True)
-    gate_close_parser.add_argument("--gate", required=True)
-    gate_close_parser.add_argument("--result", required=True)
-    gate_close_parser.add_argument("--report-commit", required=True)
-    gate_close_parser.add_argument("--report-path", required=True)
-    gate_close_parser.add_argument("--task", required=True)
-    milestone_close_parser = subparsers.add_parser(
-        "milestone-close",
-        help="Close all control-plane beads for a completed milestone",
-    )
-    milestone_close_parser.add_argument("--milestone", required=True)
+    # --- milestone group ---
+    ms_p = subparsers.add_parser("milestone", help="Milestone lifecycle")
+    ms_sub = ms_p.add_subparsers(dest="subcommand", required=True)
 
+    ms_close_p = ms_sub.add_parser(
+        "close", help="Close all control-plane beads for a completed milestone"
+    )
+    ms_close_p.set_defaults(_action="milestone-close")
+    ms_close_p.add_argument("--milestone", required=True)
+
+    # --- apply (machine-first, unchanged) ---
     apply_parser = subparsers.add_parser(
         "apply",
         help="Execute a control-plane action from structured JSON payload",
@@ -255,14 +341,131 @@ def build_parser() -> argparse.ArgumentParser:
     apply_group.add_argument("--payload-file")
     apply_group.add_argument("--payload-stdin", action="store_true")
 
-    render_parser = subparsers.add_parser("render", help="Render dev_docs projection files")
-    render_parser.add_argument("--milestone", required=True)
-    audit_parser = subparsers.add_parser(
-        "audit",
-        help="Report append-first / projection reconciliation status",
-    )
-    audit_parser.add_argument("--milestone", required=True)
     return parser
+
+
+# ---------------------------------------------------------------------------
+# Canonical payload builders: argparse Namespace -> dict for _execute_action
+# ---------------------------------------------------------------------------
+
+_PAYLOAD_BUILDERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
+    "init": lambda a: {
+        "milestone": a.milestone,
+        "run_date": a.run_date,
+        "roles": _split_csv(a.roles),
+    },
+    "open-gate": lambda a: {
+        "milestone": a.milestone,
+        "phase": a.phase,
+        "gate_id": a.gate,
+        "allowed_role": a.allowed_role,
+        "target_commit": a.target_commit,
+        "task": a.task,
+    },
+    "ack": lambda a: {
+        "milestone": a.milestone,
+        "role": a.role,
+        "command": a.cmd,
+        "gate_id": a.gate,
+        "commit": a.commit,
+        "phase": a.phase,
+        "task": a.task,
+    },
+    "heartbeat": lambda a: {
+        "milestone": a.milestone,
+        "role": a.role,
+        "phase": a.phase,
+        "status": a.status,
+        "task": a.task,
+        "eta_min": a.eta_min,
+        "gate_id": _none_if_placeholder(a.gate),
+        "target_commit": _none_if_placeholder(a.target_commit),
+        "branch": _none_if_placeholder(a.branch),
+    },
+    "phase-complete": lambda a: {
+        "milestone": a.milestone,
+        "role": a.role,
+        "phase": a.phase,
+        "gate_id": a.gate,
+        "commit": a.commit,
+        "task": a.task,
+        "branch": _none_if_placeholder(a.branch),
+    },
+    "recovery-check": lambda a: {
+        "milestone": a.milestone,
+        "role": a.role,
+        "last_seen_gate": a.last_seen_gate,
+        "task": a.task,
+    },
+    "state-sync-ok": lambda a: {
+        "milestone": a.milestone,
+        "role": a.role,
+        "gate_id": a.gate,
+        "target_commit": a.target_commit,
+        "task": a.task,
+    },
+    "ping": lambda a: {
+        "milestone": a.milestone,
+        "role": a.role,
+        "phase": a.phase,
+        "gate_id": a.gate,
+        "task": a.task,
+        "target_commit": _none_if_placeholder(a.target_commit),
+    },
+    "unconfirmed-instruction": lambda a: {
+        "milestone": a.milestone,
+        "role": a.role,
+        "command": a.cmd,
+        "phase": a.phase,
+        "gate_id": a.gate,
+        "task": a.task,
+        "target_commit": _none_if_placeholder(a.target_commit),
+        "ping_count": a.ping_count,
+    },
+    "log-pending": lambda a: {
+        "milestone": a.milestone,
+        "phase": a.phase,
+        "task": a.task,
+        "gate_id": _none_if_placeholder(a.gate),
+        "target_commit": _none_if_placeholder(a.target_commit),
+    },
+    "stale-detected": lambda a: {
+        "milestone": a.milestone,
+        "role": a.role,
+        "phase": a.phase,
+        "task": a.task,
+        "gate_id": _none_if_placeholder(a.gate),
+        "target_commit": _none_if_placeholder(a.target_commit),
+        "ping_count": a.ping_count,
+    },
+    "gate-review": lambda a: {
+        "milestone": a.milestone,
+        "role": a.role,
+        "phase": a.phase,
+        "gate_id": a.gate,
+        "result": a.result,
+        "report_commit": a.report_commit,
+        "report_path": a.report_path,
+        "task": a.task,
+    },
+    "gate-close": lambda a: {
+        "milestone": a.milestone,
+        "phase": a.phase,
+        "gate_id": a.gate,
+        "result": a.result,
+        "report_commit": a.report_commit,
+        "report_path": a.report_path,
+        "task": a.task,
+    },
+    "milestone-close": lambda a: {"milestone": a.milestone},
+    "audit": lambda a: {"milestone": a.milestone},
+    "render": lambda a: {"milestone": a.milestone},
+}
+
+
+# ---------------------------------------------------------------------------
+# Action dispatch
+# ---------------------------------------------------------------------------
 
 
 def _execute_action(service: CoordService, command: str, payload: dict[str, Any]) -> None:
@@ -425,6 +628,11 @@ def _execute_action(service: CoordService, command: str, payload: dict[str, Any]
     raise CoordError(f"unsupported action: {command}")
 
 
+# ---------------------------------------------------------------------------
+# CLI entry
+# ---------------------------------------------------------------------------
+
+
 def run_cli(
     argv: Sequence[str] | None = None,
     *,
@@ -433,7 +641,9 @@ def run_cli(
     now_fn: Callable[[], str] | None = None,
 ) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    normalized = _normalize_argv(raw_argv)
+    args = parser.parse_args(normalized)
     resolved_paths = paths or _resolve_paths(args.beads_dir)
     resolved_store = store or _select_store(args, resolved_paths)
     service = CoordService(
@@ -444,187 +654,10 @@ def run_cli(
     try:
         if args.command == "apply":
             _execute_action(service, args.action, _load_payload(args))
-        elif args.command == "init":
-            _execute_action(
-                service,
-                "init",
-                {
-                    "milestone": args.milestone,
-                    "run_date": args.run_date,
-                    "roles": _split_csv(args.roles),
-                },
-            )
-        elif args.command == "open-gate":
-            _execute_action(
-                service,
-                "open-gate",
-                {
-                    "milestone": args.milestone,
-                    "phase": args.phase,
-                    "gate_id": args.gate,
-                    "allowed_role": args.allowed_role,
-                    "target_commit": args.target_commit,
-                    "task": args.task,
-                },
-            )
-        elif args.command == "ack":
-            _execute_action(
-                service,
-                "ack",
-                {
-                    "milestone": args.milestone,
-                    "role": args.role,
-                    "command": args.cmd,
-                    "gate_id": args.gate,
-                    "commit": args.commit,
-                    "phase": args.phase,
-                    "task": args.task,
-                },
-            )
-        elif args.command == "heartbeat":
-            _execute_action(
-                service,
-                "heartbeat",
-                {
-                    "milestone": args.milestone,
-                    "role": args.role,
-                    "phase": args.phase,
-                    "status": args.status,
-                    "task": args.task,
-                    "eta_min": args.eta_min,
-                    "gate_id": _none_if_placeholder(args.gate),
-                    "target_commit": _none_if_placeholder(args.target_commit),
-                    "branch": _none_if_placeholder(args.branch),
-                },
-            )
-        elif args.command == "phase-complete":
-            _execute_action(
-                service,
-                "phase-complete",
-                {
-                    "milestone": args.milestone,
-                    "role": args.role,
-                    "phase": args.phase,
-                    "gate_id": args.gate,
-                    "commit": args.commit,
-                    "task": args.task,
-                    "branch": _none_if_placeholder(args.branch),
-                },
-            )
-        elif args.command == "recovery-check":
-            _execute_action(
-                service,
-                "recovery-check",
-                {
-                    "milestone": args.milestone,
-                    "role": args.role,
-                    "last_seen_gate": args.last_seen_gate,
-                    "task": args.task,
-                },
-            )
-        elif args.command == "state-sync-ok":
-            _execute_action(
-                service,
-                "state-sync-ok",
-                {
-                    "milestone": args.milestone,
-                    "role": args.role,
-                    "gate_id": args.gate,
-                    "target_commit": args.target_commit,
-                    "task": args.task,
-                },
-            )
-        elif args.command == "ping":
-            _execute_action(
-                service,
-                "ping",
-                {
-                    "milestone": args.milestone,
-                    "role": args.role,
-                    "phase": args.phase,
-                    "gate_id": args.gate,
-                    "task": args.task,
-                    "target_commit": _none_if_placeholder(args.target_commit),
-                },
-            )
-        elif args.command == "unconfirmed-instruction":
-            _execute_action(
-                service,
-                "unconfirmed-instruction",
-                {
-                    "milestone": args.milestone,
-                    "role": args.role,
-                    "command": args.cmd,
-                    "phase": args.phase,
-                    "gate_id": args.gate,
-                    "task": args.task,
-                    "target_commit": _none_if_placeholder(args.target_commit),
-                    "ping_count": args.ping_count,
-                },
-            )
-        elif args.command == "log-pending":
-            _execute_action(
-                service,
-                "log-pending",
-                {
-                    "milestone": args.milestone,
-                    "phase": args.phase,
-                    "task": args.task,
-                    "gate_id": _none_if_placeholder(args.gate),
-                    "target_commit": _none_if_placeholder(args.target_commit),
-                },
-            )
-        elif args.command == "stale-detected":
-            _execute_action(
-                service,
-                "stale-detected",
-                {
-                    "milestone": args.milestone,
-                    "role": args.role,
-                    "phase": args.phase,
-                    "task": args.task,
-                    "gate_id": _none_if_placeholder(args.gate),
-                    "target_commit": _none_if_placeholder(args.target_commit),
-                    "ping_count": args.ping_count,
-                },
-            )
-        elif args.command == "gate-review":
-            _execute_action(
-                service,
-                "gate-review",
-                {
-                    "milestone": args.milestone,
-                    "role": args.role,
-                    "phase": args.phase,
-                    "gate_id": args.gate,
-                    "result": args.result,
-                    "report_commit": args.report_commit,
-                    "report_path": args.report_path,
-                    "task": args.task,
-                },
-            )
-        elif args.command == "gate-close":
-            _execute_action(
-                service,
-                "gate-close",
-                {
-                    "milestone": args.milestone,
-                    "phase": args.phase,
-                    "gate_id": args.gate,
-                    "result": args.result,
-                    "report_commit": args.report_commit,
-                    "report_path": args.report_path,
-                    "task": args.task,
-                },
-            )
-        elif args.command == "milestone-close":
-            _execute_action(service, "milestone-close", {"milestone": args.milestone})
-        elif args.command == "audit":
-            _execute_action(service, "audit", {"milestone": args.milestone})
-        elif args.command == "render":
-            _execute_action(service, "render", {"milestone": args.milestone})
         else:
-            parser.error(f"unknown command: {args.command}")
+            action = args._action
+            payload = _PAYLOAD_BUILDERS[action](args)
+            _execute_action(service, action, payload)
     except CoordError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -634,6 +667,10 @@ def run_cli(
 def main() -> int:
     return run_cli()
 
+
+# ---------------------------------------------------------------------------
+# Path resolution and store selection (unchanged)
+# ---------------------------------------------------------------------------
 
 
 def _resolve_paths(beads_dir_override: str | None) -> CoordPaths:
@@ -697,6 +734,12 @@ def _shared_workspace_root(cwd: Path) -> Path:
 def _resolve_git_common_dir(cwd: Path) -> Path:
     common_dir = _git_output(cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
     return Path(common_dir)
+
+
+# ---------------------------------------------------------------------------
+# Helpers (unchanged)
+# ---------------------------------------------------------------------------
+
 
 def _split_csv(value: str) -> tuple[str, ...]:
     return tuple(part.strip() for part in value.split(",") if part.strip())
