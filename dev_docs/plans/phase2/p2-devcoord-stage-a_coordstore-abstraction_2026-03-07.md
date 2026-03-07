@@ -1,7 +1,7 @@
-# P2-Devcoord Stage A 实施计划（草稿）：CoordStore 抽象层
+# P2-Devcoord Stage A 实施计划：CoordStore 抽象层
 
 - Date: 2026-03-07
-- Status: draft
+- Status: approved
 - Scope: `P2-Devcoord Stage A` only; introduce `CoordStore` and remove `CoordService`'s direct dependency on issue-oriented storage
 - Basis:
   - [`dev_docs/plans/phase2/p2-devcoord_sqlite-control-plane_2026-03-07_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-devcoord_sqlite-control-plane_2026-03-07_draft.md)
