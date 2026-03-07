@@ -22,10 +22,20 @@ class CoordPaths:
     workspace_root: Path
     beads_dir: Path
     git_common_dir: Path
+    control_root: Path | None = None
+
+    @property
+    def control_db(self) -> Path:
+        return (self.control_root or self._default_control_root) / "control.db"
+
+    @property
+    def _default_control_root(self) -> Path:
+        return self.workspace_root / ".devcoord"
 
     @property
     def lock_file(self) -> Path:
-        return self.git_common_dir / "coord.lock"
+        root = self.control_root or self._default_control_root
+        return root / "coord.lock"
 
     def phase_subdir(self, milestone: str) -> str:
         normalized = milestone.strip().lower()

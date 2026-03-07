@@ -21,6 +21,7 @@ if __package__ in {None, ""}:
         _git_output,
     )
     from scripts.devcoord.service import CoordService, _none_if_placeholder, _utc_now
+    from scripts.devcoord.sqlite_store import SQLiteCoordStore
     from scripts.devcoord.store import (
         BeadsCoordStore,
         CoordStore,
@@ -35,6 +36,7 @@ else:
         _git_output,
     )
     from .service import CoordService, _none_if_placeholder, _utc_now
+    from .sqlite_store import SQLiteCoordStore
     from .store import (
         BeadsCoordStore,
         CoordStore,
@@ -48,6 +50,7 @@ __all__ = [
     "CoordService",
     "CoordStore",
     "MemoryCoordStore",
+    "SQLiteCoordStore",
     "build_parser",
     "main",
     "run_cli",
@@ -56,6 +59,13 @@ __all__ = [
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="NeoMAGI devcoord control plane wrapper")
+    parser.add_argument(
+        "--backend",
+        choices=("sqlite", "beads", "auto"),
+        default=os.environ.get("DEVCOORD_BACKEND", "auto"),
+        help="Control plane backend: sqlite, beads, or auto (default). "
+        "Auto selects sqlite if .devcoord/control.db exists.",
+    )
     parser.add_argument(
         "--beads-dir",
         default=os.environ.get("BEADS_DIR"),
@@ -425,11 +435,7 @@ def run_cli(
     parser = build_parser()
     args = parser.parse_args(argv)
     resolved_paths = paths or _resolve_paths(args.beads_dir)
-    resolved_store = store or BeadsCoordStore(
-        resolved_paths.beads_dir,
-        bd_bin=args.bd_bin,
-        dolt_bin=args.dolt_bin,
-    )
+    resolved_store = store or _select_store(args, resolved_paths)
     service = CoordService(
         paths=resolved_paths,
         store=resolved_store,
@@ -633,24 +639,50 @@ def main() -> int:
 def _resolve_paths(beads_dir_override: str | None) -> CoordPaths:
     git_common_dir = _resolve_git_common_dir(Path.cwd())
     workspace_root = _shared_workspace_root(Path.cwd())
+    control_root = workspace_root / ".devcoord"
     if beads_dir_override:
         beads_dir = Path(beads_dir_override).expanduser()
     else:
-        root_beads = workspace_root / ".beads" / "metadata.json"
-        legacy_beads_root = workspace_root / LEGACY_BEADS_SUBDIR
-        legacy_beads = legacy_beads_root / ".beads" / "metadata.json"
-        if legacy_beads.exists() and not root_beads.exists():
-            raise CoordError(
-                "legacy shared control plane detected at .coord/beads; "
-                "migrate to repo root .beads or pass --beads-dir explicitly"
-            )
-        beads_dir = workspace_root
+        control_db = control_root / "control.db"
+        if control_db.exists():
+            beads_dir = workspace_root
+        else:
+            root_beads = workspace_root / ".beads" / "metadata.json"
+            legacy_beads_root = workspace_root / LEGACY_BEADS_SUBDIR
+            legacy_beads = legacy_beads_root / ".beads" / "metadata.json"
+            if legacy_beads.exists() and not root_beads.exists():
+                raise CoordError(
+                    "legacy shared control plane detected at .coord/beads; "
+                    "migrate to repo root .beads or pass --beads-dir explicitly"
+                )
+            beads_dir = workspace_root
     if not beads_dir.is_absolute():
         beads_dir = (workspace_root / beads_dir).resolve()
     return CoordPaths(
         workspace_root=workspace_root,
         beads_dir=beads_dir,
         git_common_dir=git_common_dir,
+        control_root=control_root,
+    )
+
+
+def _select_store(args: argparse.Namespace, paths: CoordPaths) -> CoordStore:
+    backend = getattr(args, "backend", "auto")
+    if backend == "sqlite":
+        return SQLiteCoordStore(paths.control_db)
+    if backend == "beads":
+        return BeadsCoordStore(
+            paths.beads_dir,
+            bd_bin=args.bd_bin,
+            dolt_bin=args.dolt_bin,
+        )
+    # auto: prefer sqlite if control.db exists or if init command (bootstrap)
+    if paths.control_db.exists() or getattr(args, "command", "") == "init":
+        return SQLiteCoordStore(paths.control_db)
+    return BeadsCoordStore(
+        paths.beads_dir,
+        bd_bin=args.bd_bin,
+        dolt_bin=args.dolt_bin,
     )
 
 

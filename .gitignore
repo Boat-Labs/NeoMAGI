@@ -225,6 +225,9 @@ node_modules/
 .dolt/
 *.db
 
+# Devcoord control plane (local state, not tracked)
+.devcoord/
+
 # Devcoord / beads runtime artifacts
 .beads/dolt-monitor.pid
 .beads/dolt-server.activity

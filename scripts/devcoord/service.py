@@ -1684,7 +1684,7 @@ class CoordService:
 
     @contextlib.contextmanager
     def _locked(self) -> Iterator[None]:
-        self.paths.beads_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.lock_file.parent.mkdir(parents=True, exist_ok=True)
         self.paths.lock_file.touch(exist_ok=True)
         with self.paths.lock_file.open("r+", encoding="utf-8") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
