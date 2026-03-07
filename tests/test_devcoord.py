@@ -13,10 +13,11 @@ from scripts.devcoord.coord import (
     CoordError,
     CoordPaths,
     CoordService,
-    MemoryIssueStore,
+    MemoryCoordStore,
     _resolve_paths,
     run_cli,
 )
+from scripts.devcoord.store import BeadsCoordStore, CoordRecord
 
 
 class FakeClock:
@@ -93,7 +94,7 @@ def init_git_repo_with_review(paths: CoordPaths, report_relpath: str) -> str:
 
 
 def test_init_creates_milestone_and_agent_beads(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
 
     exit_code = run_cli(
@@ -109,7 +110,7 @@ def test_init_creates_milestone_and_agent_beads(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0
-    issues = store.load_issues()
+    issues = store.list_records("m7")
     milestone_issues = [
         issue for issue in issues if issue.metadata.get("coord_kind") == "milestone"
     ]
@@ -122,7 +123,7 @@ def test_init_creates_milestone_and_agent_beads(tmp_path: Path) -> None:
 
 
 def test_apply_payload_file_executes_open_gate(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     init_payload_path = tmp_path / "init.json"
     init_payload_path.write_text(
@@ -175,13 +176,13 @@ def test_apply_payload_file_executes_open_gate(tmp_path: Path) -> None:
     )
 
     assert exit_code == 0
-    issues = store.load_issues()
+    issues = store.list_records("m7")
     assert any(issue.metadata.get("coord_kind") == "gate" for issue in issues)
     assert any(issue.metadata.get("event") == "GATE_OPEN_SENT" for issue in issues)
 
 
 def test_apply_payload_stdin_executes_init(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     monkeypatch.setattr(
         coord_module.sys,
@@ -208,12 +209,12 @@ def test_apply_payload_stdin_executes_init(tmp_path: Path, monkeypatch: pytest.M
     )
 
     assert exit_code == 0
-    issues = store.load_issues()
+    issues = store.list_records("m7")
     assert any(issue.metadata.get("coord_kind") == "milestone" for issue in issues)
 
 
 def test_open_gate_canonicalizes_target_commit_when_git_can_resolve_it(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     short_commit = init_git_repo_with_review(paths, "dev_docs/reviews/m7_phase1_2026-03-01.md")
     full_commit = subprocess.run(
@@ -296,7 +297,7 @@ def test_resolve_paths_rejects_legacy_coord_beads_without_override(
 
 
 def test_ack_fails_closed_without_pending_message(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     service = CoordService(
         paths=paths,
@@ -336,7 +337,7 @@ def test_ack_fails_closed_without_pending_message(tmp_path: Path) -> None:
 
 
 def test_ack_deduplicates_duplicate_pending_gate_open(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     clock = FakeClock(
         "2026-03-01T10:01:00Z",
@@ -408,7 +409,7 @@ def test_ack_deduplicates_duplicate_pending_gate_open(tmp_path: Path) -> None:
 
 
 def test_recovery_check_and_state_sync_render_projection(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     clock = FakeClock(
         "2026-03-01T10:01:00Z",
@@ -476,7 +477,7 @@ def test_recovery_check_and_state_sync_render_projection(tmp_path: Path) -> None
 
 
 def test_recovery_check_is_idempotent_for_same_gate(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     clock = FakeClock(
         "2026-03-01T10:01:00Z",
@@ -532,7 +533,7 @@ def test_recovery_check_is_idempotent_for_same_gate(tmp_path: Path) -> None:
 
 
 def test_stale_detected_marks_watchdog_risk(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     clock = FakeClock(
         "2026-03-01T10:01:00Z",
@@ -586,7 +587,7 @@ def test_stale_detected_marks_watchdog_risk(tmp_path: Path) -> None:
 
 
 def test_ping_and_unconfirmed_instruction_render_projection(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     clock = FakeClock(
         "2026-03-01T10:01:00Z",
@@ -653,7 +654,7 @@ def test_ping_and_unconfirmed_instruction_render_projection(tmp_path: Path) -> N
 
 
 def test_log_pending_and_audit_snapshot(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     clock = FakeClock(
         "2026-03-01T10:01:00Z",
@@ -740,7 +741,7 @@ def test_log_pending_and_audit_snapshot(tmp_path: Path, capsys: pytest.CaptureFi
 
 
 def test_state_sync_ok_fails_closed_on_target_commit_mismatch(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     service = CoordService(
         paths=paths,
@@ -769,7 +770,7 @@ def test_state_sync_ok_fails_closed_on_target_commit_mismatch(tmp_path: Path) ->
 
 
 def test_full_flow_renders_projection_files(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     clock = FakeClock(
         "2026-03-01T10:01:00Z",
@@ -854,7 +855,7 @@ def test_full_flow_renders_projection_files(tmp_path: Path) -> None:
 
 
 def test_phase_complete_is_idempotent_for_same_gate_commit(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     clock = FakeClock(
         "2026-03-01T10:01:00Z",
@@ -917,7 +918,7 @@ def test_phase_complete_is_idempotent_for_same_gate_commit(tmp_path: Path) -> No
 
 
 def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
     report_commit = init_git_repo_with_review(paths, report_path)
@@ -1016,7 +1017,7 @@ def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
 
 
 def test_gate_close_requires_rendered_reconciliation(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
     report_commit = init_git_repo_with_review(paths, report_path)
@@ -1075,7 +1076,7 @@ def test_gate_close_requires_rendered_reconciliation(tmp_path: Path) -> None:
 
 
 def test_gate_close_requires_visible_report_commit(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
     init_git_repo_with_review(paths, report_path)
@@ -1132,7 +1133,7 @@ def test_gate_close_requires_visible_report_commit(tmp_path: Path) -> None:
 
 
 def test_audit_ignores_pending_ack_for_closed_gate(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
     report_commit = init_git_repo_with_review(paths, report_path)
@@ -1184,7 +1185,7 @@ def test_audit_ignores_pending_ack_for_closed_gate(tmp_path: Path) -> None:
 
 
 def test_milestone_close_requires_clean_audit(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     service = CoordService(
         paths=paths,
@@ -1208,7 +1209,7 @@ def test_milestone_close_requires_clean_audit(tmp_path: Path) -> None:
 
 
 def test_milestone_close_closes_all_milestone_beads(tmp_path: Path) -> None:
-    store = MemoryIssueStore()
+    store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
     report_commit = init_git_repo_with_review(paths, report_path)
@@ -1254,14 +1255,404 @@ def test_milestone_close_closes_all_milestone_beads(tmp_path: Path) -> None:
     )
     service.render("M7")
 
-    assert any(issue.status == "open" for issue in store.load_issues())
+    assert any(issue.status == "open" for issue in store.list_records("m7"))
 
     service.close_milestone("M7")
 
     milestone_issues = [
         issue
-        for issue in store.load_issues()
+        for issue in store.list_records("m7")
         if issue.metadata.get("milestone") == "m7"
     ]
     assert milestone_issues
     assert all(issue.status == "closed" for issue in milestone_issues)
+
+
+# ---------------------------------------------------------------------------
+# F3: Store-focused contract tests
+# ---------------------------------------------------------------------------
+
+
+class TestMemoryCoordStoreContract:
+    """Direct contract tests for MemoryCoordStore."""
+
+    def test_create_returns_record_with_correct_fields(self) -> None:
+        store = MemoryCoordStore()
+        rec = store.create_record(
+            title="test event",
+            record_type="task",
+            description="desc",
+            labels=["coord"],
+            metadata={"milestone": "m1", "coord_kind": "event"},
+        )
+        assert rec.record_id
+        assert rec.title == "test event"
+        assert rec.record_type == "task"
+        assert rec.status == "open"
+        assert rec.has_label("coord")
+        assert rec.metadata_str("coord_kind") == "event"
+
+    def test_create_with_non_open_status(self) -> None:
+        store = MemoryCoordStore()
+        rec = store.create_record(
+            title="closed item",
+            record_type="task",
+            description="",
+            labels=["coord"],
+            metadata={"milestone": "m1", "coord_kind": "milestone"},
+            status="closed",
+        )
+        assert rec.status == "closed"
+
+    def test_list_records_filters_by_milestone(self) -> None:
+        store = MemoryCoordStore()
+        store.create_record(
+            title="m1 event",
+            record_type="task",
+            description="",
+            labels=["coord"],
+            metadata={"milestone": "m1", "coord_kind": "event"},
+        )
+        store.create_record(
+            title="m2 event",
+            record_type="task",
+            description="",
+            labels=["coord"],
+            metadata={"milestone": "m2", "coord_kind": "event"},
+        )
+        assert len(store.list_records("m1")) == 1
+        assert len(store.list_records("m2")) == 1
+        assert store.list_records("m1")[0].title == "m1 event"
+
+    def test_list_records_filters_by_kind(self) -> None:
+        store = MemoryCoordStore()
+        store.create_record(
+            title="milestone rec",
+            record_type="task",
+            description="",
+            labels=["coord"],
+            metadata={"milestone": "m1", "coord_kind": "milestone"},
+        )
+        store.create_record(
+            title="event rec",
+            record_type="task",
+            description="",
+            labels=["coord"],
+            metadata={"milestone": "m1", "coord_kind": "event"},
+        )
+        store.create_record(
+            title="gate rec",
+            record_type="task",
+            description="",
+            labels=["coord"],
+            metadata={"milestone": "m1", "coord_kind": "gate"},
+        )
+
+        assert len(store.list_records("m1")) == 3
+        assert len(store.list_records("m1", kind="milestone")) == 1
+        assert len(store.list_records("m1", kind="event")) == 1
+        assert len(store.list_records("m1", kind="gate")) == 1
+        assert len(store.list_records("m1", kind="agent")) == 0
+
+    def test_list_records_excludes_non_coord_labels(self) -> None:
+        store = MemoryCoordStore()
+        store.create_record(
+            title="no coord label",
+            record_type="task",
+            description="",
+            labels=["other"],
+            metadata={"milestone": "m1", "coord_kind": "event"},
+        )
+        assert store.list_records("m1") == []
+
+    def test_update_record_merges_fields(self) -> None:
+        store = MemoryCoordStore()
+        rec = store.create_record(
+            title="original",
+            record_type="task",
+            description="desc",
+            labels=["coord"],
+            metadata={"milestone": "m1", "coord_kind": "event"},
+        )
+        updated = store.update_record(rec.record_id, title="changed", status="closed")
+        assert updated.title == "changed"
+        assert updated.status == "closed"
+        assert updated.description == "desc"
+        assert updated.metadata_str("coord_kind") == "event"
+
+    def test_update_record_replaces_metadata(self) -> None:
+        store = MemoryCoordStore()
+        rec = store.create_record(
+            title="t",
+            record_type="task",
+            description="",
+            labels=["coord"],
+            metadata={"milestone": "m1", "coord_kind": "gate", "phase": "1"},
+        )
+        new_meta = {"milestone": "m1", "coord_kind": "gate", "phase": "1", "status": "closed"}
+        updated = store.update_record(rec.record_id, metadata=new_meta)
+        assert updated.metadata == new_meta
+
+    def test_create_record_returns_same_as_list(self) -> None:
+        store = MemoryCoordStore()
+        created = store.create_record(
+            title="roundtrip",
+            record_type="task",
+            description="d",
+            labels=["coord"],
+            metadata={"milestone": "m1", "coord_kind": "event"},
+        )
+        listed = store.list_records("m1", kind="event")
+        assert len(listed) == 1
+        assert listed[0].record_id == created.record_id
+        assert listed[0].title == created.title
+
+
+class TestBeadsCoordStoreContract:
+    """Contract tests for BeadsCoordStore with mocked subprocess."""
+
+    def _make_store(self, tmp_path: Path) -> BeadsCoordStore:
+        beads_dir = tmp_path / "beads"
+        beads_dir.mkdir()
+        (beads_dir / ".beads").mkdir()
+        (beads_dir / ".beads" / "metadata.json").write_text("{}", "utf-8")
+        return BeadsCoordStore(beads_dir, bd_bin="bd", dolt_bin="dolt")
+
+    def _bd_list_payload(self, records: list[dict]) -> str:
+        return json.dumps(records)
+
+    def test_list_records_filters_by_kind(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = self._make_store(tmp_path)
+        bd_output = self._bd_list_payload(
+            [
+                {
+                    "id": "r1",
+                    "title": "milestone",
+                    "description": "",
+                    "type": "task",
+                    "status": "open",
+                    "labels": "coord",
+                    "metadata": json.dumps(
+                        {"milestone": "m1", "coord_kind": "milestone"}
+                    ),
+                },
+                {
+                    "id": "r2",
+                    "title": "event",
+                    "description": "",
+                    "type": "task",
+                    "status": "open",
+                    "labels": "coord",
+                    "metadata": json.dumps(
+                        {"milestone": "m1", "coord_kind": "event"}
+                    ),
+                },
+                {
+                    "id": "r3",
+                    "title": "other milestone",
+                    "description": "",
+                    "type": "task",
+                    "status": "open",
+                    "labels": "coord",
+                    "metadata": json.dumps(
+                        {"milestone": "m2", "coord_kind": "event"}
+                    ),
+                },
+            ]
+        )
+
+        def fake_run(command, **kwargs):
+            return subprocess.CompletedProcess(command, 0, stdout=bd_output, stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        all_m1 = store.list_records("m1")
+        assert len(all_m1) == 2
+
+        milestones = store.list_records("m1", kind="milestone")
+        assert len(milestones) == 1
+        assert milestones[0].record_id == "r1"
+
+        events = store.list_records("m1", kind="event")
+        assert len(events) == 1
+        assert events[0].record_id == "r2"
+
+        gates = store.list_records("m1", kind="gate")
+        assert gates == []
+
+    def test_list_records_returns_empty_when_no_metadata_file(self, tmp_path: Path) -> None:
+        beads_dir = tmp_path / "beads"
+        beads_dir.mkdir()
+        store = BeadsCoordStore(beads_dir)
+        assert store.list_records("m1") == []
+
+    def test_create_record_reloads_from_bd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = self._make_store(tmp_path)
+        calls: list[list[str]] = []
+
+        def fake_run(command, **kwargs):
+            calls.append(list(command))
+            cmd_str = " ".join(command)
+            if "create" in cmd_str:
+                return subprocess.CompletedProcess(command, 0, stdout="new-id-1\n", stderr="")
+            if "list" in cmd_str:
+                payload = json.dumps(
+                    [
+                        {
+                            "id": "new-id-1",
+                            "title": "created",
+                            "description": "d",
+                            "type": "task",
+                            "status": "open",
+                            "labels": "coord",
+                            "metadata": json.dumps({"milestone": "m1", "coord_kind": "event"}),
+                            "created_at": "2026-03-01T10:00:00Z",
+                            "updated_at": "2026-03-01T10:00:00Z",
+                        }
+                    ]
+                )
+                return subprocess.CompletedProcess(command, 0, stdout=payload, stderr="")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        rec = store.create_record(
+            title="created",
+            record_type="task",
+            description="d",
+            labels=["coord"],
+            metadata={"milestone": "m1", "coord_kind": "event"},
+        )
+        assert rec.record_id == "new-id-1"
+        assert rec.created_at == "2026-03-01T10:00:00Z"
+        create_calls = [c for c in calls if "create" in " ".join(c)]
+        list_calls = [c for c in calls if "list" in " ".join(c)]
+        assert len(create_calls) == 1
+        assert len(list_calls) == 1
+
+    def test_update_record_reloads_from_bd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = self._make_store(tmp_path)
+
+        def fake_run(command, **kwargs):
+            cmd_str = " ".join(command)
+            if "update" in cmd_str:
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if "list" in cmd_str:
+                payload = json.dumps(
+                    [
+                        {
+                            "id": "r1",
+                            "title": "updated title",
+                            "description": "d",
+                            "type": "task",
+                            "status": "closed",
+                            "labels": "coord",
+                            "metadata": json.dumps({"milestone": "m1", "coord_kind": "gate"}),
+                            "updated_at": "2026-03-01T11:00:00Z",
+                        }
+                    ]
+                )
+                return subprocess.CompletedProcess(command, 0, stdout=payload, stderr="")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        rec = store.update_record("r1", title="updated title", status="closed")
+        assert rec.record_id == "r1"
+        assert rec.title == "updated title"
+        assert rec.status == "closed"
+        assert rec.updated_at == "2026-03-01T11:00:00Z"
+
+    def test_create_record_raises_on_empty_id(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = self._make_store(tmp_path)
+
+        def fake_run(command, **kwargs):
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        with pytest.raises(CoordError, match="empty record id"):
+            store.create_record(
+                title="bad",
+                record_type="task",
+                description="",
+                labels=["coord"],
+                metadata={"milestone": "m1", "coord_kind": "event"},
+            )
+
+    def test_reload_raises_when_record_not_found(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = self._make_store(tmp_path)
+
+        call_count = 0
+
+        def fake_run(command, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            cmd_str = " ".join(command)
+            if "create" in cmd_str:
+                return subprocess.CompletedProcess(command, 0, stdout="ghost-id\n", stderr="")
+            if "list" in cmd_str:
+                return subprocess.CompletedProcess(command, 0, stdout="[]", stderr="")
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        with pytest.raises(CoordError, match="ghost-id not found after write"):
+            store.create_record(
+                title="ghost",
+                record_type="task",
+                description="",
+                labels=["coord"],
+                metadata={"milestone": "m1", "coord_kind": "event"},
+            )
+
+
+class TestCoordRecordFromMapping:
+    """Unit tests for CoordRecord.from_mapping edge cases."""
+
+    def test_string_labels_split(self) -> None:
+        rec = CoordRecord.from_mapping(
+            {"id": "1", "labels": "coord, extra", "metadata": {}}
+        )
+        assert rec.has_label("coord")
+        assert rec.has_label("extra")
+
+    def test_string_metadata_parsed(self) -> None:
+        rec = CoordRecord.from_mapping(
+            {
+                "id": "1",
+                "labels": [],
+                "metadata": json.dumps({"coord_kind": "event"}),
+            }
+        )
+        assert rec.metadata_str("coord_kind") == "event"
+
+    def test_invalid_json_metadata_falls_back(self) -> None:
+        rec = CoordRecord.from_mapping(
+            {"id": "1", "labels": [], "metadata": "not-json"}
+        )
+        assert rec.metadata == {}
+
+    def test_metadata_int_and_bool(self) -> None:
+        rec = CoordRecord.from_mapping(
+            {
+                "id": "1",
+                "labels": [],
+                "metadata": {"count": 5, "flag": True, "str_int": "3"},
+            }
+        )
+        assert rec.metadata_int("count") == 5
+        assert rec.metadata_bool("flag") is True
+        assert rec.metadata_int("str_int") == 3
+        assert rec.metadata_int("missing", 99) == 99
+        assert rec.metadata_bool("missing") is False

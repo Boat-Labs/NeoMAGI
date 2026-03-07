@@ -17,25 +17,24 @@ from .model import (
     SCHEMA_VERSION,
     CoordError,
     CoordPaths,
-    IssueRecord,
-    IssueStore,
     _git_output,
 )
+from .store import CoordRecord, CoordStore
 
 
 @dataclass
 class CoordService:
     paths: CoordPaths
-    store: IssueStore
+    store: CoordStore
     now_fn: Callable[[], str] = field(default=lambda: _utc_now())
 
     def init_control_plane(self, milestone: str, *, run_date: str, roles: Sequence[str]) -> None:
         normalized_milestone = _normalize_milestone(milestone)
         normalized_roles = tuple(_normalize_role(role) for role in roles)
         with self._locked():
-            self.store.init_repo()
-            issues = self._coord_issues(normalized_milestone)
-            milestone_issue = self._find_single(issues, "milestone")
+            self.store.init_store()
+            records = self._coord_records(normalized_milestone)
+            milestone_rec = self._find_single(records, "milestone")
             milestone_metadata = {
                 KIND_KEY: "milestone",
                 "milestone": normalized_milestone,
@@ -43,24 +42,24 @@ class CoordService:
                 "schema_version": SCHEMA_VERSION,
             }
             milestone_labels = self._base_labels("milestone", normalized_milestone)
-            if milestone_issue is None:
-                self.store.create_issue(
+            if milestone_rec is None:
+                self.store.create_record(
                     title=f"Coord milestone {normalized_milestone}",
-                    issue_type="epic",
+                    record_type="epic",
                     description=f"NeoMAGI devcoord control plane for {normalized_milestone}.",
                     labels=milestone_labels,
                     metadata=milestone_metadata,
                 )
             else:
-                self.store.update_issue(
-                    milestone_issue.issue_id,
+                self.store.update_record(
+                    milestone_rec.record_id,
                     labels=milestone_labels,
-                    metadata=_merge_dicts(milestone_issue.metadata, milestone_metadata),
+                    metadata=_merge_dicts(milestone_rec.metadata, milestone_metadata),
                 )
-            issues = self._coord_issues(normalized_milestone)
-            milestone_issue = self._require_single(issues, "milestone")
+            records = self._coord_records(normalized_milestone)
+            milestone_rec = self._require_single(records, "milestone")
             for role in normalized_roles:
-                agent_issue = self._find_single(issues, "agent", role=role)
+                agent_rec = self._find_single(records, "agent", role=role)
                 agent_metadata = {
                     KIND_KEY: "agent",
                     "milestone": normalized_milestone,
@@ -72,20 +71,20 @@ class CoordService:
                     "action": "awaiting gate",
                 }
                 labels = self._base_labels("agent", normalized_milestone, role=role)
-                if agent_issue is None:
-                    self.store.create_issue(
+                if agent_rec is None:
+                    self.store.create_record(
                         title=f"Agent {role}",
-                        issue_type="task",
+                        record_type="task",
                         description=f"Coordination state for {role}.",
                         labels=labels,
                         metadata=agent_metadata,
-                        parent_id=milestone_issue.issue_id,
+                        parent_id=milestone_rec.record_id,
                     )
                     continue
-                self.store.update_issue(
-                    agent_issue.issue_id,
+                self.store.update_record(
+                    agent_rec.record_id,
                     labels=labels,
-                    metadata=_merge_dicts(agent_issue.metadata, agent_metadata),
+                    metadata=_merge_dicts(agent_rec.metadata, agent_metadata),
                 )
 
     def open_gate(
@@ -103,12 +102,12 @@ class CoordService:
         canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
-            self.store.init_repo()
-            issues = self._coord_issues(normalized_milestone)
-            milestone_issue = self._require_single(issues, "milestone")
-            phase_issue = self._ensure_phase(issues, milestone_issue, normalized_milestone, phase)
-            issues = self._coord_issues(normalized_milestone)
-            gate_issue = self._find_single(issues, "gate", gate_id=gate_id)
+            self.store.init_store()
+            records = self._coord_records(normalized_milestone)
+            milestone_rec = self._require_single(records, "milestone")
+            phase_rec = self._ensure_phase(records, milestone_rec, normalized_milestone, phase)
+            records = self._coord_records(normalized_milestone)
+            gate_rec = self._find_single(records, "gate", gate_id=gate_id)
             gate_metadata = {
                 KIND_KEY: "gate",
                 "milestone": normalized_milestone,
@@ -129,21 +128,22 @@ class CoordService:
                 phase=phase,
                 role=normalized_role,
             )
-            if gate_issue is None:
-                gate_issue_id = self.store.create_issue(
+            if gate_rec is None:
+                gate_rec = self.store.create_record(
                     title=f"Gate {gate_id}",
-                    issue_type="task",
+                    record_type="task",
                     description=f"Gate {gate_id} for phase {phase}.",
                     labels=gate_labels,
                     metadata=gate_metadata,
-                    parent_id=phase_issue.issue_id,
+                    parent_id=phase_rec.record_id,
                 )
+                gate_record_id = gate_rec.record_id
             else:
-                gate_issue_id = gate_issue.issue_id
-                self.store.update_issue(
-                    gate_issue_id,
+                gate_record_id = gate_rec.record_id
+                self.store.update_record(
+                    gate_record_id,
                     labels=gate_labels,
-                    metadata=_merge_dicts(gate_issue.metadata, gate_metadata),
+                    metadata=_merge_dicts(gate_rec.metadata, gate_metadata),
                 )
             message_metadata = {
                 KIND_KEY: "message",
@@ -159,9 +159,9 @@ class CoordService:
                 "sent_at": now,
                 "task": task,
             }
-            self.store.create_issue(
+            self.store.create_record(
                 title=f"GATE_OPEN -> {normalized_role}",
-                issue_type="task",
+                record_type="task",
                 description=task,
                 labels=self._base_labels(
                     "message",
@@ -171,11 +171,11 @@ class CoordService:
                 ),
                 metadata=message_metadata,
                 assignee=normalized_role,
-                parent_id=gate_issue_id,
+                parent_id=gate_record_id,
             )
-            issues = self._coord_issues(normalized_milestone)
+            records = self._coord_records(normalized_milestone)
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=phase,
                 role="pm",
@@ -184,12 +184,12 @@ class CoordService:
                 event="GATE_OPEN_SENT",
                 gate_id=gate_id,
                 target_commit=canonical_target_commit,
-                parent_id=gate_issue_id,
+                parent_id=gate_record_id,
                 ts=now,
             )
-            issues = self._coord_issues(normalized_milestone)
+            records = self._coord_records(normalized_milestone)
             self._update_agent(
-                issues,
+                records,
                 milestone=normalized_milestone,
                 role=normalized_role,
                 state="spawning",
@@ -214,11 +214,11 @@ class CoordService:
         command_name = command.upper()
         canonical_commit = self._canonicalize_commit_ref(commit)
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
-            gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
-            resolved_phase = phase or gate_issue.metadata_str("phase")
+            records = self._coord_records(normalized_milestone)
+            gate_rec = self._require_single(records, "gate", gate_id=gate_id)
+            resolved_phase = phase or gate_rec.metadata_str("phase")
             duplicate_ack = self._find_latest_event(
-                issues,
+                records,
                 event="ACK",
                 role=normalized_role,
                 gate=gate_id,
@@ -226,19 +226,19 @@ class CoordService:
                 ack_of=command_name,
                 target_commit=canonical_commit,
             )
-            message_issue = self._find_pending_message(
-                issues,
+            message_rec = self._find_pending_message(
+                records,
                 role=normalized_role,
                 gate_id=gate_id,
                 command=command_name,
             )
-            if message_issue is None:
+            if message_rec is None:
                 raise CoordError(
                     f"no pending {command_name} message for role={normalized_role} gate={gate_id}"
                 )
             now = self.now_fn()
             updated_message_metadata = _merge_dicts(
-                message_issue.metadata,
+                message_rec.metadata,
                 {
                     "effective": True,
                     "acked_at": now,
@@ -246,26 +246,26 @@ class CoordService:
                     "ack_commit": canonical_commit,
                 },
             )
-            self.store.update_issue(
-                message_issue.issue_id,
+            self.store.update_record(
+                message_rec.record_id,
                 metadata=updated_message_metadata,
             )
             if duplicate_ack is not None:
-                self.store.update_issue(
-                    gate_issue.issue_id,
+                self.store.update_record(
+                    gate_rec.record_id,
                     metadata=_merge_dicts(
-                        gate_issue.metadata,
+                        gate_rec.metadata,
                         {
                             "gate_state": "open",
-                            "opened_at": gate_issue.metadata_str("opened_at")
+                            "opened_at": gate_rec.metadata_str("opened_at")
                             or duplicate_ack.metadata_str("ts"),
                             "target_commit": canonical_commit,
                         },
                     ),
                 )
-                issues = self._coord_issues(normalized_milestone)
+                records = self._coord_records(normalized_milestone)
                 self._update_agent(
-                    issues,
+                    records,
                     milestone=normalized_milestone,
                     role=normalized_role,
                     state="working",
@@ -275,9 +275,9 @@ class CoordService:
                     stale_risk="none",
                 )
                 return
-            issues = self._coord_issues(normalized_milestone)
+            records = self._coord_records(normalized_milestone)
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=resolved_phase,
                 role=normalized_role,
@@ -287,22 +287,22 @@ class CoordService:
                 gate_id=gate_id,
                 target_commit=canonical_commit,
                 ack_of=command_name,
-                parent_id=gate_issue.issue_id,
+                parent_id=gate_rec.record_id,
                 ts=now,
-                source_message_id=message_issue.issue_id,
+                source_message_id=message_rec.record_id,
             )
             gate_metadata = _merge_dicts(
-                gate_issue.metadata,
+                gate_rec.metadata,
                 {
                     "gate_state": "open",
                     "opened_at": now,
                     "target_commit": canonical_commit,
                 },
             )
-            self.store.update_issue(gate_issue.issue_id, metadata=gate_metadata)
-            issues = self._coord_issues(normalized_milestone)
+            self.store.update_record(gate_rec.record_id, metadata=gate_metadata)
+            records = self._coord_records(normalized_milestone)
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=resolved_phase,
                 role="pm",
@@ -311,13 +311,13 @@ class CoordService:
                 event="GATE_EFFECTIVE",
                 gate_id=gate_id,
                 target_commit=canonical_commit,
-                parent_id=gate_issue.issue_id,
+                parent_id=gate_rec.record_id,
                 ts=now,
-                source_message_id=message_issue.issue_id,
+                source_message_id=message_rec.record_id,
             )
-            issues = self._coord_issues(normalized_milestone)
+            records = self._coord_records(normalized_milestone)
             self._update_agent(
-                issues,
+                records,
                 milestone=normalized_milestone,
                 role=normalized_role,
                 state="working",
@@ -345,10 +345,10 @@ class CoordService:
         canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
-            parent_id = self._event_parent_id(issues, phase=phase, gate_id=gate_id)
+            records = self._coord_records(normalized_milestone)
+            parent_id = self._event_parent_id(records, phase=phase, gate_id=gate_id)
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=phase,
                 role=normalized_role,
@@ -362,9 +362,9 @@ class CoordService:
                 eta_min=eta_min,
                 branch=branch,
             )
-            issues = self._coord_issues(normalized_milestone)
+            records = self._coord_records(normalized_milestone)
             self._update_agent(
-                issues,
+                records,
                 milestone=normalized_milestone,
                 role=normalized_role,
                 state=_to_agent_state(status),
@@ -389,9 +389,9 @@ class CoordService:
         normalized_role = _normalize_role(role)
         canonical_commit = self._canonicalize_commit_ref(commit)
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
+            records = self._coord_records(normalized_milestone)
             duplicate_phase_complete = self._find_latest_event(
-                issues,
+                records,
                 event="PHASE_COMPLETE",
                 role=normalized_role,
                 gate=gate_id,
@@ -401,22 +401,22 @@ class CoordService:
             if duplicate_phase_complete is not None:
                 return
             now = self.now_fn()
-            gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
-            phase_issue = self._require_single(issues, "phase", phase=phase)
-            self.store.update_issue(
-                gate_issue.issue_id,
-                metadata=_merge_dicts(gate_issue.metadata, {"target_commit": canonical_commit}),
+            gate_rec = self._require_single(records, "gate", gate_id=gate_id)
+            phase_rec = self._require_single(records, "phase", phase=phase)
+            self.store.update_record(
+                gate_rec.record_id,
+                metadata=_merge_dicts(gate_rec.metadata, {"target_commit": canonical_commit}),
             )
-            self.store.update_issue(
-                phase_issue.issue_id,
+            self.store.update_record(
+                phase_rec.record_id,
                 metadata=_merge_dicts(
-                    phase_issue.metadata,
+                    phase_rec.metadata,
                     {"phase_state": "submitted", "last_commit": canonical_commit},
                 ),
             )
-            issues = self._coord_issues(normalized_milestone)
+            records = self._coord_records(normalized_milestone)
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=phase,
                 role=normalized_role,
@@ -425,14 +425,14 @@ class CoordService:
                 event="PHASE_COMPLETE",
                 gate_id=gate_id,
                 target_commit=canonical_commit,
-                parent_id=gate_issue.issue_id,
+                parent_id=gate_rec.record_id,
                 ts=now,
                 eta_min=0,
                 branch=branch,
             )
-            issues = self._coord_issues(normalized_milestone)
+            records = self._coord_records(normalized_milestone)
             self._update_agent(
-                issues,
+                records,
                 milestone=normalized_milestone,
                 role=normalized_role,
                 state="done",
@@ -455,10 +455,10 @@ class CoordService:
         normalized_last_seen_gate = last_seen_gate.strip() or "unknown"
         requested_gate = _none_if_placeholder(normalized_last_seen_gate)
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
-            snapshot = self._state_snapshot(issues, preferred_gate_id=requested_gate)
+            records = self._coord_records(normalized_milestone)
+            snapshot = self._state_snapshot(records, preferred_gate_id=requested_gate)
             duplicate_recovery = self._find_latest_event(
-                issues,
+                records,
                 event="RECOVERY_CHECK",
                 role=normalized_role,
                 gate=snapshot["gate_id"],
@@ -470,7 +470,7 @@ class CoordService:
                 return
             now = self.now_fn()
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=snapshot["phase"],
                 role=normalized_role,
@@ -488,7 +488,7 @@ class CoordService:
             if snapshot["gate_id"]:
                 action = f"awaiting state sync for {snapshot['gate_id']}"
             self._update_agent(
-                issues=self._coord_issues(normalized_milestone),
+                records=self._coord_records(normalized_milestone),
                 milestone=normalized_milestone,
                 role=normalized_role,
                 state="stuck",
@@ -511,19 +511,19 @@ class CoordService:
         canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
-            gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
-            current_target_commit = gate_issue.metadata_str("target_commit")
+            records = self._coord_records(normalized_milestone)
+            gate_rec = self._require_single(records, "gate", gate_id=gate_id)
+            current_target_commit = gate_rec.metadata_str("target_commit")
             if current_target_commit and canonical_target_commit != current_target_commit:
                 raise CoordError(
                     "state sync target_commit mismatch: "
                     f"gate={gate_id} expected={current_target_commit} got={canonical_target_commit}"
                 )
             resolved_target_commit = current_target_commit or canonical_target_commit
-            phase = gate_issue.metadata_str("phase")
-            allowed_role = gate_issue.metadata_str("allowed_role")
+            phase = gate_rec.metadata_str("phase")
+            allowed_role = gate_rec.metadata_str("allowed_role")
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=phase,
                 role="pm",
@@ -532,14 +532,14 @@ class CoordService:
                 event="STATE_SYNC_OK",
                 gate_id=gate_id,
                 target_commit=resolved_target_commit,
-                parent_id=gate_issue.issue_id,
+                parent_id=gate_rec.record_id,
                 ts=now,
                 sync_role=normalized_role,
                 allowed_role=allowed_role,
             )
             commit_suffix = f" ({resolved_target_commit})" if resolved_target_commit else ""
             self._update_agent(
-                issues=self._coord_issues(normalized_milestone),
+                records=self._coord_records(normalized_milestone),
                 milestone=normalized_milestone,
                 role=normalized_role,
                 state="idle",
@@ -565,10 +565,10 @@ class CoordService:
         canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
-            parent_id = self._event_parent_id(issues, phase=phase, gate_id=gate_id)
+            records = self._coord_records(normalized_milestone)
+            parent_id = self._event_parent_id(records, phase=phase, gate_id=gate_id)
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=phase,
                 role=normalized_role,
@@ -585,7 +585,7 @@ class CoordService:
             if gate_id:
                 action = f"stale detected on {gate_id}; investigate and recover"
             self._update_agent(
-                issues=self._coord_issues(normalized_milestone),
+                records=self._coord_records(normalized_milestone),
                 milestone=normalized_milestone,
                 role=normalized_role,
                 state="stuck",
@@ -610,14 +610,14 @@ class CoordService:
         canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
-            gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
-            resolved_target_commit = canonical_target_commit or gate_issue.metadata_str(
+            records = self._coord_records(normalized_milestone)
+            gate_rec = self._require_single(records, "gate", gate_id=gate_id)
+            resolved_target_commit = canonical_target_commit or gate_rec.metadata_str(
                 "target_commit"
             )
-            self.store.create_issue(
+            self.store.create_record(
                 title=f"PING -> {normalized_role}",
-                issue_type="task",
+                record_type="task",
                 description=task,
                 labels=self._base_labels(
                     "message",
@@ -640,10 +640,10 @@ class CoordService:
                     "task": task,
                 },
                 assignee=normalized_role,
-                parent_id=gate_issue.issue_id,
+                parent_id=gate_rec.record_id,
             )
             self._record_event(
-                issues=self._coord_issues(normalized_milestone),
+                records=self._coord_records(normalized_milestone),
                 milestone=normalized_milestone,
                 phase=phase,
                 role="pm",
@@ -652,7 +652,7 @@ class CoordService:
                 event="PING_SENT",
                 gate_id=gate_id,
                 target_commit=resolved_target_commit,
-                parent_id=gate_issue.issue_id,
+                parent_id=gate_rec.record_id,
                 ts=now,
                 target_role=normalized_role,
             )
@@ -675,13 +675,13 @@ class CoordService:
         canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
-            gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
-            resolved_target_commit = canonical_target_commit or gate_issue.metadata_str(
+            records = self._coord_records(normalized_milestone)
+            gate_rec = self._require_single(records, "gate", gate_id=gate_id)
+            resolved_target_commit = canonical_target_commit or gate_rec.metadata_str(
                 "target_commit"
             )
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=phase,
                 role="pm",
@@ -690,7 +690,7 @@ class CoordService:
                 event="UNCONFIRMED_INSTRUCTION",
                 gate_id=gate_id,
                 target_commit=resolved_target_commit,
-                parent_id=gate_issue.issue_id,
+                parent_id=gate_rec.record_id,
                 ts=now,
                 command_name=command_name,
                 target_role=normalized_role,
@@ -710,10 +710,10 @@ class CoordService:
         canonical_target_commit = self._canonicalize_commit_ref(target_commit)
         now = self.now_fn()
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
-            parent_id = self._event_parent_id(issues, phase=phase, gate_id=gate_id)
+            records = self._coord_records(normalized_milestone)
+            parent_id = self._event_parent_id(records, phase=phase, gate_id=gate_id)
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=phase,
                 role="pm",
@@ -728,14 +728,14 @@ class CoordService:
 
     def audit(self, milestone: str) -> dict[str, Any]:
         normalized_milestone = _normalize_milestone(milestone)
-        issues = self._coord_issues(normalized_milestone)
-        milestone_issue = self._require_single(issues, "milestone")
-        run_date = milestone_issue.metadata_str("run_date")
+        milestone_recs = self._coord_records(normalized_milestone, kind="milestone")
+        milestone_rec = self._require_single(milestone_recs, "milestone")
+        run_date = milestone_rec.metadata_str("run_date")
         if not run_date:
             raise CoordError(f"milestone {normalized_milestone} does not have run_date metadata")
         events = sorted(
-            self._iter_kind(issues, "event"),
-            key=lambda issue: (issue.metadata_int("event_seq"), issue.issue_id),
+            self._coord_records(normalized_milestone, kind="event"),
+            key=lambda rec: (rec.metadata_int("event_seq"), rec.record_id),
         )
         heartbeat_path = (
             self.paths.log_dir(normalized_milestone, run_date) / "heartbeat_events.jsonl"
@@ -752,23 +752,25 @@ class CoordService:
                     latest_logged_event_seq = max(
                         latest_logged_event_seq, int(payload.get("event_seq") or 0)
                     )
+        gate_records = self._coord_records(normalized_milestone, kind="gate")
         gate_states = {
-            issue.metadata_str("gate_id"): issue.metadata_str("gate_state", "pending")
-            for issue in self._iter_kind(issues, "gate")
+            rec.metadata_str("gate_id"): rec.metadata_str("gate_state", "pending")
+            for rec in gate_records
         }
+        message_records = self._coord_records(normalized_milestone, kind="message")
         pending_ack_messages = sorted(
             [
                 {
-                    "command": issue.metadata_str("command"),
-                    "role": issue.metadata_str("role"),
-                    "gate": issue.metadata_str("gate_id"),
-                    "phase": issue.metadata_str("phase"),
-                    "target_commit": issue.metadata_str("target_commit"),
+                    "command": rec.metadata_str("command"),
+                    "role": rec.metadata_str("role"),
+                    "gate": rec.metadata_str("gate_id"),
+                    "phase": rec.metadata_str("phase"),
+                    "target_commit": rec.metadata_str("target_commit"),
                 }
-                for issue in self._iter_kind(issues, "message")
-                if issue.metadata_bool("requires_ack")
-                and not issue.metadata_bool("effective")
-                and gate_states.get(issue.metadata_str("gate_id"), "pending") != "closed"
+                for rec in message_records
+                if rec.metadata_bool("requires_ack")
+                and not rec.metadata_bool("effective")
+                and gate_states.get(rec.metadata_str("gate_id"), "pending") != "closed"
             ],
             key=lambda payload: (
                 payload["phase"],
@@ -780,21 +782,21 @@ class CoordService:
         open_gates = sorted(
             [
                 {
-                    "gate": issue.metadata_str("gate_id"),
-                    "phase": issue.metadata_str("phase"),
-                    "status": issue.metadata_str("gate_state"),
-                    "allowed_role": issue.metadata_str("allowed_role"),
-                    "target_commit": issue.metadata_str("target_commit"),
+                    "gate": rec.metadata_str("gate_id"),
+                    "phase": rec.metadata_str("phase"),
+                    "status": rec.metadata_str("gate_state"),
+                    "allowed_role": rec.metadata_str("allowed_role"),
+                    "target_commit": rec.metadata_str("target_commit"),
                 }
-                for issue in self._iter_kind(issues, "gate")
-                if issue.metadata_str("gate_state") != "closed"
+                for rec in gate_records
+                if rec.metadata_str("gate_state") != "closed"
             ],
             key=lambda payload: (payload["phase"], payload["gate"]),
         )
         log_pending_events = [
-            self._event_projection(issue)
-            for issue in events
-            if issue.metadata_str("event") == "LOG_PENDING"
+            self._event_projection(rec)
+            for rec in events
+            if rec.metadata_str("event") == "LOG_PENDING"
         ]
         latest_event_seq = events[-1].metadata_int("event_seq") if events else 0
         return {
@@ -828,20 +830,20 @@ class CoordService:
         normalized_result = result.upper()
         now = self.now_fn()
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
-            gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
+            records = self._coord_records(normalized_milestone)
+            gate_rec = self._require_single(records, "gate", gate_id=gate_id)
             gate_metadata = _merge_dicts(
-                gate_issue.metadata,
+                gate_rec.metadata,
                 {
                     "result": normalized_result,
                     "report_commit": report_commit,
                     "report_path": report_path,
                 },
             )
-            self.store.update_issue(gate_issue.issue_id, metadata=gate_metadata)
-            issues = self._coord_issues(normalized_milestone)
+            self.store.update_record(gate_rec.record_id, metadata=gate_metadata)
+            records = self._coord_records(normalized_milestone)
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=phase,
                 role=normalized_role,
@@ -849,17 +851,17 @@ class CoordService:
                 task=task,
                 event="GATE_REVIEW_COMPLETE",
                 gate_id=gate_id,
-                target_commit=gate_issue.metadata_str("target_commit"),
-                parent_id=gate_issue.issue_id,
+                target_commit=gate_rec.metadata_str("target_commit"),
+                parent_id=gate_rec.record_id,
                 ts=now,
                 eta_min=0,
                 result=normalized_result,
                 report_commit=report_commit,
                 report_path=report_path,
             )
-            issues = self._coord_issues(normalized_milestone)
+            records = self._coord_records(normalized_milestone)
             self._update_agent(
-                issues,
+                records,
                 milestone=normalized_milestone,
                 role=normalized_role,
                 state="done",
@@ -884,21 +886,21 @@ class CoordService:
         normalized_result = result.upper()
         now = self.now_fn()
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
-            milestone_issue = self._require_single(issues, "milestone")
-            gate_issue = self._require_single(issues, "gate", gate_id=gate_id)
-            phase_issue = self._require_single(issues, "phase", phase=phase)
+            records = self._coord_records(normalized_milestone)
+            milestone_rec = self._require_single(records, "milestone")
+            gate_rec = self._require_single(records, "gate", gate_id=gate_id)
+            phase_rec = self._require_single(records, "phase", phase=phase)
             self._ensure_gate_close_guards(
-                issues=issues,
-                milestone_issue=milestone_issue,
-                gate_issue=gate_issue,
+                records=records,
+                milestone_rec=milestone_rec,
+                gate_rec=gate_rec,
                 phase=phase,
                 result=normalized_result,
                 report_commit=report_commit,
                 report_path=report_path,
             )
             gate_metadata = _merge_dicts(
-                gate_issue.metadata,
+                gate_rec.metadata,
                 {
                     "result": normalized_result,
                     "report_commit": report_commit,
@@ -907,17 +909,17 @@ class CoordService:
                     "closed_at": now,
                 },
             )
-            self.store.update_issue(gate_issue.issue_id, metadata=gate_metadata)
-            self.store.update_issue(
-                phase_issue.issue_id,
+            self.store.update_record(gate_rec.record_id, metadata=gate_metadata)
+            self.store.update_record(
+                phase_rec.record_id,
                 metadata=_merge_dicts(
-                    phase_issue.metadata,
+                    phase_rec.metadata,
                     {"phase_state": "closed"},
                 ),
             )
-            issues = self._coord_issues(normalized_milestone)
+            records = self._coord_records(normalized_milestone)
             self._record_event(
-                issues=issues,
+                records=records,
                 milestone=normalized_milestone,
                 phase=phase,
                 role="pm",
@@ -925,8 +927,8 @@ class CoordService:
                 task=task,
                 event="GATE_CLOSE",
                 gate_id=gate_id,
-                target_commit=gate_issue.metadata_str("target_commit"),
-                parent_id=gate_issue.issue_id,
+                target_commit=gate_rec.metadata_str("target_commit"),
+                parent_id=gate_rec.record_id,
                 ts=now,
                 result=normalized_result,
                 report_commit=report_commit,
@@ -935,36 +937,43 @@ class CoordService:
 
     def render(self, milestone: str) -> None:
         normalized_milestone = _normalize_milestone(milestone)
-        issues = self._coord_issues(normalized_milestone)
-        milestone_issue = self._require_single(issues, "milestone")
-        run_date = milestone_issue.metadata_str("run_date")
+        milestone_recs = self._coord_records(normalized_milestone, kind="milestone")
+        milestone_rec = self._require_single(milestone_recs, "milestone")
+        run_date = milestone_rec.metadata_str("run_date")
         if not run_date:
             raise CoordError(f"milestone {normalized_milestone} does not have run_date metadata")
         log_dir = self.paths.log_dir(normalized_milestone, run_date)
         log_dir.mkdir(parents=True, exist_ok=True)
         events = sorted(
-            self._iter_kind(issues, "event"),
-            key=lambda issue: (issue.metadata_int("event_seq"), issue.issue_id),
+            self._coord_records(normalized_milestone, kind="event"),
+            key=lambda rec: (rec.metadata_int("event_seq"), rec.record_id),
         )
         heartbeat_events_path = log_dir / "heartbeat_events.jsonl"
         heartbeat_lines = [
-            json.dumps(self._event_projection(issue), ensure_ascii=False)
-            for issue in events
+            json.dumps(self._event_projection(rec), ensure_ascii=False)
+            for rec in events
         ]
         heartbeat_events_path.write_text(
             "\n".join(heartbeat_lines) + ("\n" if heartbeat_lines else ""),
             "utf-8",
         )
+        gate_records = self._coord_records(normalized_milestone, kind="gate")
         gate_state_path = log_dir / "gate_state.md"
-        gate_state_path.write_text(self._render_gate_state(issues, normalized_milestone), "utf-8")
+        gate_state_path.write_text(
+            self._render_gate_state(gate_records, normalized_milestone), "utf-8"
+        )
+        agent_records = self._coord_records(normalized_milestone, kind="agent")
         watchdog_path = log_dir / "watchdog_status.md"
-        watchdog_path.write_text(self._render_watchdog(issues, normalized_milestone), "utf-8")
+        watchdog_path.write_text(
+            self._render_watchdog(agent_records, normalized_milestone), "utf-8"
+        )
         self.paths.progress_file.parent.mkdir(parents=True, exist_ok=True)
         self.paths.progress_file.write_text(
             self._render_project_progress(
                 milestone=normalized_milestone,
                 run_date=run_date,
-                issues=issues,
+                gate_records=gate_records,
+                agent_records=agent_records,
                 existing=self.paths.progress_file.read_text("utf-8")
                 if self.paths.progress_file.exists()
                 else "",
@@ -975,8 +984,8 @@ class CoordService:
     def close_milestone(self, milestone: str) -> None:
         normalized_milestone = _normalize_milestone(milestone)
         with self._locked():
-            issues = self._coord_issues(normalized_milestone)
-            self._require_single(issues, "milestone")
+            records = self._coord_records(normalized_milestone)
+            self._require_single(records, "milestone")
             audit = self.audit(normalized_milestone)
             if not audit["reconciled"]:
                 raise CoordError(
@@ -991,26 +1000,24 @@ class CoordService:
                 )
             if audit["pending_ack_messages"]:
                 raise CoordError("cannot close milestone while pending ACK messages remain")
-            for issue in issues:
-                if issue.status == "closed":
+            for rec in records:
+                if rec.status == "closed":
                     continue
-                self.store.update_issue(issue.issue_id, status="closed")
+                self.store.update_record(rec.record_id, status="closed")
 
-    def _coord_issues(self, milestone: str) -> list[IssueRecord]:
-        return [
-            issue
-            for issue in self.store.load_issues()
-            if issue.has_label(COORD_LABEL) and issue.metadata_str("milestone") == milestone
-        ]
+    def _coord_records(
+        self, milestone: str, *, kind: str | None = None
+    ) -> list[CoordRecord]:
+        return self.store.list_records(milestone, kind=kind)
 
     def _ensure_phase(
         self,
-        issues: Sequence[IssueRecord],
-        milestone_issue: IssueRecord,
+        records: Sequence[CoordRecord],
+        milestone_rec: CoordRecord,
         milestone: str,
         phase: str,
-    ) -> IssueRecord:
-        phase_issue = self._find_single(issues, "phase", phase=phase)
+    ) -> CoordRecord:
+        phase_rec = self._find_single(records, "phase", phase=phase)
         phase_metadata = {
             KIND_KEY: "phase",
             "milestone": milestone,
@@ -1019,49 +1026,25 @@ class CoordService:
             "last_commit": "",
         }
         phase_labels = self._base_labels("phase", milestone, phase=phase)
-        if phase_issue is None:
-            phase_issue_id = self.store.create_issue(
+        if phase_rec is None:
+            return self.store.create_record(
                 title=f"Coord phase {phase}",
-                issue_type="task",
+                record_type="task",
                 description=f"Coordination phase {phase} for {milestone}.",
                 labels=phase_labels,
                 metadata=phase_metadata,
-                parent_id=milestone_issue.issue_id,
+                parent_id=milestone_rec.record_id,
             )
-            return IssueRecord(
-                issue_id=phase_issue_id,
-                title=f"Coord phase {phase}",
-                description="",
-                issue_type="task",
-                status="open",
-                labels=tuple(sorted(phase_labels)),
-                metadata=phase_metadata,
-                parent_id=milestone_issue.issue_id,
-            )
-        self.store.update_issue(
-            phase_issue.issue_id,
+        return self.store.update_record(
+            phase_rec.record_id,
             labels=phase_labels,
-            metadata=_merge_dicts(phase_issue.metadata, phase_metadata),
-        )
-        return IssueRecord(
-            issue_id=phase_issue.issue_id,
-            title=phase_issue.title,
-            description=phase_issue.description,
-            issue_type=phase_issue.issue_type,
-            status=phase_issue.status,
-            labels=tuple(sorted(phase_labels)),
-            metadata=_merge_dicts(phase_issue.metadata, phase_metadata),
-            assignee=phase_issue.assignee,
-            parent_id=phase_issue.parent_id,
-            created_at=phase_issue.created_at,
-            updated_at=phase_issue.updated_at,
-            closed_at=phase_issue.closed_at,
+            metadata=_merge_dicts(phase_rec.metadata, phase_metadata),
         )
 
     def _record_event(
         self,
         *,
-        issues: Sequence[IssueRecord],
+        records: Sequence[CoordRecord],
         milestone: str,
         phase: str,
         role: str,
@@ -1086,7 +1069,7 @@ class CoordService:
         target_role: str | None = None,
         ping_count: int | None = None,
     ) -> str:
-        next_seq = self._next_event_seq(issues)
+        next_seq = self._next_event_seq(records)
         metadata = {
             KIND_KEY: "event",
             "milestone": milestone,
@@ -1114,18 +1097,19 @@ class CoordService:
             "ts": ts,
         }
         rendered_phase = phase or "na"
-        return self.store.create_issue(
+        rec = self.store.create_record(
             title=f"{event} {role} phase {rendered_phase}",
-            issue_type="task",
+            record_type="task",
             description=task,
             labels=self._base_labels("event", milestone, phase=phase or None, role=role),
             metadata=metadata,
             parent_id=parent_id,
         )
+        return rec.record_id
 
     def _update_agent(
         self,
-        issues: Sequence[IssueRecord],
+        records: Sequence[CoordRecord],
         *,
         milestone: str,
         role: str,
@@ -1143,54 +1127,54 @@ class CoordService:
         }
         if stale_risk is not None:
             updates["stale_risk"] = stale_risk
-        agent_issue = self._require_single(issues, "agent", role=role)
+        agent_rec = self._require_single(records, "agent", role=role)
         agent_metadata = _merge_dicts(
-            agent_issue.metadata,
+            agent_rec.metadata,
             updates,
         )
-        self.store.update_issue(
-            agent_issue.issue_id,
+        self.store.update_record(
+            agent_rec.record_id,
             metadata=agent_metadata,
             labels=self._base_labels("agent", milestone, role=role),
         )
 
     def _event_parent_id(
         self,
-        issues: Sequence[IssueRecord],
+        records: Sequence[CoordRecord],
         *,
         phase: str | None,
         gate_id: str | None,
     ) -> str | None:
         if gate_id:
-            gate_issue = self._find_single(issues, "gate", gate_id=gate_id)
-            if gate_issue is not None:
-                return gate_issue.issue_id
+            gate_rec = self._find_single(records, "gate", gate_id=gate_id)
+            if gate_rec is not None:
+                return gate_rec.record_id
         if phase:
-            phase_issue = self._find_single(issues, "phase", phase=phase)
-            if phase_issue is not None:
-                return phase_issue.issue_id
-        milestone_issue = self._find_single(issues, "milestone")
-        if milestone_issue is not None:
-            return milestone_issue.issue_id
+            phase_rec = self._find_single(records, "phase", phase=phase)
+            if phase_rec is not None:
+                return phase_rec.record_id
+        milestone_rec = self._find_single(records, "milestone")
+        if milestone_rec is not None:
+            return milestone_rec.record_id
         return None
 
     def _find_pending_message(
         self,
-        issues: Sequence[IssueRecord],
+        records: Sequence[CoordRecord],
         *,
         role: str,
         gate_id: str,
         command: str,
-    ) -> IssueRecord | None:
+    ) -> CoordRecord | None:
         candidates = [
-            issue
-            for issue in self._iter_kind(issues, "message")
-            if issue.metadata_str("role") == role
-            and issue.metadata_str("gate_id") == gate_id
-            and issue.metadata_str("command").upper() == command
-            and not issue.metadata_bool("effective")
+            rec
+            for rec in self._iter_kind(records, "message")
+            if rec.metadata_str("role") == role
+            and rec.metadata_str("gate_id") == gate_id
+            and rec.metadata_str("command").upper() == command
+            and not rec.metadata_bool("effective")
         ]
-        candidates.sort(key=lambda issue: issue.issue_id)
+        candidates.sort(key=lambda rec: rec.record_id)
         return candidates[-1] if candidates else None
 
     @staticmethod
@@ -1214,68 +1198,68 @@ class CoordService:
 
     @staticmethod
     def _find_single(
-        issues: Sequence[IssueRecord],
+        records: Sequence[CoordRecord],
         kind: str,
         **matches: str,
-    ) -> IssueRecord | None:
+    ) -> CoordRecord | None:
         candidates = []
-        for issue in issues:
-            if issue.metadata_str(KIND_KEY) != kind:
+        for rec in records:
+            if rec.metadata_str(KIND_KEY) != kind:
                 continue
-            if any(issue.metadata_str(key) != value for key, value in matches.items()):
+            if any(rec.metadata_str(key) != value for key, value in matches.items()):
                 continue
-            candidates.append(issue)
+            candidates.append(rec)
         if not candidates:
             return None
-        candidates.sort(key=lambda issue: issue.issue_id)
+        candidates.sort(key=lambda rec: rec.record_id)
         return candidates[-1]
 
     def _require_single(
         self,
-        issues: Sequence[IssueRecord],
+        records: Sequence[CoordRecord],
         kind: str,
         **matches: str,
-    ) -> IssueRecord:
-        issue = self._find_single(issues, kind, **matches)
-        if issue is None:
+    ) -> CoordRecord:
+        rec = self._find_single(records, kind, **matches)
+        if rec is None:
             filters = ", ".join(f"{key}={value}" for key, value in matches.items())
-            raise CoordError(f"missing {kind} issue for {filters or 'control plane'}")
-        return issue
+            raise CoordError(f"missing {kind} record for {filters or 'control plane'}")
+        return rec
 
     @staticmethod
-    def _iter_kind(issues: Sequence[IssueRecord], kind: str) -> Iterable[IssueRecord]:
-        return (issue for issue in issues if issue.metadata_str(KIND_KEY) == kind)
+    def _iter_kind(records: Sequence[CoordRecord], kind: str) -> Iterable[CoordRecord]:
+        return (rec for rec in records if rec.metadata_str(KIND_KEY) == kind)
 
     def _state_snapshot(
         self,
-        issues: Sequence[IssueRecord],
+        records: Sequence[CoordRecord],
         *,
         preferred_gate_id: str | None = None,
     ) -> dict[str, str | None]:
-        gate_issue = None
+        gate_rec = None
         if preferred_gate_id:
-            gate_issue = self._find_single(issues, "gate", gate_id=preferred_gate_id)
-        if gate_issue is None:
-            gate_issue = self._latest_gate(issues)
-        phase_issue = self._latest_phase(issues)
+            gate_rec = self._find_single(records, "gate", gate_id=preferred_gate_id)
+        if gate_rec is None:
+            gate_rec = self._latest_gate(records)
+        phase_rec = self._latest_phase(records)
         phase = ""
         parent_id = None
         gate_id = ""
         target_commit = ""
         allowed_role = ""
-        if gate_issue is not None:
-            phase = gate_issue.metadata_str("phase")
-            gate_id = gate_issue.metadata_str("gate_id")
-            target_commit = gate_issue.metadata_str("target_commit")
-            allowed_role = gate_issue.metadata_str("allowed_role")
-            parent_id = gate_issue.issue_id
-        elif phase_issue is not None:
-            phase = phase_issue.metadata_str("phase")
-            parent_id = phase_issue.issue_id
+        if gate_rec is not None:
+            phase = gate_rec.metadata_str("phase")
+            gate_id = gate_rec.metadata_str("gate_id")
+            target_commit = gate_rec.metadata_str("target_commit")
+            allowed_role = gate_rec.metadata_str("allowed_role")
+            parent_id = gate_rec.record_id
+        elif phase_rec is not None:
+            phase = phase_rec.metadata_str("phase")
+            parent_id = phase_rec.record_id
         else:
-            milestone_issue = self._find_single(issues, "milestone")
-            if milestone_issue is not None:
-                parent_id = milestone_issue.issue_id
+            milestone_rec = self._find_single(records, "milestone")
+            if milestone_rec is not None:
+                parent_id = milestone_rec.record_id
         return {
             "phase": phase,
             "gate_id": gate_id,
@@ -1285,59 +1269,59 @@ class CoordService:
         }
 
     @staticmethod
-    def _latest_gate(issues: Sequence[IssueRecord]) -> IssueRecord | None:
+    def _latest_gate(records: Sequence[CoordRecord]) -> CoordRecord | None:
         gates = sorted(
             (
-                issue
-                for issue in issues
-                if issue.metadata_str(KIND_KEY) == "gate"
+                rec
+                for rec in records
+                if rec.metadata_str(KIND_KEY) == "gate"
             ),
-            key=lambda issue: (_phase_sort_key(issue.metadata_str("phase")), issue.issue_id),
+            key=lambda rec: (_phase_sort_key(rec.metadata_str("phase")), rec.record_id),
         )
         return gates[-1] if gates else None
 
     @staticmethod
-    def _latest_phase(issues: Sequence[IssueRecord]) -> IssueRecord | None:
+    def _latest_phase(records: Sequence[CoordRecord]) -> CoordRecord | None:
         phases = sorted(
             (
-                issue
-                for issue in issues
-                if issue.metadata_str(KIND_KEY) == "phase"
+                rec
+                for rec in records
+                if rec.metadata_str(KIND_KEY) == "phase"
             ),
-            key=lambda issue: (_phase_sort_key(issue.metadata_str("phase")), issue.issue_id),
+            key=lambda rec: (_phase_sort_key(rec.metadata_str("phase")), rec.record_id),
         )
         return phases[-1] if phases else None
 
     def _ensure_gate_close_guards(
         self,
         *,
-        issues: Sequence[IssueRecord],
-        milestone_issue: IssueRecord,
-        gate_issue: IssueRecord,
+        records: Sequence[CoordRecord],
+        milestone_rec: CoordRecord,
+        gate_rec: CoordRecord,
         phase: str,
         result: str,
         report_commit: str,
         report_path: str,
     ) -> None:
         self._ensure_review_event(
-            issues=issues,
-            gate_id=gate_issue.metadata_str("gate_id"),
+            records=records,
+            gate_id=gate_rec.metadata_str("gate_id"),
             phase=phase,
             result=result,
             report_commit=report_commit,
             report_path=report_path,
         )
         self._ensure_projection_reconciled(
-            milestone=milestone_issue.metadata_str("milestone"),
-            run_date=milestone_issue.metadata_str("run_date"),
-            expected_events=len(list(self._iter_kind(issues, "event"))),
+            milestone=milestone_rec.metadata_str("milestone"),
+            run_date=milestone_rec.metadata_str("run_date"),
+            expected_events=len(list(self._iter_kind(records, "event"))),
         )
         self._ensure_report_visible(report_commit=report_commit, report_path=report_path)
 
     def _ensure_review_event(
         self,
         *,
-        issues: Sequence[IssueRecord],
+        records: Sequence[CoordRecord],
         gate_id: str,
         phase: str,
         result: str,
@@ -1345,7 +1329,7 @@ class CoordService:
         report_path: str,
     ) -> None:
         review_event = self._find_matching_event(
-            issues,
+            records,
             event="GATE_REVIEW_COMPLETE",
             gate_id=gate_id,
             phase=phase,
@@ -1420,7 +1404,7 @@ class CoordService:
 
     def _find_matching_event(
         self,
-        issues: Sequence[IssueRecord],
+        records: Sequence[CoordRecord],
         *,
         event: str,
         gate_id: str,
@@ -1428,98 +1412,98 @@ class CoordService:
         result: str,
         report_commit: str,
         report_path: str,
-    ) -> IssueRecord | None:
+    ) -> CoordRecord | None:
         candidates = [
-            issue
-            for issue in self._iter_kind(issues, "event")
-            if issue.metadata_str("event") == event
-            and issue.metadata_str("gate") == gate_id
-            and issue.metadata_str("phase") == phase
-            and issue.metadata_str("result") == result
-            and issue.metadata_str("report_commit") == report_commit
-            and issue.metadata_str("report_path") == report_path
+            rec
+            for rec in self._iter_kind(records, "event")
+            if rec.metadata_str("event") == event
+            and rec.metadata_str("gate") == gate_id
+            and rec.metadata_str("phase") == phase
+            and rec.metadata_str("result") == result
+            and rec.metadata_str("report_commit") == report_commit
+            and rec.metadata_str("report_path") == report_path
         ]
-        candidates.sort(key=lambda issue: (issue.metadata_int("event_seq"), issue.issue_id))
+        candidates.sort(key=lambda rec: (rec.metadata_int("event_seq"), rec.record_id))
         return candidates[-1] if candidates else None
 
     def _find_latest_event(
         self,
-        issues: Sequence[IssueRecord],
+        records: Sequence[CoordRecord],
         *,
         event: str,
         **matches: str,
-    ) -> IssueRecord | None:
+    ) -> CoordRecord | None:
         candidates = [
-            issue
-            for issue in self._iter_kind(issues, "event")
-            if issue.metadata_str("event") == event
-            and all(issue.metadata_str(key) == value for key, value in matches.items())
+            rec
+            for rec in self._iter_kind(records, "event")
+            if rec.metadata_str("event") == event
+            and all(rec.metadata_str(key) == value for key, value in matches.items())
         ]
-        candidates.sort(key=lambda issue: (issue.metadata_int("event_seq"), issue.issue_id))
+        candidates.sort(key=lambda rec: (rec.metadata_int("event_seq"), rec.record_id))
         return candidates[-1] if candidates else None
 
     @staticmethod
-    def _next_event_seq(issues: Sequence[IssueRecord]) -> int:
+    def _next_event_seq(records: Sequence[CoordRecord]) -> int:
         max_seq = 0
-        for issue in issues:
-            if issue.metadata_str(KIND_KEY) != "event":
+        for rec in records:
+            if rec.metadata_str(KIND_KEY) != "event":
                 continue
-            max_seq = max(max_seq, issue.metadata_int("event_seq"))
+            max_seq = max(max_seq, rec.metadata_int("event_seq"))
         return max_seq + 1
 
     @staticmethod
-    def _event_projection(issue: IssueRecord) -> dict[str, Any]:
+    def _event_projection(rec: CoordRecord) -> dict[str, Any]:
         payload: dict[str, Any] = {
-            "ts": issue.metadata_str("ts"),
-            "role": _render_role(issue.metadata_str("role")),
-            "phase": issue.metadata_str("phase"),
-            "status": issue.metadata_str("status"),
-            "task": issue.metadata_str("task"),
-            "event": issue.metadata_str("event"),
-            "gate": issue.metadata_str("gate"),
-            "target_commit": issue.metadata_str("target_commit"),
-            "event_seq": issue.metadata_int("event_seq"),
-            "eta_min": issue.metadata.get("eta_min"),
+            "ts": rec.metadata_str("ts"),
+            "role": _render_role(rec.metadata_str("role")),
+            "phase": rec.metadata_str("phase"),
+            "status": rec.metadata_str("status"),
+            "task": rec.metadata_str("task"),
+            "event": rec.metadata_str("event"),
+            "gate": rec.metadata_str("gate"),
+            "target_commit": rec.metadata_str("target_commit"),
+            "event_seq": rec.metadata_int("event_seq"),
+            "eta_min": rec.metadata.get("eta_min"),
         }
-        ack_of = issue.metadata_str("ack_of")
+        ack_of = rec.metadata_str("ack_of")
         if ack_of:
             payload["ack_of"] = ack_of
-        branch = issue.metadata_str("branch")
+        branch = rec.metadata_str("branch")
         if branch:
             payload["branch"] = branch
-        result = issue.metadata_str("result")
+        result = rec.metadata_str("result")
         if result:
             payload["result"] = result
-        report_commit = issue.metadata_str("report_commit")
+        report_commit = rec.metadata_str("report_commit")
         if report_commit:
             payload["report_commit"] = report_commit
-        report_path = issue.metadata_str("report_path")
+        report_path = rec.metadata_str("report_path")
         if report_path:
             payload["report_path"] = report_path
-        source_message_id = issue.metadata_str("source_message_id")
+        source_message_id = rec.metadata_str("source_message_id")
         if source_message_id:
             payload["source_msg_id"] = source_message_id
-        last_seen_gate = issue.metadata_str("last_seen_gate")
+        last_seen_gate = rec.metadata_str("last_seen_gate")
         if last_seen_gate:
             payload["last_seen_gate"] = last_seen_gate
-        sync_role = issue.metadata_str("sync_role")
+        sync_role = rec.metadata_str("sync_role")
         if sync_role:
             payload["sync_role"] = _render_role(sync_role)
-        allowed_role = issue.metadata_str("allowed_role")
+        allowed_role = rec.metadata_str("allowed_role")
         if allowed_role:
             payload["allowed_role"] = _render_role(allowed_role)
-        command_name = issue.metadata_str("command_name")
+        command_name = rec.metadata_str("command_name")
         if command_name:
             payload["command_name"] = command_name
-        target_role = issue.metadata_str("target_role")
+        target_role = rec.metadata_str("target_role")
         if target_role:
             payload["target_role"] = _render_role(target_role)
-        ping_count = issue.metadata.get("ping_count")
+        ping_count = rec.metadata.get("ping_count")
         if ping_count is not None:
             payload["ping_count"] = ping_count
         return payload
 
-    def _render_gate_state(self, issues: Sequence[IssueRecord], milestone: str) -> str:
+    def _render_gate_state(self, gate_records: Sequence[CoordRecord], milestone: str) -> str:
         lines = [
             f"# {milestone.upper()} Gate State",
             "",
@@ -1527,10 +1511,10 @@ class CoordService:
             "|------|-------|--------|--------|--------|--------|---------------|--------|",
         ]
         gates = sorted(
-            self._iter_kind(issues, "gate"),
-            key=lambda issue: (
-                _phase_sort_key(issue.metadata_str("phase")),
-                issue.metadata_str("gate_id"),
+            gate_records,
+            key=lambda rec: (
+                _phase_sort_key(rec.metadata_str("phase")),
+                rec.metadata_str("gate_id"),
             ),
         )
         for gate in gates:
@@ -1563,7 +1547,7 @@ class CoordService:
             )
         return "\n".join(lines) + "\n"
 
-    def _render_watchdog(self, issues: Sequence[IssueRecord], milestone: str) -> str:
+    def _render_watchdog(self, agent_records: Sequence[CoordRecord], milestone: str) -> str:
         lines = [
             f"# {milestone.upper()} Watchdog Status",
             "",
@@ -1571,17 +1555,13 @@ class CoordService:
             "|------|--------|----------------|--------------|------------|--------|",
         ]
         agents = sorted(
-            (
-                issue
-                for issue in self._iter_kind(issues, "agent")
-                if issue.metadata_str("role") != "pm"
-            ),
-            key=lambda issue: issue.metadata_str("role"),
+            (rec for rec in agent_records if rec.metadata_str("role") != "pm"),
+            key=lambda rec: rec.metadata_str("role"),
         )
         if not agents:
             agents = sorted(
-                self._iter_kind(issues, "agent"),
-                key=lambda issue: issue.metadata_str("role"),
+                agent_records,
+                key=lambda rec: rec.metadata_str("role"),
             )
         for agent in agents:
             lines.append(
@@ -1605,7 +1585,8 @@ class CoordService:
         *,
         milestone: str,
         run_date: str,
-        issues: Sequence[IssueRecord],
+        gate_records: Sequence[CoordRecord],
+        agent_records: Sequence[CoordRecord],
         existing: str,
     ) -> str:
         begin_marker = f"<!-- devcoord:begin milestone={milestone} -->"
@@ -1613,7 +1594,8 @@ class CoordService:
         block = self._project_progress_block(
             milestone=milestone,
             run_date=run_date,
-            issues=issues,
+            gate_records=gate_records,
+            agent_records=agent_records,
             begin_marker=begin_marker,
             end_marker=end_marker,
         )
@@ -1633,18 +1615,15 @@ class CoordService:
         *,
         milestone: str,
         run_date: str,
-        issues: Sequence[IssueRecord],
+        gate_records: Sequence[CoordRecord],
+        agent_records: Sequence[CoordRecord],
         begin_marker: str,
         end_marker: str,
     ) -> str:
-        latest_gate = self._latest_gate(issues)
+        latest_gate = self._latest_gate(gate_records)
         non_pm_agents = sorted(
-            (
-                issue
-                for issue in self._iter_kind(issues, "agent")
-                if issue.metadata_str("role") != "pm"
-            ),
-            key=lambda issue: issue.metadata_str("role"),
+            (rec for rec in agent_records if rec.metadata_str("role") != "pm"),
+            key=lambda rec: rec.metadata_str("role"),
         )
         status = "in_progress"
         done_summary = "control plane initialized"

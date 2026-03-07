@@ -16,34 +16,38 @@ if __package__ in {None, ""}:
     from scripts.devcoord.model import (
         DEFAULT_ROLES,
         LEGACY_BEADS_SUBDIR,
-        CliIssueStore,
         CoordError,
         CoordPaths,
-        IssueStore,
-        MemoryIssueStore,
         _git_output,
     )
     from scripts.devcoord.service import CoordService, _none_if_placeholder, _utc_now
+    from scripts.devcoord.store import (
+        BeadsCoordStore,
+        CoordStore,
+        MemoryCoordStore,
+    )
 else:
     from .model import (
         DEFAULT_ROLES,
         LEGACY_BEADS_SUBDIR,
-        CliIssueStore,
         CoordError,
         CoordPaths,
-        IssueStore,
-        MemoryIssueStore,
         _git_output,
     )
     from .service import CoordService, _none_if_placeholder, _utc_now
+    from .store import (
+        BeadsCoordStore,
+        CoordStore,
+        MemoryCoordStore,
+    )
 
 __all__ = [
-    "CliIssueStore",
+    "BeadsCoordStore",
     "CoordError",
     "CoordPaths",
     "CoordService",
-    "IssueStore",
-    "MemoryIssueStore",
+    "CoordStore",
+    "MemoryCoordStore",
     "build_parser",
     "main",
     "run_cli",
@@ -414,14 +418,14 @@ def _execute_action(service: CoordService, command: str, payload: dict[str, Any]
 def run_cli(
     argv: Sequence[str] | None = None,
     *,
-    store: IssueStore | None = None,
+    store: CoordStore | None = None,
     paths: CoordPaths | None = None,
     now_fn: Callable[[], str] | None = None,
 ) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     resolved_paths = paths or _resolve_paths(args.beads_dir)
-    resolved_store = store or CliIssueStore(
+    resolved_store = store or BeadsCoordStore(
         resolved_paths.beads_dir,
         bd_bin=args.bd_bin,
         dolt_bin=args.dolt_bin,
