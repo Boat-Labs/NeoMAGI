@@ -1,7 +1,7 @@
 # P2-Devcoord Stage D 实施计划：Beads Cutover and Closeout Hardening
 
 - Date: 2026-03-07
-- Status: approved
+- Status: completed
 - Scope: `P2-Devcoord Stage D` only; complete the hard cutover from beads-backed devcoord compatibility to a SQLite-only control plane, harden milestone closeout, and retire active `.beads` control-plane guidance
 - Track Type: parallel development-process repair track; outside the `P2-M*` product milestone series
 - Basis:
@@ -440,18 +440,18 @@ bd / beads
 
 ## Acceptance Criteria
 
-- [ ] devcoord steady-state runtime 已收敛为 SQLite-only
-- [ ] `BeadsCoordStore` 不再作为当前 runtime 路径存在
-- [ ] `CoordPaths.beads_dir` 与 legacy `.beads` 路径语义已退役
-- [ ] `coord.py --help` 不再暴露 beads backend / path 参数
-- [ ] legacy flags 会明确 fail-fast，而不是静默 fallback
-- [ ] `milestone close` / closeout 文档 / closeout 测试全部对齐 SQLite-only 收口路径
-- [ ] active governance docs、skills、runtime docs 已将 `.devcoord/control.db` 作为唯一 SSOT
-- [ ] devcoord control-plane 写入不再触发 `just beads-pull` / `just beads-push` 要求
-- [ ] `beads_control_plane.md` 已被 supersede 或 archive note 清楚接管
-- [ ] `bd list --status open` 不再被 live devcoord 对象污染
-- [ ] 历史 beads control-plane 数据未导入 SQLite，历史证据文档未被错误重写
-- [ ] 全量测试通过，且无 beads-related regression failure
+- [x] devcoord steady-state runtime 已收敛为 SQLite-only
+- [x] `BeadsCoordStore` 不再作为当前 runtime 路径存在
+- [x] `CoordPaths.beads_dir` 与 legacy `.beads` 路径语义已退役
+- [x] `coord.py --help` 不再暴露 beads backend / path 参数
+- [x] legacy flags 会明确 fail-fast，而不是静默 fallback
+- [x] `milestone close` / closeout 文档 / closeout 测试全部对齐 SQLite-only 收口路径
+- [x] active governance docs、skills、runtime docs 已将 `.devcoord/control.db` 作为唯一 SSOT
+- [x] devcoord control-plane 写入不再触发 `just beads-pull` / `just beads-push` 要求
+- [x] `beads_control_plane.md` 已被 supersede 或 archive note 清楚接管
+- [x] `bd list --status open` 不再被 live devcoord 对象污染
+- [x] 历史 beads control-plane 数据未导入 SQLite，历史证据文档未被错误重写
+- [x] 全量测试通过，且无 beads-related regression failure
 
 ## Resolved Positions
 
