@@ -3,6 +3,7 @@
 - Date: 2026-03-07
 - Status: draft
 - Scope: `P2-Devcoord Stage B` only; implement `SQLiteCoordStore`, bootstrap `.devcoord/control.db`, and make `render/audit` run against SQLite
+- Track Type: parallel development-process repair track; outside the `P2-M*` product milestone series
 - Basis:
   - [`dev_docs/plans/phase2/p2-devcoord_sqlite-control-plane_2026-03-07.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-devcoord_sqlite-control-plane_2026-03-07.md)
   - [`dev_docs/plans/phase2/p2-devcoord-stage-a_coordstore-abstraction_2026-03-07.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-devcoord-stage-a_coordstore-abstraction_2026-03-07.md)

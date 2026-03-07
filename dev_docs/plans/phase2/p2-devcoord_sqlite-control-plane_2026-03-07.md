@@ -3,6 +3,7 @@
 - Date: 2026-03-07
 - Status: approved
 - Scope: `P2-Devcoord` only; decouple `devcoord` from `beads` and migrate the coordination control plane to a dedicated SQLite store
+- Track Type: parallel development-process repair track; outside the `P2-M*` product milestone series
 - Basis:
   - [`decisions/0050-devcoord-decouple-from-beads-and-use-sqlite-control-plane-store.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0050-devcoord-decouple-from-beads-and-use-sqlite-control-plane-store.md)
   - [`design_docs/devcoord_sqlite_control_plane_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/devcoord_sqlite_control_plane_draft.md)
@@ -31,6 +32,11 @@
 - 将 `devcoord` 从 `beads` store 解耦；
 - 迁移到一个更小、更专用的 `.devcoord/control.db`；
 - 同时把 `coord.py` 从扁平命令面收敛到更可读的 grouped surface。
+
+这里再明确一层边界：
+
+- `P2-Devcoord` 是并行的开发流程修复轨，不是 `P2-M1 / P2-M2 / ...` 这条产品能力路线的一部分
+- 它服务于后续 `P2-M*` 实施效率和治理质量，但不应与产品 milestone 本身混号或混状态
 
 ## Core Decision
 

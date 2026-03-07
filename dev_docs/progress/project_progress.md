@@ -350,3 +350,11 @@
 - Baseline: 845 → 916 tests (+71, +8.4%); 11 new files, ~1,050 insertions
 - Next: P2-M1a 全部关闭；按 `design_docs/phase2/roadmap_milestones_v1.md` 确定下一阶段
 - Risk: 无
+
+## 2026-03-07 (local) | P2-Devcoord Stage A
+- Status: in_progress (acceptance passed, landing pending)
+- Done: Devcoord Stage A（`CoordStore` 抽象层）post-review 验收通过 — `CoordStore` seam 建立、`BeadsCoordStore / MemoryCoordStore` 落位、`CoordService` 脱离 `IssueStore / IssueRecord` 中心语义、CLI 对外行为保持不变
+- Track: 并行开发流程修复轨；不属于 `P2-M*` 产品里程碑序列
+- Evidence: `dev_docs/plans/phase2/p2-devcoord-stage-a_coordstore-abstraction_2026-03-07.md`; current implementation files `scripts/devcoord/store.py`, `scripts/devcoord/service.py`, `scripts/devcoord/coord.py`, `scripts/devcoord/model.py`, `tests/test_devcoord.py`
+- Next: 将当前 workspace 中已验收的 Stage A 实现完成 commit/push 落地，然后按 `dev_docs/plans/phase2/p2-devcoord-stage-b_sqlite-backend_2026-03-07_draft.md` 进入 Stage B
+- Risk: 在 commit/push 完成前，Stage A 的 accepted baseline 仍未体现在仓库历史中；后续 Stage B coding 不应越过这一落地步骤

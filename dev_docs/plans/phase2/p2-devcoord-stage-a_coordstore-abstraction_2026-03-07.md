@@ -1,8 +1,11 @@
 # P2-Devcoord Stage A 实施计划：CoordStore 抽象层
 
 - Date: 2026-03-07
-- Status: approved
+- Status: approved + accepted
+- Acceptance: post-review passed
+- Landing: current workspace pending commit/push in this thread
 - Scope: `P2-Devcoord Stage A` only; introduce `CoordStore` and remove `CoordService`'s direct dependency on issue-oriented storage
+- Track Type: parallel development-process repair track; outside the `P2-M*` product milestone series
 - Basis:
   - [`dev_docs/plans/phase2/p2-devcoord_sqlite-control-plane_2026-03-07.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-devcoord_sqlite-control-plane_2026-03-07.md)
   - [`design_docs/devcoord_sqlite_control_plane_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/devcoord_sqlite_control_plane_draft.md)
