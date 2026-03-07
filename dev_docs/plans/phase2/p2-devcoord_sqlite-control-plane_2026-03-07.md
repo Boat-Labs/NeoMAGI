@@ -1,7 +1,7 @@
-# P2-Devcoord 实施计划（草稿）：SQLite Control Plane
+# P2-Devcoord 实施计划：SQLite Control Plane
 
 - Date: 2026-03-07
-- Status: draft
+- Status: approved
 - Scope: `P2-Devcoord` only; decouple `devcoord` from `beads` and migrate the coordination control plane to a dedicated SQLite store
 - Basis:
   - [`decisions/0050-devcoord-decouple-from-beads-and-use-sqlite-control-plane-store.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0050-devcoord-decouple-from-beads-and-use-sqlite-control-plane-store.md)
@@ -135,6 +135,9 @@
   - SQLite schema 直接落到 `milestones / phases / gates / roles / messages / events`
   - service 层可为适配该模型而改造部分读写 helper
   - 但不要求在 `Stage B` 把整个 runtime 重写成一套新的 domain object 系统
+  - 默认起点仍是实现 `Stage A` 已批准的 `CoordStore` seam
+  - 只有当 SQLite query/write 模型证明现有 seam 不足时，才允许在 `Stage B` 对 protocol 做窄幅、增量式演化
+  - 一旦发生该类演化，`MemoryCoordStore` 与 `BeadsCoordStore` 必须在同一实现切片内同步跟进，避免再次制造双重契约
 
 ### 3. SQLite Data Model
 
@@ -401,6 +404,8 @@ SQLite 可接受的前提是写入规则明确：
 - 端到端 closeout smoke test
 - 手动检查 `bd list --status open`
 - 手动检查 `render -> audit -> milestone-close`
+- 验证 `BeadsCoordStore` 相关运行路径已不可达、已移除，或已不再被默认 runtime 选中
+- 清理测试名称与断言描述中残留的 `beads` 控制面术语，避免 cutover 后继续放大旧语义
 
 验收：
 
