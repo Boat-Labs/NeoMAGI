@@ -204,15 +204,15 @@ class SQLiteCoordStore:
         if prefix == "ms":
             return self._update_milestone(conn, local_id, metadata=metadata, status=status)
         if prefix == "ph":
-            return self._update_phase(conn, local_id, metadata=metadata)
+            return self._update_phase(conn, local_id, metadata=metadata, status=status)
         if prefix == "gt":
-            return self._update_gate(conn, local_id, metadata=metadata)
+            return self._update_gate(conn, local_id, metadata=metadata, status=status)
         if prefix == "rl":
-            return self._update_role(conn, local_id, metadata=metadata)
+            return self._update_role(conn, local_id, metadata=metadata, status=status)
         if prefix == "mg":
             return self._update_message(conn, int(local_id), metadata=metadata)
         if prefix == "ev":
-            return self._update_event(conn, int(local_id), status=status)
+            return self._load_event(conn, int(local_id))
 
         raise CoordError(f"cannot update record with unknown prefix: {prefix}")
 
@@ -298,21 +298,25 @@ class SQLiteCoordStore:
         composite_id: str,
         *,
         metadata: dict[str, Any] | None = None,
+        status: str | None = None,
     ) -> CoordRecord:
         milestone_id, phase_id = composite_id.split("|", 1)
+        sets, vals = [], []
         if metadata:
-            sets, vals = [], []
             for col in ("phase_state", "last_commit", "closed_at"):
                 if col in metadata:
                     sets.append(f"{col}=?")
                     vals.append(metadata[col])
-            if sets:
-                vals.extend([milestone_id, phase_id])
-                conn.execute(
-                    f"UPDATE phases SET {', '.join(sets)} WHERE milestone_id=? AND phase_id=?",
-                    vals,
-                )
-                conn.commit()
+        if status == "closed":
+            sets.append("phase_state=?")
+            vals.append("closed")
+        if sets:
+            vals.extend([milestone_id, phase_id])
+            conn.execute(
+                f"UPDATE phases SET {', '.join(sets)} WHERE milestone_id=? AND phase_id=?",
+                vals,
+            )
+            conn.commit()
         return self._load_phase(conn, milestone_id, phase_id)
 
     def _load_phase(
@@ -369,10 +373,11 @@ class SQLiteCoordStore:
         composite_id: str,
         *,
         metadata: dict[str, Any] | None = None,
+        status: str | None = None,
     ) -> CoordRecord:
         milestone_id, gate_id = composite_id.split("|", 1)
+        sets, vals = [], []
         if metadata:
-            sets, vals = [], []
             for col in (
                 "gate_state",
                 "target_commit",
@@ -386,13 +391,16 @@ class SQLiteCoordStore:
                 if col in metadata:
                     sets.append(f"{col}=?")
                     vals.append(metadata[col])
-            if sets:
-                vals.extend([milestone_id, gate_id])
-                conn.execute(
-                    f"UPDATE gates SET {', '.join(sets)} WHERE milestone_id=? AND gate_id=?",
-                    vals,
-                )
-                conn.commit()
+        if status == "closed":
+            sets.append("gate_state=?")
+            vals.append("closed")
+        if sets:
+            vals.extend([milestone_id, gate_id])
+            conn.execute(
+                f"UPDATE gates SET {', '.join(sets)} WHERE milestone_id=? AND gate_id=?",
+                vals,
+            )
+            conn.commit()
         return self._load_gate(conn, milestone_id, gate_id)
 
     def _load_gate(
@@ -440,21 +448,25 @@ class SQLiteCoordStore:
         composite_id: str,
         *,
         metadata: dict[str, Any] | None = None,
+        status: str | None = None,
     ) -> CoordRecord:
         milestone_id, role = composite_id.split("|", 1)
+        sets, vals = [], []
         if metadata:
-            sets, vals = [], []
             for col in ("agent_state", "action", "current_task", "last_activity", "stale_risk"):
                 if col in metadata:
                     sets.append(f"{col}=?")
                     vals.append(metadata[col])
-            if sets:
-                vals.extend([milestone_id, role])
-                conn.execute(
-                    f"UPDATE roles SET {', '.join(sets)} WHERE milestone_id=? AND role=?",
-                    vals,
-                )
-                conn.commit()
+        if status == "closed":
+            sets.append("agent_state=?")
+            vals.append("closed")
+        if sets:
+            vals.extend([milestone_id, role])
+            conn.execute(
+                f"UPDATE roles SET {', '.join(sets)} WHERE milestone_id=? AND role=?",
+                vals,
+            )
+            conn.commit()
         return self._load_role(conn, milestone_id, role)
 
     def _load_role(
@@ -648,18 +660,6 @@ class SQLiteCoordStore:
         conn.commit()
         return self._load_event(conn, cur.lastrowid)
 
-    def _update_event(
-        self,
-        conn: sqlite3.Connection,
-        event_id: int,
-        *,
-        status: str | None = None,
-    ) -> CoordRecord:
-        if status is not None:
-            conn.execute("UPDATE events SET status=? WHERE event_id=?", (status, event_id))
-            conn.commit()
-        return self._load_event(conn, event_id)
-
     def _load_event(self, conn: sqlite3.Connection, event_id: int | None) -> CoordRecord:
         row = conn.execute(
             "SELECT * FROM events WHERE event_id=?", (event_id,)
@@ -709,12 +709,13 @@ def _milestone_to_record(row: sqlite3.Row) -> CoordRecord:
 def _phase_to_record(row: sqlite3.Row) -> CoordRecord:
     milestone_id = row["milestone_id"]
     phase_id = row["phase_id"]
+    record_status = "closed" if row["phase_state"] == "closed" else "open"
     return CoordRecord(
         record_id=f"ph:{milestone_id}|{phase_id}",
         title=f"Coord phase {phase_id}",
         description=f"Coordination phase {phase_id} for {milestone_id}.",
         record_type="task",
-        status="open",
+        status=record_status,
         labels=_coord_labels("phase", milestone_id, phase=phase_id),
         metadata={
             KIND_KEY: "phase",
@@ -729,12 +730,13 @@ def _phase_to_record(row: sqlite3.Row) -> CoordRecord:
 def _gate_to_record(row: sqlite3.Row) -> CoordRecord:
     milestone_id = row["milestone_id"]
     gate_id = row["gate_id"]
+    record_status = "closed" if row["gate_state"] == "closed" else "open"
     return CoordRecord(
         record_id=f"gt:{milestone_id}|{gate_id}",
         title=f"Gate {gate_id}",
         description=f"Gate {gate_id} for phase {row['phase_id']}.",
         record_type="task",
-        status="open",
+        status=record_status,
         labels=_coord_labels(
             "gate", milestone_id, phase=row["phase_id"], role=row["allowed_role"]
         ),
@@ -758,12 +760,13 @@ def _gate_to_record(row: sqlite3.Row) -> CoordRecord:
 def _role_to_record(row: sqlite3.Row) -> CoordRecord:
     milestone_id = row["milestone_id"]
     role = row["role"]
+    record_status = "closed" if row["agent_state"] == "closed" else "open"
     return CoordRecord(
         record_id=f"rl:{milestone_id}|{role}",
         title=f"Agent {role}",
         description=f"Coordination state for {role}.",
         record_type="task",
-        status="open",
+        status=record_status,
         labels=_coord_labels("agent", milestone_id, role=role),
         metadata={
             KIND_KEY: "agent",

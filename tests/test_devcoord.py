@@ -2281,3 +2281,205 @@ class TestSQLiteWriteConflictSmoke:
 
         store1.close()
         store2.close()
+
+
+class TestSQLiteCloseMilestoneContract:
+    """Regression: close_milestone must not corrupt event business status
+    and must mark phase/gate/role records as closed."""
+
+    def test_close_milestone_preserves_event_status_and_closes_records(
+        self, tmp_path: Path
+    ) -> None:
+        paths = make_sqlite_paths(tmp_path)
+        store = SQLiteCoordStore(paths.control_db)
+        clock = FakeClock(
+            "2026-03-01T10:00:00Z",
+            "2026-03-01T10:01:00Z",
+            "2026-03-01T10:02:00Z",
+            "2026-03-01T10:03:00Z",
+            "2026-03-01T10:04:00Z",
+            "2026-03-01T10:05:00Z",
+            "2026-03-01T10:06:00Z",
+            "2026-03-01T10:07:00Z",
+        )
+        service = CoordService(paths=paths, store=store, now_fn=clock)
+        service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+        service.open_gate(
+            "M7",
+            phase="1",
+            gate_id="G-M7-P1",
+            allowed_role="backend",
+            target_commit="abc1234",
+            task="open gate",
+        )
+        service.ack(
+            "M7",
+            role="backend",
+            command="GATE_OPEN",
+            gate_id="G-M7-P1",
+            commit="abc1234",
+            phase="1",
+            task="ACK",
+        )
+        service.phase_complete(
+            "M7",
+            role="backend",
+            phase="1",
+            gate_id="G-M7-P1",
+            commit="abc1234",
+            task="done",
+        )
+
+        report_relpath = "dev_docs/reports/m7_p1_review.md"
+        report_commit = init_git_repo_with_review(paths, report_relpath)
+
+        service.gate_review(
+            "M7",
+            role="tester",
+            phase="1",
+            gate_id="G-M7-P1",
+            result="PASS",
+            report_commit=report_commit,
+            report_path=report_relpath,
+            task="review",
+        )
+        service.render("M7")
+        service.gate_close(
+            "M7",
+            phase="1",
+            gate_id="G-M7-P1",
+            result="PASS",
+            report_commit=report_commit,
+            report_path=report_relpath,
+            task="close gate",
+        )
+        service.render("M7")
+
+        events_before = store.list_records("m7", kind="event")
+        event_statuses_before = {
+            e.metadata_int("event_seq"): e.metadata_str("status") for e in events_before
+        }
+
+        service.close_milestone("M7")
+
+        events_after = store.list_records("m7", kind="event")
+        for ev in events_after:
+            seq = ev.metadata_int("event_seq")
+            assert ev.metadata_str("status") == event_statuses_before[seq], (
+                f"event seq={seq} business status changed from "
+                f"{event_statuses_before[seq]!r} to {ev.metadata_str('status')!r}"
+            )
+
+        milestones = store.list_records("m7", kind="milestone")
+        assert all(m.status == "closed" for m in milestones)
+
+        phases = store.list_records("m7", kind="phase")
+        assert all(p.status == "closed" for p in phases), (
+            f"phase statuses: {[p.status for p in phases]}"
+        )
+
+        gates = store.list_records("m7", kind="gate")
+        assert all(g.status == "closed" for g in gates), (
+            f"gate statuses: {[g.status for g in gates]}"
+        )
+
+        roles = store.list_records("m7", kind="agent")
+        assert all(r.status == "closed" for r in roles), (
+            f"role statuses: {[r.status for r in roles]}"
+        )
+
+        audit = service.audit("M7")
+        assert audit["reconciled"] is True
+
+        store.close()
+
+    def test_render_after_close_preserves_event_projection(self, tmp_path: Path) -> None:
+        """Render after close_milestone must produce unchanged heartbeat_events."""
+        paths = make_sqlite_paths(tmp_path)
+        store = SQLiteCoordStore(paths.control_db)
+        clock = FakeClock(
+            "2026-03-01T10:00:00Z",
+            "2026-03-01T10:01:00Z",
+            "2026-03-01T10:02:00Z",
+            "2026-03-01T10:03:00Z",
+            "2026-03-01T10:04:00Z",
+            "2026-03-01T10:05:00Z",
+            "2026-03-01T10:06:00Z",
+            "2026-03-01T10:07:00Z",
+        )
+        service = CoordService(paths=paths, store=store, now_fn=clock)
+        service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
+        service.open_gate(
+            "M7",
+            phase="1",
+            gate_id="G-M7-P1",
+            allowed_role="backend",
+            target_commit="abc1234",
+            task="open gate",
+        )
+        service.ack(
+            "M7",
+            role="backend",
+            command="GATE_OPEN",
+            gate_id="G-M7-P1",
+            commit="abc1234",
+            phase="1",
+            task="ACK",
+        )
+        service.heartbeat(
+            "M7",
+            role="backend",
+            phase="1",
+            status="working",
+            task="coding",
+            eta_min=30,
+            gate_id="G-M7-P1",
+            target_commit="abc1234",
+        )
+        service.phase_complete(
+            "M7",
+            role="backend",
+            phase="1",
+            gate_id="G-M7-P1",
+            commit="abc1234",
+            task="done",
+        )
+
+        report_relpath = "dev_docs/reports/m7_p1_review.md"
+        report_commit = init_git_repo_with_review(paths, report_relpath)
+
+        service.gate_review(
+            "M7",
+            role="tester",
+            phase="1",
+            gate_id="G-M7-P1",
+            result="PASS",
+            report_commit=report_commit,
+            report_path=report_relpath,
+            task="review",
+        )
+        service.render("M7")
+        service.gate_close(
+            "M7",
+            phase="1",
+            gate_id="G-M7-P1",
+            result="PASS",
+            report_commit=report_commit,
+            report_path=report_relpath,
+            task="close gate",
+        )
+        service.render("M7")
+
+        log_dir = paths.log_dir("m7", "2026-03-01")
+        projection_before = (log_dir / "heartbeat_events.jsonl").read_text("utf-8")
+
+        service.close_milestone("M7")
+
+        service.render("M7")
+        projection_after = (log_dir / "heartbeat_events.jsonl").read_text("utf-8")
+
+        assert projection_before == projection_after, (
+            "render after close_milestone changed heartbeat_events.jsonl"
+        )
+
+        store.close()
