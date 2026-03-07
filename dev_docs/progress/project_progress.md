@@ -335,3 +335,18 @@
 - Next: p2m1a-g0 已关闭，等待 P2-M1A 下一条 gate
 - Risk: 无
 <!-- devcoord:end milestone=p2-m1a -->
+
+## 2026-03-07 (local) | P2-M1a closeout
+- Status: done
+- Done: P2-M1a 显式成长治理内核全部完成（Agent Teams PM 协调，3 Phase Gate 全通过）— GrowthObjectKind/GrowthProposal 类型体系、PolicyRegistry (soul=onboarded, 4 reserved)、GrowthGovernanceEngine fail-closed 编排、GovernedObjectAdapter Protocol + SoulGovernedObjectAdapter thin wrapper、ADR 0049 adapter-first 决策
+- Detail:
+  - Phase 0+1: 类型 + 策略 + 引擎 + 适配器契约 — GrowthObjectKind, GrowthLifecycleStatus, GrowthProposal, PolicyRegistry, GrowthGovernanceEngine, GovernedObjectAdapter Protocol, UnsupportedGrowthObjectError
+  - Phase 2: Soul 适配器 — SoulGovernedObjectAdapter thin wrapper over EvolutionEngine, GrowthProposal→SoulProposal 转换, EvalResult→GrowthEvalResult 转换
+  - Phase 3: 集成测试 + ADR — 68 tests 全覆盖, ADR 0049 adapter-first 决策
+  - Post-review fixes: cross-kind mismatch guard (UnsupportedGrowthObjectError), proposed_by→created_by 穿透审计链路, SoulProposal 新增 created_by 字段 (默认 "agent" 向后兼容)
+- Evidence: 916 tests passed, ruff clean; commit 711465a (post-review fix); PM 报告 `dev_docs/logs/phase2/p2-m1a_2026-03-06/pm.md`; gate 记录 `dev_docs/logs/phase2/p2-m1a_2026-03-06/gate_state.md`
+- Plan: `dev_docs/plans/phase2/p2-m1a_growth-governance-kernel_2026-03-06.md`
+- Decisions: ADR 0049 (growth-governance-kernel-adapter-first)
+- Baseline: 845 → 916 tests (+71, +8.4%); 11 new files, ~1,050 insertions
+- Next: P2-M1a 全部关闭；按 `design_docs/phase2/roadmap_milestones_v1.md` 确定下一阶段
+- Risk: 无
