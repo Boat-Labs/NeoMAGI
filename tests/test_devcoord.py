@@ -2388,6 +2388,28 @@ class TestSQLiteCloseMilestoneContract:
             f"role statuses: {[r.status for r in roles]}"
         )
 
+        events_after = store.list_records("m7", kind="event")
+        assert len(events_after) > 0
+        assert all(e.status == "closed" for e in events_after), (
+            f"event record statuses: {[e.status for e in events_after]}"
+        )
+
+        messages = store.list_records("m7", kind="message")
+        assert len(messages) > 0
+        assert all(m.status == "closed" for m in messages), (
+            f"message record statuses: {[m.status for m in messages]}"
+        )
+
+        all_records = store.list_records("m7")
+        assert all(rec.status == "closed" for rec in all_records), (
+            "not all records closed: "
+            + ", ".join(
+                f"{rec.record_id}={rec.status}"
+                for rec in all_records
+                if rec.status != "closed"
+            )
+        )
+
         audit = service.audit("M7")
         assert audit["reconciled"] is True
 

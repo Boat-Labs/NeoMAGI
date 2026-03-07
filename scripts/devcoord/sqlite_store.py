@@ -9,7 +9,7 @@ from typing import Any
 from .model import COORD_LABEL, KIND_KEY, CoordError
 from .store import CoordRecord
 
-SQLITE_SCHEMA_VERSION = 1
+SQLITE_SCHEMA_VERSION = 2
 BUSY_TIMEOUT_MS = 5000
 
 _SCHEMA_SQL = """\
@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS messages (
     acked_at TEXT,
     ack_role TEXT,
     ack_commit TEXT,
-    payload_json TEXT NOT NULL DEFAULT '{}'
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    record_closed INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -93,6 +94,7 @@ CREATE TABLE IF NOT EXISTS events (
     source_message_id INTEGER,
     payload_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL,
+    record_closed INTEGER NOT NULL DEFAULT 0,
     UNIQUE (milestone_id, event_seq)
 );
 """
@@ -210,9 +212,9 @@ class SQLiteCoordStore:
         if prefix == "rl":
             return self._update_role(conn, local_id, metadata=metadata, status=status)
         if prefix == "mg":
-            return self._update_message(conn, int(local_id), metadata=metadata)
+            return self._update_message(conn, int(local_id), metadata=metadata, status=status)
         if prefix == "ev":
-            return self._load_event(conn, int(local_id))
+            return self._update_event(conn, int(local_id), status=status)
 
         raise CoordError(f"cannot update record with unknown prefix: {prefix}")
 
@@ -545,9 +547,10 @@ class SQLiteCoordStore:
         message_id: int,
         *,
         metadata: dict[str, Any] | None = None,
+        status: str | None = None,
     ) -> CoordRecord:
+        sets, vals = [], []
         if metadata:
-            sets, vals = [], []
             if "effective" in metadata:
                 sets.append("effective=?")
                 vals.append(1 if metadata["effective"] else 0)
@@ -560,12 +563,15 @@ class SQLiteCoordStore:
             if "ack_commit" in metadata:
                 sets.append("ack_commit=?")
                 vals.append(metadata["ack_commit"])
-            if sets:
-                vals.append(message_id)
-                conn.execute(
-                    f"UPDATE messages SET {', '.join(sets)} WHERE message_id=?", vals
-                )
-                conn.commit()
+        if status == "closed":
+            sets.append("record_closed=?")
+            vals.append(1)
+        if sets:
+            vals.append(message_id)
+            conn.execute(
+                f"UPDATE messages SET {', '.join(sets)} WHERE message_id=?", vals
+            )
+            conn.commit()
         return self._load_message(conn, message_id)
 
     def _load_message(self, conn: sqlite3.Connection, message_id: int | None) -> CoordRecord:
@@ -659,6 +665,20 @@ class SQLiteCoordStore:
         )
         conn.commit()
         return self._load_event(conn, cur.lastrowid)
+
+    def _update_event(
+        self,
+        conn: sqlite3.Connection,
+        event_id: int,
+        *,
+        status: str | None = None,
+    ) -> CoordRecord:
+        if status == "closed":
+            conn.execute(
+                "UPDATE events SET record_closed=1 WHERE event_id=?", (event_id,)
+            )
+            conn.commit()
+        return self._load_event(conn, event_id)
 
     def _load_event(self, conn: sqlite3.Connection, event_id: int | None) -> CoordRecord:
         row = conn.execute(
@@ -805,12 +825,13 @@ def _message_to_record(row: sqlite3.Row) -> CoordRecord:
         "ack_commit": row["ack_commit"] or "",
     }
     metadata.update(payload)
+    record_status = "closed" if row["record_closed"] else "open"
     return CoordRecord(
         record_id=f"mg:{message_id}",
         title=f"{row['command_name']} -> {row['target_role']}",
         description=payload.get("task", ""),
         record_type="task",
-        status="open",
+        status=record_status,
         labels=_coord_labels(
             "message",
             row["milestone_id"],
@@ -850,12 +871,13 @@ def _event_to_record(row: sqlite3.Row) -> CoordRecord:
         "ts": row["created_at"],
     }
     metadata.update(payload)
+    record_status = "closed" if row["record_closed"] else "open"
     return CoordRecord(
         record_id=f"ev:{event_id}",
         title=f"{row['event_type']} {row['role'] or ''} phase {row['phase_id'] or 'na'}",
         description=row["task"],
         record_type="task",
-        status="open",
+        status=record_status,
         labels=_coord_labels(
             "event",
             row["milestone_id"],
