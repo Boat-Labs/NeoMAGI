@@ -1,7 +1,7 @@
 # Phase 2 Design Index
 
 > 目的：为 Phase 2 提供技术架构入口。  
-> 使用原则：先看产品路线图，再按里程碑读取对应 architecture 文档；实现细节不足时再进入跨阶段草案。
+> 使用原则：先看产品路线图，再按里程碑读取对应 architecture 文档；实现细节不足时再进入跨阶段设计文档。
 
 ## 1. 推荐读取顺序
 
@@ -20,12 +20,12 @@
 5. `design_docs/phase2/p2_m4_architecture.md`
    - `P2-M4`：外部协作表面、Slack、浏览器/外部平台读写边界。
 
-## 2. 跨阶段草案（按需）
+## 2. 跨阶段设计（按需）
 
 - `design_docs/procedure_runtime.md`
   - `P2-M2` 的底层 runtime control object 正式设计文档。
-- `design_docs/skill_objects_runtime_draft.md`
-  - `P2-M1` 的 skill object 运行时经验层草案。
+- `design_docs/skill_objects_runtime.md`
+  - `P2-M1` 的 skill object 运行时经验层正式设计文档。
 - `design_docs/memory_architecture_v2.md`
   - `P2-M3` 的 memory kernel / applications 长期原则。
 

@@ -42,7 +42,7 @@
   - 放弃原因：层级过多会增加认知与实现复杂度，不符合 NeoMAGI 的降熵原则。
 
 ## 影响
-- 技术落地草案收敛到 `design_docs/skill_objects_runtime_draft.md`，用于定义 `skill object` 的最小结构、runtime join points、evidence 语义以及与 prompt / procedure / tools 的交互边界。
+- 技术落地设计文档收敛到 `design_docs/skill_objects_runtime.md`，用于定义 `skill object` 的最小结构、runtime join points、evidence 语义以及与 prompt / procedure / tools 的交互边界。
 - 当前 `PromptBuilder` 中的 skills placeholder 后续应演进为“程序化 skill 投影层”，而不是继续维持空占位或拼接式文本层。
 - `P2-M1` 中“不要总从 0 开始”的能力建设，后续应优先通过 skill object 落地；只有足够稳定、清晰、跨场景复用的部分，才允许 promote 到更底层的能力单元。
 - 后续若引入用户教授经验、Actionbook 等外部经验源，应首先沉淀为 skill object，而不是直接下沉为 atomic tool。

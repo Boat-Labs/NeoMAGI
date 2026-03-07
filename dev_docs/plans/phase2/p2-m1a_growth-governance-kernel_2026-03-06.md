@@ -6,7 +6,7 @@
 - Basis:
   - [`design_docs/phase2/p2_m1_architecture.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/phase2/p2_m1_architecture.md)
   - [`design_docs/phase2/roadmap_milestones_v1.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/phase2/roadmap_milestones_v1.md)
-  - [`design_docs/skill_objects_runtime_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/skill_objects_runtime_draft.md)
+  - [`design_docs/skill_objects_runtime.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/skill_objects_runtime.md)
   - [`decisions/0027-partner-agent-self-evolution-guardrails.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0027-partner-agent-self-evolution-guardrails.md)
   - [`decisions/0036-evolution-consistency-db-as-ssot-and-soulmd-as-projection.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0036-evolution-consistency-db-as-ssot-and-soulmd-as-projection.md)
   - [`decisions/0048-skill-objects-as-runtime-experience-layer.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0048-skill-objects-as-runtime-experience-layer.md)

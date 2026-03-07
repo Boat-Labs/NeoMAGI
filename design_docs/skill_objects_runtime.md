@@ -1,10 +1,10 @@
-# Skill Objects（草案）
+# Skill Objects
 
-> 状态：draft  
-> 日期：2026-03-06  
+> 状态：approved  
+> 日期：2026-03-07  
 > 依据：`design_docs/phase2/roadmap_milestones_v1.md`、`design_docs/procedure_runtime.md`、`design_docs/system_prompt.md`、ADR 0027、ADR 0048
 
-## 1. 这份草案解决什么问题
+## 1. 这份设计解决什么问题
 
 NeoMAGI 已经明确两件事：
 - 能力扩展应优先走稳定原子工具路线；
@@ -21,7 +21,7 @@ NeoMAGI 已经明确两件事：
 - 它不是 hook 本身；
 - 它只负责承载“这类任务基于已有经验通常该怎么做得更稳”的可复用 delta。
 
-本草案将这层命名为 `Skill Object`。
+本文档将这层命名为 `Skill Object`。
 
 ## 2. 核心判断
 
@@ -123,7 +123,7 @@ hook 擅长的是：
 
 NeoMAGI 不需要传统 hook 机制作为本体；它只需要少量固定 runtime join points 来解析和投影 skill object。
 
-## 6. 最小对象模型（V1 草案）
+## 6. 最小对象模型（V1）
 
 ### 6.1 SkillSpec
 
@@ -397,7 +397,7 @@ V1 只建议保留 3 个固定 join points：
 不建议在 V1 引入大量细碎 hook 点。  
 join point 越多，系统越容易重新走向高熵的事件回调网络。
 
-与当前 `AgentLoop` 的最小集成草案：
+与当前 `AgentLoop` 的最小集成方案：
 - `pre-plan`
   - 在 `AgentLoop.handle_message()` 中，完成 mode / tool schema / active procedure 解析后、调用 `PromptBuilder.build()` 前触发。
   - 产物：`TaskFrame` + `ResolvedSkillView`。

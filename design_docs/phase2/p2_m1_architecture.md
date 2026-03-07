@@ -2,7 +2,7 @@
 
 > 状态：planned  
 > 对应里程碑：`P2-M1` 显式成长与 Builder 治理  
-> 依据：`design_docs/phase2/roadmap_milestones_v1.md`、`design_docs/skill_objects_runtime_draft.md`、ADR 0027、ADR 0036、ADR 0048
+> 依据：`design_docs/phase2/roadmap_milestones_v1.md`、`design_docs/skill_objects_runtime.md`、ADR 0027、ADR 0036、ADR 0048
 
 ## 1. 目标
 

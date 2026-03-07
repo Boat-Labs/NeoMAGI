@@ -31,8 +31,8 @@
 6. `design_docs/procedure_runtime.md`
    - Phase 2 方向的 deterministic procedure / runtime control 正式设计文档。
 
-7. `design_docs/skill_objects_runtime_draft.md`
-   - `2+1` 中第二层：skill object 的结构、程序化投影与学习草案。
+7. `design_docs/skill_objects_runtime.md`
+   - `2+1` 中第二层：skill object 的结构、程序化投影与学习正式设计文档。
 
 8. `design_docs/devcoord_sqlite_control_plane.md`
    - `devcoord` 从 `beads` 解耦后的 SQLite control-plane store 与精简命令面设计。
@@ -48,7 +48,7 @@
 - `design_docs/system_prompt.md`
 - `design_docs/memory_architecture_v2.md`
 - `design_docs/procedure_runtime.md`
-- `design_docs/skill_objects_runtime_draft.md`
+- `design_docs/skill_objects_runtime.md`
 - `design_docs/devcoord_sqlite_control_plane.md`（仅在需要 devcoord / 协作控制面重构时）
 
 ## 4. Phase 1 归档入口
