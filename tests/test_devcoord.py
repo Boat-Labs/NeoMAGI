@@ -1844,6 +1844,21 @@ class TestSQLitePathResolutionFromCLI:
         with pytest.raises(CoordError, match="Legacy beads control plane detected"):
             _resolve_paths()
 
+    def test_legacy_coord_beads_without_control_db_raises_split_brain_guard(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        workspace_root = tmp_path / "workspace"
+        (workspace_root / ".git").mkdir(parents=True, exist_ok=True)
+        legacy_marker = workspace_root / ".coord" / "beads" / ".beads" / "metadata.json"
+        legacy_marker.parent.mkdir(parents=True, exist_ok=True)
+        legacy_marker.write_text("{}", "utf-8")
+        monkeypatch.setattr(coord_module, "_shared_workspace_root", lambda cwd: workspace_root)
+        monkeypatch.setattr(
+            coord_module, "_resolve_git_common_dir", lambda cwd: workspace_root / ".git"
+        )
+        with pytest.raises(CoordError, match="Legacy beads control plane detected"):
+            _resolve_paths()
+
     def test_legacy_beads_with_control_db_passes(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
