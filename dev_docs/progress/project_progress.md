@@ -360,9 +360,9 @@
 - Risk: 无
 
 ## 2026-03-07 (local) | P2-Devcoord Stage B
-- Status: in_progress (plan approved, implementation pending)
-- Done: Devcoord Stage B（SQLite 后端与 Render/Audit 切换）计划已批准，等待进入实现
+- Status: done
+- Done: Devcoord Stage B（SQLite 后端与 Render/Audit 切换）已完成并验收通过 — `.devcoord/control.db` 落地为 control-plane 真源，`SQLiteCoordStore` 覆盖 milestone / phase / gate / role / message / event 六类记录，CLI 支持 `sqlite` / `beads` / `auto` 选路，`render` / `audit` 在 SQLite fresh-start 路径下可完整运行，`close_milestone` 契约回归已修复
 - Track: 并行开发流程修复轨；不属于 `P2-M*` 产品里程碑序列
-- Evidence: `dev_docs/plans/phase2/p2-devcoord-stage-b_sqlite-backend_2026-03-07.md`
-- Next: 按批准的 `Stage B` 计划进入实现
-- Risk: Stage B 涉及 SQLite schema、shared-root 路径、service 读写 helper 改造与 render/audit 切换，回归面明显高于 Stage A
+- Evidence: 相关提交 `341b0da` / `75bfbeb` / `9427bb6`；`uv run pytest -q tests/test_devcoord.py` 61 passed；全量 955 passed；计划 `dev_docs/plans/phase2/p2-devcoord-stage-b_sqlite-backend_2026-03-07.md`
+- Next: 进入 `Stage C` 命令面精简的计划与实施准备
+- Risk: 保留 fresh-start-only 的 SQLite schema 约束；已有 v1 `.devcoord/control.db` 需删除后按 v2 重新初始化
