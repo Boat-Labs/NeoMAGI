@@ -39,7 +39,10 @@
 - `CoordStore`、`BeadsCoordStore`、`MemoryCoordStore` 已存在
 - `CoordService` 已不再直接依赖 `IssueStore` / `IssueRecord`
 
-如果 `Stage A` 还未落地，`Stage B` 不应提前开工。
+当前口径：
+
+- `Stage A` 已 post-review 通过并完成 commit/push 落地
+- 因此前置条件已满足，`Stage B` 可以进入计划审阅与开工准备
 
 ## Core Decision
 

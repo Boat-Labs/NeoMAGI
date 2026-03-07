@@ -1,9 +1,9 @@
 # P2-Devcoord Stage A 实施计划：CoordStore 抽象层
 
 - Date: 2026-03-07
-- Status: approved + accepted
+- Status: approved + accepted + executed
 - Acceptance: post-review passed
-- Landing: current workspace pending commit/push in this thread
+- Landing: committed and landed
 - Scope: `P2-Devcoord Stage A` only; introduce `CoordStore` and remove `CoordService`'s direct dependency on issue-oriented storage
 - Track Type: parallel development-process repair track; outside the `P2-M*` product milestone series
 - Basis:

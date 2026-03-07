@@ -352,9 +352,17 @@
 - Risk: 无
 
 ## 2026-03-07 (local) | P2-Devcoord Stage A
-- Status: in_progress (acceptance passed, landing pending)
-- Done: Devcoord Stage A（`CoordStore` 抽象层）post-review 验收通过 — `CoordStore` seam 建立、`BeadsCoordStore / MemoryCoordStore` 落位、`CoordService` 脱离 `IssueStore / IssueRecord` 中心语义、CLI 对外行为保持不变
+- Status: done
+- Done: Devcoord Stage A（`CoordStore` 抽象层）已完成、验收通过并落地 — `CoordStore` seam 建立、`BeadsCoordStore / MemoryCoordStore` 落位、`CoordService` 脱离 `IssueStore / IssueRecord` 中心语义、CLI 对外行为保持不变
 - Track: 并行开发流程修复轨；不属于 `P2-M*` 产品里程碑序列
-- Evidence: `dev_docs/plans/phase2/p2-devcoord-stage-a_coordstore-abstraction_2026-03-07.md`; current implementation files `scripts/devcoord/store.py`, `scripts/devcoord/service.py`, `scripts/devcoord/coord.py`, `scripts/devcoord/model.py`, `tests/test_devcoord.py`
-- Next: 将当前 workspace 中已验收的 Stage A 实现完成 commit/push 落地，然后按 `dev_docs/plans/phase2/p2-devcoord-stage-b_sqlite-backend_2026-03-07_draft.md` 进入 Stage B
-- Risk: 在 commit/push 完成前，Stage A 的 accepted baseline 仍未体现在仓库历史中；后续 Stage B coding 不应越过这一落地步骤
+- Evidence: `dev_docs/plans/phase2/p2-devcoord-stage-a_coordstore-abstraction_2026-03-07.md`
+- Next: 进入 `Stage B` 计划审阅与开工准备
+- Risk: 无
+
+## 2026-03-07 (local) | P2-Devcoord Stage B
+- Status: in_progress (plan review)
+- Done: Devcoord Stage B（SQLite 后端与 Render/Audit 切换）草稿已建立，进入开工前审阅
+- Track: 并行开发流程修复轨；不属于 `P2-M*` 产品里程碑序列
+- Evidence: `dev_docs/plans/phase2/p2-devcoord-stage-b_sqlite-backend_2026-03-07_draft.md`
+- Next: 收敛 Stage B 审阅意见并批准正稿，然后进入实现
+- Risk: Stage B 涉及 SQLite schema、shared-root 路径、service 读写 helper 改造与 render/audit 切换，回归面明显高于 Stage A
