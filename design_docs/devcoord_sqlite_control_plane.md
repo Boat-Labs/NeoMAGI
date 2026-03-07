@@ -1,6 +1,6 @@
 # Devcoord SQLite 控制面设计
 
-> 状态：定稿
+> 状态：approved
 > 日期：2026-03-07
 > 适用范围：仅用于 NeoMAGI 开发协作，不用于产品运行时
 > 相关决议：[`decisions/0050-devcoord-decouple-from-beads-and-use-sqlite-control-plane-store.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0050-devcoord-decouple-from-beads-and-use-sqlite-control-plane-store.md)
