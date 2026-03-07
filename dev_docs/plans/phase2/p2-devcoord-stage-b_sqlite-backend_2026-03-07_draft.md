@@ -92,6 +92,12 @@
 - 让多 worktree 共享路径稳定
 - 让 `render/audit` 在 SQLite 上继续给出与当前同类的证据
 
+还需要显式承认一个实现事实：
+
+- `Stage A` 的 `CoordRecord` seam 是过渡形态，不是 SQLite 时代的最终领域模型
+- `Stage B` 不会把整个系统重写成 typed records，但会允许 store/query seam 和 service helper 向 typed/fielded SQLite 模型靠拢
+- 因此 `Stage B` 的工作量不只是新增一个 adapter；它包含一部分 service 读写路径改造
+
 ## Target Architecture
 
 ### 1. Store Boundary
@@ -142,6 +148,10 @@
 
 - 只保留在 SQLite 内部 metadata / schema 中
 - 不引入 sidecar `schema_version.json`
+- 遇到不兼容 schema version 时直接 fail-closed
+  - 不做 forward migration
+  - 不做兼容降级
+  - 操作者删除本地 `.devcoord/` 后重新 `init`
 
 ### 3. Fresh Bootstrap
 
@@ -169,6 +179,7 @@ Stage B 必须固定共享路径解析：
 
 - `CoordPaths` 命名从 `beads_dir` 向 `control_root` / `control_db` 一类语义迁移
 - `.devcoord/` 加入 `.gitignore`
+- `beads_dir` 在 `Stage B` 期间可暂时保留为兼容字段，但不再作为 SQLite 路径真源
 
 ### 5. Concurrency and Transactions
 
@@ -203,7 +214,22 @@ Stage B 必须固定共享路径解析：
 - `open_gates`
   - 仍能正确识别
 
-### 7. Runtime Selection
+### 7. Service Adaptation Boundary
+
+`Stage B` 不只是“换掉 store 实现”，还必须允许一定深度的 service 改造。
+
+明确 in-scope：
+
+- 把当前依赖 metadata bag 的部分 helper 改成通过 `SQLiteCoordStore` query helpers 读取 typed/fielded 数据
+- 把当前 “先组装 metadata dict，再 create/update record” 的部分路径改成更贴近 SQLite schema 的写入方式
+- 让 `render/audit/close_milestone` 直接建立在 SQLite query 结果上
+
+明确 out-of-scope：
+
+- 一次性把整个 runtime 改写成全 typed domain object 系统
+- 在 `Stage B` 重写全部协议语义或命令面
+
+### 8. Runtime Selection
 
 `Stage B` 不做命令面精简，但需要决定 SQLite 如何进入运行时。
 
@@ -259,6 +285,7 @@ Stage B 必须固定共享路径解析：
 - schema bootstrap
 - SQLite metadata / schema version
 - 空库可初始化
+- schema version mismatch fail-closed
 
 验收：
 
@@ -286,6 +313,9 @@ Stage B 必须固定共享路径解析：
 - ACK 生效路径
 - `target_commit` persistence
 - `close_milestone` 可在 SQLite 上运行
+- service 层必要的 query/write helper 改造
+  - 允许从 metadata bag 风格访问转向 store query helpers
+  - 不要求引入完整 typed records 公共模型
 
 验收：
 

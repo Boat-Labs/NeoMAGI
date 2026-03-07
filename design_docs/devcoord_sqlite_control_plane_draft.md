@@ -49,7 +49,6 @@
 ```text
 .devcoord/
   control.db
-  schema_version.json (optional)
 ```
 
 规则：
@@ -118,6 +117,8 @@ closed_at TEXT
 
 - `status` 只保留粗粒度状态：`active` 或 `closed`
 - 这一层替代原来 milestone bead 根对象
+- schema version 只保留在 SQLite 内部 schema / metadata 中
+- 若发现不兼容 schema version，直接 fail-closed，并要求操作者删除本地 `.devcoord/` 后重新初始化；本方案不提供旧控制面数据迁移
 
 ### 6.2 `phases`
 
@@ -455,13 +456,14 @@ coord.py apply ...
 
 ## 10. Service 层形态
 
-当前 `CoordService` 的语义方法大体可以保留。
+当前 `CoordService` 的语义方法大体可以保留，但实现深度不能被低估。
 
 主要重构点应该是：
 
 - 引入 `CoordStore` 抽象
 - 把 `beads` 专属的持久化逻辑移出 service
 - 新增 `SQLiteCoordStore`
+- 允许部分 service helper 从 metadata bag 读写模式，演进到调用 store query/write helpers
 
 建议分层：
 
@@ -477,7 +479,13 @@ coord.py apply ...
 - `SQLiteCoordStore`
   - 基于 `sqlite3` 的 `.devcoord/control.db` 具体实现
 
-这样可以在只替换 store adapter 的前提下，保持协议语义稳定。
+约束：
+
+- 这不是“只换一个 adapter 就结束”的工作
+- `Stage B` 允许为适配 typed SQLite schema 改造 service 读写路径
+- 但不要求一次性把整个 runtime 重写成一套新的 typed domain object 系统
+
+这样可以在保持协议语义稳定的同时，让 SQLite schema 的结构化收益真正落地，而不是再次被扁平化回通用 record bag。
 
 ## 11. 迁移策略
 
@@ -497,12 +505,15 @@ coord.py apply ...
 - 实现 `SQLiteCoordStore`
 - 让 `render/audit` 改为从 SQLite 读取
 - 新 store 必须支持 fresh bootstrap，不依赖旧 `beads` control-plane 数据导入
+- `CoordPaths` 在这一阶段新增 `control_root` / `control_db` 一类语义字段
+- `beads_dir` 可暂时保留为兼容字段，但不再作为 SQLite 路径真源
 
 ### Stage 3: Command regrouping
 
 - 新增 grouped CLI commands
 - 保留旧 flat aliases
-- 将 PM/backend/tester skills 切到 grouped 或 `apply` 形式
+- 将 PM/backend/tester skills 与 runbook 的新示例切到 grouped 或 `apply` 形式
+- 兼容期内旧 flat aliases 仍可继续支撑未及时更新的 skill / prompt
 
 ### Stage 4: Cutover
 
@@ -521,8 +532,13 @@ coord.py apply ...
 - `milestone close` 可在不触碰 backlog issue 的前提下完成 closeout。
 - `coord.py` 顶层命令分组比当前扁平命令面更少、更容易记忆。
 
-## 13. 开放问题
+## 13. 已决口径
 
-- `.devcoord/control.db` 应该被 git ignore，还是依赖现有 ignore 规则和 projection 证据让它保持本地态？
-- `schema_version` 应只存在 SQLite metadata 中，还是额外保留 sidecar `schema_version.json` 便于人工检查？
-- `gate open` 应先作为语义 alias 存在，还是立即成为替代 `open-gate` 的 canonical path？
+- `.devcoord/` 进入 `.gitignore`
+  - 原因：它是本地控制面状态，不应进入仓库历史
+- `schema_version` 只保留在 SQLite 内部 schema / metadata 中
+  - 原因：sidecar 文件会重复表达同一事实，增加维护成本
+- schema version 不匹配时直接 fail-closed
+  - 原因：本方案采用 fresh-start only，不为旧控制面数据提供迁移链路
+- `gate open` 作为 canonical path
+  - 原因：Stage 3 的目标就是收敛命令面，`open-gate` 仅作为兼容 alias 保留一段过渡期

@@ -128,6 +128,13 @@
 - service 层不再依赖 `IssueRecord` 风格的数据结构。
 - 任何 `bd ... --json` 细节都必须被收拢在 `BeadsCoordStore` 内部，而不是继续泄漏到 service 层。
 - `BeadsCoordStore` 的作用仅限于代码层渐进切换，不承担历史 control-plane 数据导入职责。
+- `Stage A` 已批准的口径继续成立：
+  - 保留单一 `CoordRecord` 作为过渡 seam
+  - 不在 `Stage A` 立即引入 typed records
+- `Stage B` 则允许进一步把 store seam 向 typed/fielded SQLite 模型推进：
+  - SQLite schema 直接落到 `milestones / phases / gates / roles / messages / events`
+  - service 层可为适配该模型而改造部分读写 helper
+  - 但不要求在 `Stage B` 把整个 runtime 重写成一套新的 domain object 系统
 
 ### 3. SQLite Data Model
 
@@ -171,7 +178,8 @@ SQLite 可接受的前提是写入规则明确：
 
 - 多 worktree 必须指向同一个 shared root `.devcoord/control.db`
 - `render` 输出仍写入当前共享仓库下的 `dev_docs/`
-- `CoordPaths` 后续应从 `beads_dir` 迁移到 `control_root` / `control_db` 一类更直接的字段命名
+- `Stage B` 必须先新增 `control_root` / `control_db` 一类更直接的字段命名
+- `Stage D` 再退役 `CoordPaths.beads_dir` 与相关旧参数
 
 ### 6. Command Surface
 
@@ -293,6 +301,9 @@ SQLite 可接受的前提是写入规则明确：
 - SQLite-backed query/write path
 - `render/audit` 读 SQLite
 - `.devcoord/` 本地状态目录落位
+- service 层读写 helper 按 SQLite typed schema 做必要改造
+  - 不再假设所有状态都经由 metadata bag 组装/拆解
+  - 允许将部分 query 下推到 `SQLiteCoordStore`
 
 测试方法：
 
@@ -315,6 +326,7 @@ SQLite 可接受的前提是写入规则明确：
 - 所有需 ACK 的指令 `STOP / WAIT / RESUME / GATE_OPEN / PING` 在 SQLite 后端上仍保持 “pending -> effective” 语义
 - `target_commit` 写入、读取、projection 与 audit 结果一致
 - 多 worktree 指向同一 shared `.devcoord/control.db`
+- schema version 不匹配时 fail-closed，并要求操作者重建本地 `.devcoord/`
 
 ### Stage C: Grouped CLI Surface
 
@@ -338,12 +350,16 @@ SQLite 可接受的前提是写入规则明确：
 - 旧命令映射表与 deprecation 注记
 - `gate open` 作为 canonical path
 - `open-gate` 仅保留兼容 alias
+- PM / backend / tester skills 与 runbook 的新示例口径切到 grouped commands
+- 旧 skill / prompt 在兼容期内仍可依赖 flat alias 运行
 
 测试方法：
 
 - CLI smoke tests 覆盖 grouped commands
 - compatibility smoke tests 覆盖旧 flat aliases
-- 以最小 PM/backend/tester prompt 样例验证 skill 不需要一次性重写
+- 以最小 PM/backend/tester prompt 样例验证：
+  - grouped form 已成为新口径
+  - 旧 flat alias 仍可支撑兼容期执行
 
 验收：
 
@@ -425,5 +441,7 @@ SQLite 可接受的前提是写入规则明确：
   - 理由：它是本地控制面状态，不应进入仓库历史
 - `schema_version` 只保留在 SQLite metadata / schema 内部
   - 理由：sidecar `json` 会重复表达同一事实，增加维护成本
+- schema version 不匹配时直接 fail-closed
+  - 理由：本方案明确采用 fresh-start only，不为旧 control-plane 数据设计迁移链路；不兼容时应删除本地 `.devcoord/` 后重新初始化
 - `gate open` 作为 canonical path
   - 理由：Stage C 的目标就是收敛命令面，`open-gate` 仅作为兼容 alias 保留一段过渡期
