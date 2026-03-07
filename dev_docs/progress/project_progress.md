@@ -366,3 +366,11 @@
 - Evidence: 相关提交 `341b0da` / `75bfbeb` / `9427bb6`；`uv run pytest -q tests/test_devcoord.py` 61 passed；全量 955 passed；计划 `dev_docs/plans/phase2/p2-devcoord-stage-b_sqlite-backend_2026-03-07.md`
 - Next: 进入 `Stage C` 命令面精简的计划与实施准备
 - Risk: 保留 fresh-start-only 的 SQLite schema 约束；已有 v1 `.devcoord/control.db` 需删除后按 v2 重新初始化
+
+## 2026-03-07 (local) | P2-Devcoord Stage C
+- Status: done
+- Done: Devcoord Stage C（Grouped CLI Surface）已完成并验收通过 — 17 个 flat 顶层命令收敛为 `init / gate / command / event / projection / milestone / apply` 分组结构，argv normalization 实现 flat alias 透明兼容，`_PAYLOAD_BUILDERS` 替代 200+ 行 if/elif dispatch，`command send --name PING` 成为 ping 的 canonical grouped path，三个 devcoord skill narrative 切到 grouped CLI，payloads.md 保持 apply 机器入口不变
+- Track: 并行开发流程修复轨；不属于 `P2-M*` 产品里程碑序列
+- Evidence: commit `7b3a60a`；merge `eaa56dd`；`uv run pytest -q tests/test_devcoord.py` 96 passed；全量 990 passed；计划 `dev_docs/plans/phase2/p2-devcoord-stage-c_grouped-cli-surface_2026-03-07.md`
+- Next: 进入 `Stage D` beads cutover / closeout hardening 的计划与实施准备
+- Risk: 无
