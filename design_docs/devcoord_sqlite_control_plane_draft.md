@@ -108,7 +108,6 @@ schema 应刻意保持克制。这个 store 只需要 6 类逻辑对象：
 milestone_id TEXT PRIMARY KEY
 run_date TEXT NOT NULL
 status TEXT NOT NULL
-schema_version INTEGER NOT NULL
 created_at TEXT NOT NULL
 closed_at TEXT
 ```
@@ -117,7 +116,9 @@ closed_at TEXT
 
 - `status` 只保留粗粒度状态：`active` 或 `closed`
 - 这一层替代原来 milestone bead 根对象
+- schema version 不放在 milestone 行内
 - schema version 只保留在 SQLite 内部 schema / metadata 中
+  - 具体建议：使用 `PRAGMA user_version`
 - 若发现不兼容 schema version，直接 fail-closed，并要求操作者删除本地 `.devcoord/` 后重新初始化；本方案不提供旧控制面数据迁移
 
 ### 6.2 `phases`
@@ -140,7 +141,7 @@ PRIMARY KEY (milestone_id, phase_id)
 
 说明：
 
-- `phase_state` 表示 `pending`、`active`、`closed` 之类的聚合状态
+- 当前 runtime 的最小聚合状态是 `in_progress`、`closed`
 - `last_commit` 用于 projection 和 resume 判断
 
 ### 6.3 `gates`
@@ -186,8 +187,6 @@ role TEXT NOT NULL
 agent_state TEXT NOT NULL
 action TEXT
 current_task TEXT
-current_phase TEXT
-current_gate TEXT
 last_activity TEXT
 stale_risk TEXT
 PRIMARY KEY (milestone_id, role)
@@ -199,6 +198,7 @@ PRIMARY KEY (milestone_id, role)
 - 主要服务 watchdog 和 projection 输出
 - SQLite `roles` 表承接当前 service 层 `kind="agent"` 的语义
 - 本阶段不要求同步把 service 侧既有 `agent` 概念全部重命名为 `role`
+- `current_phase` / `current_gate` 当前没有明确写路径，因此不作为 `Stage B` 最小 schema 字段保留
 
 ### 6.5 `messages`
 
@@ -210,7 +210,6 @@ PRIMARY KEY (milestone_id, role)
 
 ```sql
 message_id INTEGER PRIMARY KEY AUTOINCREMENT
-message_key TEXT NOT NULL UNIQUE
 milestone_id TEXT NOT NULL
 gate_id TEXT
 phase_id TEXT
@@ -223,7 +222,6 @@ sent_at TEXT NOT NULL
 acked_at TEXT
 ack_role TEXT
 ack_commit TEXT
-source_message_key TEXT
 payload_json TEXT NOT NULL
 ```
 
@@ -232,6 +230,16 @@ payload_json TEXT NOT NULL
 - 该表承载 `GATE_OPEN`、`STOP`、`WAIT`、`RESUME`、`PING`
 - `effective=0` 表示尚未 ACK
 - `payload_json` 用于窄扩展，避免过快膨胀顶层 schema
+- `message_id` 即本地 SQLite 真源中的稳定主键，对应当前 store 侧 `record_id` 的角色
+- 本阶段不再额外引入 `message_key`
+  - 原因：该控制面是单机单库场景，不需要第二套文本稳定键
+- 字段命名映射：
+
+| schema 列名 | 当前 service metadata key | 说明 |
+| --- | --- | --- |
+| `command_name` | `command` | schema 侧显式写出动作名 |
+| `target_role` | `role` | schema 侧显式写出目标角色 |
+| `message_id` | `record_id` | 本地主键，不再额外包装 `message_key` |
 
 ### 6.6 `events`
 
@@ -257,7 +265,7 @@ report_path TEXT
 report_commit TEXT
 branch TEXT
 eta_min INTEGER
-source_message_key TEXT
+source_message_id INTEGER
 payload_json TEXT NOT NULL
 created_at TEXT NOT NULL
 UNIQUE (milestone_id, event_seq)
@@ -268,6 +276,16 @@ UNIQUE (milestone_id, event_seq)
 - `event_seq` 继续保持 milestone 级单调递增，用于 audit / render 排序
 - 所有协议证据都落在这里
 - 这张表替代的是 append-only event beads，不是 projection JSONL
+- `event_type` 是 schema 列名；当前 service bag 中的 `event` 键可在 store mapping 时投影到该列
+- `source_message_id` 对应当前 service 里的 `source_message_id`
+- 以下事件变体字段默认不升为一等列，统一进入 `payload_json`：
+  - `ack_of`
+  - `last_seen_gate`
+  - `sync_role`
+  - `allowed_role`
+  - `command_name`
+  - `target_role`
+  - `ping_count`
 
 ## 7. 事务规则
 
@@ -307,7 +325,7 @@ SQLite 只有在写入规则足够明确时才成立：
 
 ## 9. 精简后的 `coord.py` 命令面
 
-## 9.1 当前问题
+### 9.1 当前问题
 
 当前 `coord.py` 暴露了太多扁平的顶层命令。问题不在于协议事件本身没必要，而在于每个协议事件都变成了一个平级 CLI 概念。
 
@@ -322,7 +340,7 @@ SQLite 只有在写入规则足够明确时才成立：
 
 目标：
 
-- 当前扁平顶层命令面：16 个命令
+- 当前扁平顶层命令面：16 个人类面命令 + 1 个 machine-first `apply`
 - 目标顶层命令面：7 个命令
 
 ### Machine-first 入口
@@ -548,6 +566,7 @@ coord.py apply ...
 - `.devcoord/` 进入 `.gitignore`
   - 原因：它是本地控制面状态，不应进入仓库历史
 - `schema_version` 只保留在 SQLite 内部 schema / metadata 中
+  - 具体口径：优先使用 `PRAGMA user_version`
   - 原因：sidecar 文件会重复表达同一事实，增加维护成本
 - schema version 不匹配时直接 fail-closed
   - 原因：本方案采用 fresh-start only，不为旧控制面数据提供迁移链路
