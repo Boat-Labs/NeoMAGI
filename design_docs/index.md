@@ -37,7 +37,10 @@
 8. `design_docs/devcoord_sqlite_control_plane.md`
    - `devcoord` 从 `beads` 解耦后的 SQLite control-plane store 与精简命令面设计。
 
-9. `design_docs/phase1/index.md`
+9. `design_docs/devcoord_sqlite_control_plane_product.md`
+   - `devcoord` SQLite control plane 的产品口径说明：为什么存在、怎么理解、和 `bd` / PostgreSQL / `dev_docs` 的边界。
+
+10. `design_docs/phase1/index.md`
    - 只有在需要 Phase 1 历史设计细节时再进入。
 
 ## 3. 当前默认激活文档
@@ -50,6 +53,7 @@
 - `design_docs/procedure_runtime.md`
 - `design_docs/skill_objects_runtime.md`
 - `design_docs/devcoord_sqlite_control_plane.md`（仅在需要 devcoord / 协作控制面重构时）
+- `design_docs/devcoord_sqlite_control_plane_product.md`（仅在需要产品口径或高层心智模型时）
 
 ## 4. Phase 1 归档入口
 

@@ -4,6 +4,7 @@
 > 日期：2026-03-07
 > 适用范围：仅用于 NeoMAGI 开发协作，不用于产品运行时
 > 相关决议：[`decisions/0050-devcoord-decouple-from-beads-and-use-sqlite-control-plane-store.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0050-devcoord-decouple-from-beads-and-use-sqlite-control-plane-store.md)
+> 产品口径说明：[`design_docs/devcoord_sqlite_control_plane_product.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/devcoord_sqlite_control_plane_product.md)
 
 ## 1. 目的
 
