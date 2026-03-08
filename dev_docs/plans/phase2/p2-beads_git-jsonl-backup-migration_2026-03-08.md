@@ -1,7 +1,7 @@
-# P2 Beads Git-JSONL Backup Migration Draft
+# P2 Beads Git-JSONL Backup Migration
 
 - Date: 2026-03-08
-- Status: draft
+- Status: approved
 - Scope: 项目级 `beads` 备份路径迁移；将当前文档与 closeout 规则从 Dolt remote sync 收敛为 Git 跟踪的 JSONL 备份，不改变 `bd` 本地运行时
 - Track Type: parallel governance / developer-workflow repair track; outside the `P2-M*` product milestone series
 - Driver: 现有 `dolt push` / `dolt pull` 在 Git remote 路径上不稳定，而项目真实需要的是“可恢复备份”，不是 Dolt 远端历史语义
@@ -16,7 +16,7 @@
   - [`.beads/config.yaml`](../../../.beads/config.yaml)
   - [`.beads/README.md`](../../../.beads/README.md)
 - Approval Coupling:
-  - 本计划一旦批准，视为同时批准 ADR 0052；实施首轮需把 `decisions/0052-project-beads-backup-git-tracked-jsonl-exports.md` 从 `proposed` 改为 `accepted`，并同步更新 `decisions/INDEX.md`。
+  - 本计划已批准；ADR 0052 在同一轮文档落地中从 `proposed` 改为 `accepted`，并同步更新 `decisions/INDEX.md`。
 
 ## Context
 
@@ -242,9 +242,9 @@ project git repo
 - 不在本 track 单独新增自动化 smoke test；轻量验证折叠进 `beads-backup-status` 可观测性与 Slice D 的恢复演练。
 - `no-db: true` 评估延后到本方案稳定运行两周后，再按需要创建单独 follow-up issue。
 
-## Output of This Draft
+## Implementation Order
 
-如果批准，实施应分两步：
+实施按两步推进：
 
 1. 先改文档、runbook 和 `just` 入口，让项目口径与真实可靠路径一致。
 2. 再做一次恢复演练，把 JSONL backup 方案从“理论可用”提升为“仓库明确验证过的恢复路径”。
