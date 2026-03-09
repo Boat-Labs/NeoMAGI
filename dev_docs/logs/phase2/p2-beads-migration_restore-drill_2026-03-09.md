@@ -92,6 +92,36 @@ Cross-check:
 
 All three match.
 
+## 8. Mutation → Backup Diff verification
+
+Validates acceptance criterion: "修改 issue 数据后，`.beads/backup/*` 能稳定形成可提交变更".
+
+```
+$ bd create "Drill: verify backup diff after mutation" -t task -p 4 --json
+  → NeoMAGI-bui created (status: open)
+
+$ bd update NeoMAGI-bui --claim --json
+  → status: in_progress
+
+$ bd close NeoMAGI-bui --reason "Drill verification complete" --json
+  → status: closed
+```
+
+After create/update/close cycle:
+
+```
+$ bd backup --force
+Backup complete: 119 issues, 1095 events, 0 comments, 109 deps, 389 labels, 11 config
+
+$ git show --stat HEAD   # bd auto-committed the backup
+  .beads/backup/backup_state.json | 8 ++++----
+  .beads/backup/events.jsonl      | 3 +++
+  .beads/backup/issues.jsonl      | 1 +
+  3 files changed, 8 insertions(+), 4 deletions(-)
+```
+
+Result: issue count went from 118 → 119 (+1 new issue), events from 1092 → 1095 (+3: create, update, close). The backup diff is deterministic and committable.
+
 ## Limitations
 
 - `bd list` (without `--all`) defaults to open issues only (showed 4); `--all` is required for total count verification.
@@ -100,4 +130,5 @@ All three match.
 
 ## Conclusion
 
-JSONL backup + restore path is verified: a clean environment with no pre-existing `.beads/dolt/` can fully recover all 118 issues from `.beads/backup/*.jsonl` via `bd init && bd backup restore`.
+1. **Restore path verified**: A clean environment with no pre-existing `.beads/dolt/` can fully recover all 118 issues from `.beads/backup/*.jsonl` via `bd init && bd backup restore`.
+2. **Mutation → backup diff verified**: After a `bd create/update/close` cycle, `bd backup --force` produces a deterministic, committable diff in `.beads/backup/*` (issues.jsonl +1, events.jsonl +3).
