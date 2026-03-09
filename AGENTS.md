@@ -309,6 +309,7 @@ For more details, see README.md and docs/QUICKSTART.md.
    # If this session changed beads / bd issue data:
    just beads-backup
    git add .beads/backup/
+   git commit -m "bd: backup <date>"
    git push
    git status  # MUST show "up to date with origin"
    ```
