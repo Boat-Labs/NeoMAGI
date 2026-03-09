@@ -15,6 +15,7 @@
 {"created_at":"2026-03-04T09:13:41Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-cws","issue_id":"NeoMAGI-8rc","type":"parent-child"}
 {"created_at":"2026-03-07T23:28:07Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-mk0","issue_id":"NeoMAGI-8y2","type":"discovered-from"}
 {"created_at":"2026-03-04T09:13:27Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-iui","issue_id":"NeoMAGI-9ca","type":"parent-child"}
+{"created_at":"2026-03-09T23:52:54Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-ih2","issue_id":"NeoMAGI-9qy","type":"discovered-from"}
 {"created_at":"2026-03-09T23:48:34Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-ih2","issue_id":"NeoMAGI-ado","type":"discovered-from"}
 {"created_at":"2026-03-09T23:28:18Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-w6d","issue_id":"NeoMAGI-as0","type":"discovered-from"}
 {"created_at":"2026-03-04T09:13:39Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-drh","issue_id":"NeoMAGI-bmt","type":"parent-child"}
