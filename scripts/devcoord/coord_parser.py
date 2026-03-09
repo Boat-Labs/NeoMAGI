@@ -116,7 +116,12 @@ def _add_command_parser(subparsers: Any) -> None:
 def _add_event_parser(subparsers: Any) -> None:
     event_p = subparsers.add_parser("event", help="Protocol events")
     event_sub = event_p.add_subparsers(dest="subcommand", required=True)
+    _add_event_lifecycle_parsers(event_sub)
+    _add_event_recovery_parsers(event_sub)
+    _add_event_watchdog_parsers(event_sub)
 
+
+def _add_event_lifecycle_parsers(event_sub: Any) -> None:
     event_hb_p = event_sub.add_parser("heartbeat", help="Record a heartbeat event")
     event_hb_p.set_defaults(_action="heartbeat")
     event_hb_p.add_argument("--milestone", required=True)
@@ -139,6 +144,8 @@ def _add_event_parser(subparsers: Any) -> None:
     event_pc_p.add_argument("--task", required=True)
     event_pc_p.add_argument("--branch")
 
+
+def _add_event_recovery_parsers(event_sub: Any) -> None:
     event_rc_p = event_sub.add_parser(
         "recovery-check", help="Record a RECOVERY_CHECK event after restart or context loss"
     )
@@ -158,6 +165,8 @@ def _add_event_parser(subparsers: Any) -> None:
     event_ss_p.add_argument("--target-commit", required=True)
     event_ss_p.add_argument("--task", required=True)
 
+
+def _add_event_watchdog_parsers(event_sub: Any) -> None:
     event_sd_p = event_sub.add_parser(
         "stale-detected", help="Record a suspected stale role after timeout checks"
     )
