@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-09T22:56:22+00:00",
+  "generated_at": "2026-03-09T23:01:20+00:00",
   "policy_version": 1,
   "thresholds": {
     "prod": {
@@ -31,116 +31,6 @@
     }
   },
   "block_findings": [
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_branches",
-      "path": "scripts/m6_eval.py",
-      "actual": 8,
-      "limit": 6,
-      "fingerprint": "function_branches::scripts/m6_eval.py::_send_and_collect::97",
-      "symbol": "_send_and_collect",
-      "line": 97
-    },
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_lines",
-      "path": "scripts/m6_eval.py",
-      "actual": 60,
-      "limit": 50,
-      "fingerprint": "function_lines::scripts/m6_eval.py::_send_and_collect::97",
-      "symbol": "_send_and_collect",
-      "line": 97
-    },
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_lines",
-      "path": "scripts/m6_eval.py",
-      "actual": 51,
-      "limit": 50,
-      "fingerprint": "function_lines::scripts/m6_eval.py::run_t10::164",
-      "symbol": "run_t10",
-      "line": 164
-    },
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_lines",
-      "path": "scripts/m6_eval.py",
-      "actual": 55,
-      "limit": 50,
-      "fingerprint": "function_lines::scripts/m6_eval.py::run_t13::294",
-      "symbol": "run_t13",
-      "line": 294
-    },
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_lines",
-      "path": "scripts/m6_eval.py",
-      "actual": 51,
-      "limit": 50,
-      "fingerprint": "function_lines::scripts/m6_eval.py::run_t15::400",
-      "symbol": "run_t15",
-      "line": 400
-    },
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_nesting",
-      "path": "scripts/m6_eval.py",
-      "actual": 5,
-      "limit": 3,
-      "fingerprint": "function_nesting::scripts/m6_eval.py::_send_and_collect::97",
-      "symbol": "_send_and_collect",
-      "line": 97
-    },
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_nesting",
-      "path": "scripts/m6_eval.py",
-      "actual": 4,
-      "limit": 3,
-      "fingerprint": "function_nesting::scripts/m6_eval.py::run_t11::217",
-      "symbol": "run_t11",
-      "line": 217
-    },
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_nesting",
-      "path": "scripts/m6_eval.py",
-      "actual": 4,
-      "limit": 3,
-      "fingerprint": "function_nesting::scripts/m6_eval.py::run_t12::252",
-      "symbol": "run_t12",
-      "line": 252
-    },
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_nesting",
-      "path": "scripts/m6_eval.py",
-      "actual": 4,
-      "limit": 3,
-      "fingerprint": "function_nesting::scripts/m6_eval.py::run_t14::351",
-      "symbol": "run_t14",
-      "line": 351
-    },
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_nesting",
-      "path": "scripts/m6_eval.py",
-      "actual": 4,
-      "limit": 3,
-      "fingerprint": "function_nesting::scripts/m6_eval.py::run_t16::453",
-      "symbol": "run_t16",
-      "line": 453
-    },
     {
       "severity": "block",
       "group": "scripts",

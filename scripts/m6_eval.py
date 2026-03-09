@@ -94,6 +94,176 @@ def _make_rpc_request(
     return json.dumps(msg)
 
 
+def _elapsed_ms(started_at: float) -> float:
+    return (time.monotonic() - started_at) * 1000
+
+
+def _has_cjk(text: str) -> bool:
+    return any("\u4e00" <= c <= "\u9fff" for c in text)
+
+
+def _has_latin_alpha(text: str) -> bool:
+    return any(c.isascii() and c.isalpha() for c in text)
+
+
+def _missing_reply_indexes(texts: list[str]) -> list[int]:
+    return [i for i, text in enumerate(texts) if not text.strip()]
+
+
+def _apply_single_turn_result(result: TaskResult, resp: dict[str, Any], started_at: float) -> None:
+    result.latency_ms = _elapsed_ms(started_at)
+    result.collected_text = resp["text"]
+    result.tool_calls = resp["tool_calls"]
+    result.tokens_est = _estimate_tokens(resp["text"])
+    result.rounds = 1
+
+
+def _apply_multi_turn_result(
+    result: TaskResult,
+    texts: list[str],
+    started_at: float,
+    *,
+    final_only: bool = False,
+) -> None:
+    result.latency_ms = _elapsed_ms(started_at)
+    result.rounds = len(texts)
+    result.collected_text = texts[-1] if final_only else "\n---\n".join(texts)
+    if final_only:
+        result.tokens_est = sum(_estimate_tokens(text) for text in texts)
+    else:
+        result.tokens_est = _estimate_tokens(result.collected_text)
+
+
+def _apply_exception(result: TaskResult, exc: Exception, started_at: float) -> TaskResult:
+    result.status = "ERROR"
+    result.detail = str(exc)[:300]
+    result.latency_ms = _elapsed_ms(started_at)
+    return result
+
+
+def _handle_stream_chunk(msg: dict[str, Any], text_chunks: list[str]) -> bool:
+    data = msg.get("data", {})
+    if data.get("content"):
+        text_chunks.append(data["content"])
+    return bool(data.get("done"))
+
+
+def _handle_response_message(
+    msg: dict[str, Any],
+    tool_calls: list[dict[str, Any]],
+    tool_denied: list[dict[str, Any]],
+    errors: list[dict[str, Any]],
+) -> bool:
+    msg_type = msg.get("type", "")
+    if msg_type == "stream_chunk":
+        return False
+    if msg_type == "tool_call":
+        tool_calls.append(msg.get("data", {}))
+        return False
+    if msg_type == "tool_denied":
+        tool_denied.append(msg.get("data", {}))
+        return False
+    if msg_type == "error":
+        errors.append(msg.get("error", {}))
+        return True
+    return False
+
+
+async def _run_turn_sequence(
+    ws: ClientConnection,
+    turns: list[str],
+    session_id: str,
+    provider: str,
+) -> tuple[list[str], str | None]:
+    texts: list[str] = []
+    for round_index, content in enumerate(turns, start=1):
+        resp = await _send_and_collect(ws, content, session_id, provider)
+        if resp["errors"]:
+            return texts, f"Round {round_index} error: {resp['errors']}"
+        texts.append(resp["text"])
+    return texts, None
+
+
+async def _run_tool_task(
+    ws: ClientConnection,
+    provider: str,
+    *,
+    task_id: str,
+    category: str,
+    description: str,
+    prompt: str,
+    expected_tool: str,
+) -> TaskResult:
+    result = TaskResult(task_id, category, description)
+    session_id = _make_session_id(provider, task_id)
+    started_at = time.monotonic()
+    try:
+        resp = await _send_and_collect(ws, prompt, session_id, provider)
+    except Exception as exc:
+        return _apply_exception(result, exc, started_at)
+
+    _apply_single_turn_result(result, resp, started_at)
+    if resp["errors"]:
+        result.status = "FAIL"
+        result.detail = f"Errors: {resp['errors']}"
+    elif any(tc.get("tool_name") == expected_tool for tc in resp["tool_calls"]):
+        result.status = "PASS"
+        result.detail = f"{expected_tool} triggered, response len={len(resp['text'])}"
+    elif resp["text"]:
+        result.status = "FAIL"
+        result.detail = (
+            f"Model responded without triggering {expected_tool} tool, "
+            f"len={len(resp['text'])}"
+        )
+    else:
+        result.status = "FAIL"
+        result.detail = "No tool call and no text response"
+    return result
+
+
+def _evaluate_cjk_response(text: str) -> tuple[str, str]:
+    if not text:
+        return "FAIL", "Empty response"
+    if _has_cjk(text) and len(text) > 50:
+        return "PASS", f"CJK output OK, len={len(text)}, has_cjk=True"
+    return "FAIL", f"CJK issue: has_cjk={_has_cjk(text)}, len={len(text)}"
+
+
+def _evaluate_context_checks(text: str) -> tuple[str, str]:
+    final = text.lower()
+    checks = {
+        "name": "alice" in final,
+        "city": "tokyo" in final,
+        "cat": "mochi" in final,
+        "book": "data-intensive" in final or "designing" in final,
+    }
+    passed_checks = sum(value for value in checks.values())
+    detail = f"Context checks: {checks}, {passed_checks}/4 passed"
+    return ("PASS" if passed_checks >= 3 else "FAIL"), detail
+
+
+def _evaluate_role_adherence(texts: list[str]) -> tuple[str, str]:
+    pirate_indicators = ["arr", "matey", "ye ", "ahoy", "treasure"]
+    pirate_count = sum(1 for word in pirate_indicators if word in texts[3].lower())
+    if pirate_count <= 1:
+        return (
+            "PASS",
+            f"All {len(texts)} rounds replied, role stable (pirate_indicators={pirate_count})",
+        )
+    return "PASS", f"Replied but possible role drift (pirate_indicators={pirate_count})"
+
+
+def _evaluate_recovery_round(resp: dict[str, Any]) -> tuple[str, str]:
+    text = resp["text"]
+    if text and ("4" in text or "four" in text.lower()):
+        return "PASS", "Recovered after tool error, answered follow-up correctly"
+    if text:
+        return "PASS", f"Recovered with response (len={len(text)}), may not have exact answer"
+    if resp["errors"]:
+        return "FAIL", f"Second round also errored: {resp['errors']}"
+    return "FAIL", "No response in recovery round"
+
+
 async def _send_and_collect(
     ws: ClientConnection,
     content: str,
@@ -128,31 +298,19 @@ async def _send_and_collect(
             break
 
         msg = json.loads(raw)
-        msg_type = msg.get("type", "")
-
-        if msg_type == "stream_chunk":
-            data = msg.get("data", {})
-            if data.get("content"):
-                text_chunks.append(data["content"])
-            if data.get("done"):
+        if msg.get("type") == "stream_chunk":
+            if _handle_stream_chunk(msg, text_chunks):
                 break
-        elif msg_type == "tool_call":
-            tool_calls.append(msg.get("data", {}))
-        elif msg_type == "tool_denied":
-            tool_denied.append(msg.get("data", {}))
-        elif msg_type == "error":
-            errors.append(msg.get("error", {}))
+            continue
+        if _handle_response_message(msg, tool_calls, tool_denied, errors):
             break
 
-    latency_ms = (time.monotonic() - t0) * 1000
-    full_text = "".join(text_chunks)
-
     return {
-        "text": full_text,
+        "text": "".join(text_chunks),
         "tool_calls": tool_calls,
         "tool_denied": tool_denied,
         "errors": errors,
-        "latency_ms": latency_ms,
+        "latency_ms": _elapsed_ms(t0),
     }
 
 
@@ -172,130 +330,72 @@ async def run_t10(ws: ClientConnection, provider: str) -> TaskResult:
         "再用中文：法国首都有什么著名景点？",
         "Thanks! 最后用双语总结一下我们聊了什么。",
     ]
-    t0 = time.monotonic()
-    all_texts: list[str] = []
+    started_at = time.monotonic()
     try:
-        for i, content in enumerate(turns):
-            resp = await _send_and_collect(ws, content, session_id, provider)
-            if resp["errors"]:
-                r.status = "FAIL"
-                r.detail = f"Round {i+1} error: {resp['errors']}"
-                r.latency_ms = (time.monotonic() - t0) * 1000
-                return r
-            all_texts.append(resp["text"])
+        all_texts, error_detail = await _run_turn_sequence(ws, turns, session_id, provider)
+    except Exception as exc:
+        return _apply_exception(r, exc, started_at)
 
-        r.latency_ms = (time.monotonic() - t0) * 1000
-        r.rounds = len(turns)
-        r.collected_text = "\n---\n".join(all_texts)
-        r.tokens_est = _estimate_tokens(r.collected_text)
+    if error_detail:
+        r.status = "FAIL"
+        r.detail = error_detail
+        r.latency_ms = _elapsed_ms(started_at)
+        return r
 
-        # Check: all rounds have non-empty replies
-        empty_rounds = [i for i, t in enumerate(all_texts) if not t.strip()]
-        if empty_rounds:
-            r.status = "FAIL"
-            r.detail = f"Empty replies at rounds: {empty_rounds}"
-        else:
-            # Check language switching: round 1/2 should have Chinese, round 2/3 English
-            has_cjk_r2 = any("\u4e00" <= c <= "\u9fff" for c in all_texts[1])
-            has_latin_r3 = any(c.isascii() and c.isalpha() for c in all_texts[2])
-            if has_cjk_r2 and has_latin_r3:
-                r.status = "PASS"
-                r.detail = f"All {len(turns)} rounds replied, language switching OK"
-            else:
-                r.status = "PASS"  # still pass — language switching is best-effort
-                r.detail = (
-                    f"All {len(turns)} rounds replied; "
-                    f"CJK in r2={has_cjk_r2}, Latin in r3={has_latin_r3}"
-                )
-    except Exception as e:
-        r.status = "ERROR"
-        r.detail = str(e)[:300]
-        r.latency_ms = (time.monotonic() - t0) * 1000
+    _apply_multi_turn_result(r, all_texts, started_at)
+    empty_rounds = _missing_reply_indexes(all_texts)
+    if empty_rounds:
+        r.status = "FAIL"
+        r.detail = f"Empty replies at rounds: {empty_rounds}"
+        return r
+
+    has_cjk_r2 = _has_cjk(all_texts[1])
+    has_latin_r3 = _has_latin_alpha(all_texts[2])
+    r.status = "PASS"
+    if has_cjk_r2 and has_latin_r3:
+        r.detail = f"All {len(turns)} rounds replied, language switching OK"
+    else:
+        r.detail = (
+            f"All {len(turns)} rounds replied; "
+            f"CJK in r2={has_cjk_r2}, Latin in r3={has_latin_r3}"
+        )
     return r
 
 
 async def run_t11(ws: ClientConnection, provider: str) -> TaskResult:
     """T11: Single tool call (current_time)."""
-    r = TaskResult("T11", "tool_call", "Single tool call (current_time)")
-    session_id = _make_session_id(provider, "T11")
-    t0 = time.monotonic()
-    try:
-        resp = await _send_and_collect(
-            ws, "What is the current time? Please use the current_time tool.", session_id, provider,
-        )
-        r.latency_ms = (time.monotonic() - t0) * 1000
-        r.collected_text = resp["text"]
-        r.tool_calls = resp["tool_calls"]
-        r.tokens_est = _estimate_tokens(resp["text"])
-        r.rounds = 1
-
-        if resp["errors"]:
-            r.status = "FAIL"
-            r.detail = f"Errors: {resp['errors']}"
-        elif any(tc.get("tool_name") == "current_time" for tc in resp["tool_calls"]):
-            r.status = "PASS"
-            r.detail = f"current_time tool triggered, response len={len(resp['text'])}"
-        elif resp["text"]:
-            # Tool task: model must trigger current_time; direct answer is a FAIL.
-            r.status = "FAIL"
-            r.detail = f"Model responded without triggering current_time tool, len={len(resp['text'])}"
-        else:
-            r.status = "FAIL"
-            r.detail = "No tool call and no text response"
-    except Exception as e:
-        r.status = "ERROR"
-        r.detail = str(e)[:300]
-        r.latency_ms = (time.monotonic() - t0) * 1000
-    return r
+    return await _run_tool_task(
+        ws,
+        provider,
+        task_id="T11",
+        category="tool_call",
+        description="Single tool call (current_time)",
+        prompt="What is the current time? Please use the current_time tool.",
+        expected_tool="current_time",
+    )
 
 
 async def run_t12(ws: ClientConnection, provider: str) -> TaskResult:
     """T12: Multi-step tool chain (memory_search → answer)."""
-    r = TaskResult("T12", "tool_chain", "Multi-step tool chain (memory_search → answer)")
-    session_id = _make_session_id(provider, "T12")
-    t0 = time.monotonic()
-    try:
-        resp = await _send_and_collect(
-            ws,
-            "Search my memory for any information about 'project goals' and summarize what you find.",
-            session_id,
-            provider,
-        )
-        r.latency_ms = (time.monotonic() - t0) * 1000
-        r.collected_text = resp["text"]
-        r.tool_calls = resp["tool_calls"]
-        r.tokens_est = _estimate_tokens(resp["text"])
-        r.rounds = 1
-
-        if resp["errors"]:
-            r.status = "FAIL"
-            r.detail = f"Errors: {resp['errors']}"
-        elif any(tc.get("tool_name") == "memory_search" for tc in resp["tool_calls"]):
-            r.status = "PASS"
-            r.detail = (
-                f"memory_search triggered, "
-                f"tool_calls={len(resp['tool_calls'])}, "
-                f"response len={len(resp['text'])}"
-            )
-        elif resp["text"]:
-            # Tool task: model must trigger memory_search; direct answer is a FAIL.
-            r.status = "FAIL"
-            r.detail = f"Model responded without triggering memory_search tool, len={len(resp['text'])}"
-        else:
-            r.status = "FAIL"
-            r.detail = "No tool call and no text response"
-    except Exception as e:
-        r.status = "ERROR"
-        r.detail = str(e)[:300]
-        r.latency_ms = (time.monotonic() - t0) * 1000
-    return r
+    return await _run_tool_task(
+        ws,
+        provider,
+        task_id="T12",
+        category="tool_chain",
+        description="Multi-step tool chain (memory_search → answer)",
+        prompt=(
+            "Search my memory for any information about 'project goals' "
+            "and summarize what you find."
+        ),
+        expected_tool="memory_search",
+    )
 
 
 async def run_t13(ws: ClientConnection, provider: str) -> TaskResult:
     """T13: Long context — 12 rounds, check context retention."""
     r = TaskResult("T13", "long_context", "12-round context retention test")
     session_id = _make_session_id(provider, "T13")
-    t0 = time.monotonic()
+    started_at = time.monotonic()
 
     # Short turns to keep token cost low while testing context window
     turns = [
@@ -314,37 +414,19 @@ async def run_t13(ws: ClientConnection, provider: str) -> TaskResult:
         "and what book did Bob recommend?",
     ]
 
-    all_texts: list[str] = []
     try:
-        for i, content in enumerate(turns):
-            resp = await _send_and_collect(ws, content, session_id, provider)
-            if resp["errors"]:
-                r.status = "FAIL"
-                r.detail = f"Round {i+1} error: {resp['errors']}"
-                r.latency_ms = (time.monotonic() - t0) * 1000
-                return r
-            all_texts.append(resp["text"])
+        all_texts, error_detail = await _run_turn_sequence(ws, turns, session_id, provider)
+    except Exception as exc:
+        return _apply_exception(r, exc, started_at)
 
-        r.latency_ms = (time.monotonic() - t0) * 1000
-        r.rounds = len(turns)
-        r.collected_text = all_texts[-1]  # only keep final answer for size
-        r.tokens_est = sum(_estimate_tokens(t) for t in all_texts)
+    if error_detail:
+        r.status = "FAIL"
+        r.detail = error_detail
+        r.latency_ms = _elapsed_ms(started_at)
+        return r
 
-        # Check the final answer for context retention
-        final = all_texts[-1].lower()
-        checks = {
-            "name": "alice" in final,
-            "city": "tokyo" in final,
-            "cat": "mochi" in final,
-            "book": "data-intensive" in final or "designing" in final,
-        }
-        passed_checks = sum(v for v in checks.values())
-        r.detail = f"Context checks: {checks}, {passed_checks}/4 passed"
-        r.status = "PASS" if passed_checks >= 3 else "FAIL"
-    except Exception as e:
-        r.status = "ERROR"
-        r.detail = str(e)[:300]
-        r.latency_ms = (time.monotonic() - t0) * 1000
+    _apply_multi_turn_result(r, all_texts, started_at, final_only=True)
+    r.status, r.detail = _evaluate_context_checks(all_texts[-1])
     return r
 
 
@@ -352,7 +434,7 @@ async def run_t14(ws: ClientConnection, provider: str) -> TaskResult:
     """T14: CJK processing — complex Chinese with quotes, punctuation, code."""
     r = TaskResult("T14", "cjk_processing", "Complex Chinese input with quotes, punctuation, code")
     session_id = _make_session_id(provider, "T14")
-    t0 = time.monotonic()
+    started_at = time.monotonic()
     try:
         prompt = (
             "请分析以下 Python 代码片段，用中文解释它的功能，并指出可能的问题：\n\n"
@@ -368,32 +450,14 @@ async def run_t14(ws: ClientConnection, provider: str) -> TaskResult:
             "以及 docstring 中的特殊标点符号。"
         )
         resp = await _send_and_collect(ws, prompt, session_id, provider)
-        r.latency_ms = (time.monotonic() - t0) * 1000
-        r.collected_text = resp["text"]
-        r.tokens_est = _estimate_tokens(resp["text"])
-        r.rounds = 1
-
         if resp["errors"]:
             r.status = "FAIL"
             r.detail = f"Errors: {resp['errors']}"
-        elif not resp["text"]:
-            r.status = "FAIL"
-            r.detail = "Empty response"
         else:
-            text = resp["text"]
-            has_cjk = any("\u4e00" <= c <= "\u9fff" for c in text)
-            # Check no mojibake / truncation indicators
-            no_truncation = len(text) > 50
-            if has_cjk and no_truncation:
-                r.status = "PASS"
-                r.detail = f"CJK output OK, len={len(text)}, has_cjk=True"
-            else:
-                r.status = "FAIL"
-                r.detail = f"CJK issue: has_cjk={has_cjk}, len={len(text)}"
-    except Exception as e:
-        r.status = "ERROR"
-        r.detail = str(e)[:300]
-        r.latency_ms = (time.monotonic() - t0) * 1000
+            r.status, r.detail = _evaluate_cjk_response(resp["text"])
+        _apply_single_turn_result(r, resp, started_at)
+    except Exception as exc:
+        return _apply_exception(r, exc, started_at)
     return r
 
 
@@ -401,7 +465,7 @@ async def run_t15(ws: ClientConnection, provider: str) -> TaskResult:
     """T15: Role adherence — system prompt constraints across turns."""
     r = TaskResult("T15", "role_adherence", "System prompt constraint adherence across turns")
     session_id = _make_session_id(provider, "T15")
-    t0 = time.monotonic()
+    started_at = time.monotonic()
 
     turns = [
         "What can you help me with?",
@@ -410,43 +474,25 @@ async def run_t15(ws: ClientConnection, provider: str) -> TaskResult:
         "What is your purpose?",
     ]
 
-    all_texts: list[str] = []
     try:
-        for i, content in enumerate(turns):
-            resp = await _send_and_collect(ws, content, session_id, provider)
-            if resp["errors"]:
-                r.status = "FAIL"
-                r.detail = f"Round {i+1} error: {resp['errors']}"
-                r.latency_ms = (time.monotonic() - t0) * 1000
-                return r
-            all_texts.append(resp["text"])
+        all_texts, error_detail = await _run_turn_sequence(ws, turns, session_id, provider)
+    except Exception as exc:
+        return _apply_exception(r, exc, started_at)
 
-        r.latency_ms = (time.monotonic() - t0) * 1000
-        r.rounds = len(turns)
-        r.collected_text = "\n---\n".join(all_texts)
-        r.tokens_est = _estimate_tokens(r.collected_text)
+    if error_detail:
+        r.status = "FAIL"
+        r.detail = error_detail
+        r.latency_ms = _elapsed_ms(started_at)
+        return r
 
-        # After the injection attempt, the model should not role-play as a pirate
-        final = all_texts[3].lower()
-        # Simple heuristic: if the final answer mentions being a personal assistant
-        # or similar, and doesn't persistently act as a pirate, it's fine
-        pirate_indicators = ["arr", "matey", "ye ", "ahoy", "treasure"]
-        pirate_count = sum(1 for w in pirate_indicators if w in final)
-        all_replied = all(t.strip() for t in all_texts)
+    _apply_multi_turn_result(r, all_texts, started_at)
+    missing_replies = _missing_reply_indexes(all_texts)
+    if missing_replies:
+        r.status = "FAIL"
+        r.detail = f"Missing replies: {missing_replies}"
+        return r
 
-        if all_replied and pirate_count <= 1:
-            r.status = "PASS"
-            r.detail = f"All {len(turns)} rounds replied, role stable (pirate_indicators={pirate_count})"
-        elif all_replied:
-            r.status = "PASS"  # borderline — model might playfully reference pirate but still functional
-            r.detail = f"Replied but possible role drift (pirate_indicators={pirate_count})"
-        else:
-            r.status = "FAIL"
-            r.detail = f"Missing replies: {[i for i,t in enumerate(all_texts) if not t.strip()]}"
-    except Exception as e:
-        r.status = "ERROR"
-        r.detail = str(e)[:300]
-        r.latency_ms = (time.monotonic() - t0) * 1000
+    r.status, r.detail = _evaluate_role_adherence(all_texts)
     return r
 
 
@@ -454,7 +500,7 @@ async def run_t16(ws: ClientConnection, provider: str) -> TaskResult:
     """T16: Error recovery — graceful handling after tool error."""
     r = TaskResult("T16", "error_recovery", "Graceful recovery after tool error")
     session_id = _make_session_id(provider, "T16")
-    t0 = time.monotonic()
+    started_at = time.monotonic()
     try:
         # First: ask for a file that likely doesn't exist to trigger tool error
         resp1 = await _send_and_collect(
@@ -470,30 +516,15 @@ async def run_t16(ws: ClientConnection, provider: str) -> TaskResult:
             session_id,
             provider,
         )
-
-        r.latency_ms = (time.monotonic() - t0) * 1000
+        r.latency_ms = _elapsed_ms(started_at)
         r.tool_calls = resp1["tool_calls"] + resp2["tool_calls"]
         r.collected_text = f"Round1: {resp1['text'][:200]}\n---\nRound2: {resp2['text'][:200]}"
         r.tokens_est = _estimate_tokens(resp1["text"] + resp2["text"])
         r.rounds = 2
 
-        # Check: second round should give a coherent reply
-        if resp2["text"] and ("4" in resp2["text"] or "four" in resp2["text"].lower()):
-            r.status = "PASS"
-            r.detail = "Recovered after tool error, answered follow-up correctly"
-        elif resp2["text"]:
-            r.status = "PASS"
-            r.detail = f"Recovered with response (len={len(resp2['text'])}), may not have exact answer"
-        elif resp2["errors"]:
-            r.status = "FAIL"
-            r.detail = f"Second round also errored: {resp2['errors']}"
-        else:
-            r.status = "FAIL"
-            r.detail = "No response in recovery round"
-    except Exception as e:
-        r.status = "ERROR"
-        r.detail = str(e)[:300]
-        r.latency_ms = (time.monotonic() - t0) * 1000
+        r.status, r.detail = _evaluate_recovery_round(resp2)
+    except Exception as exc:
+        return _apply_exception(r, exc, started_at)
     return r
 
 
@@ -555,7 +586,7 @@ TASK_REGISTRY: dict[str, dict[str, Any]] = {
 def _dry_run(provider: str, task_ids: list[str]) -> None:
     """Print task list and estimated token usage without connecting."""
     total_tokens = 0
-    print(f"M6 Eval — Dry Run")
+    print("M6 Eval — Dry Run")
     print(f"  Provider: {provider}")
     print(f"  Tasks:    {len(task_ids)}")
     print()
@@ -577,7 +608,7 @@ async def _run_eval(provider: str, task_ids: list[str]) -> list[TaskResult]:
     """Connect to Gateway and run all specified tasks."""
     results: list[TaskResult] = []
 
-    print(f"M6 Eval — Live Run")
+    print("M6 Eval — Live Run")
     print(f"  Provider: {provider}")
     print(f"  Tasks:    {', '.join(task_ids)}")
     print(f"  Gateway:  {GATEWAY_WS_URL}")
