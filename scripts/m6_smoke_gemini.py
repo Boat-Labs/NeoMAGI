@@ -16,7 +16,9 @@ import json
 import os
 import sys
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 # Load .env from project root (worktree or main repo)
 _project_root = Path(__file__).resolve().parent.parent
@@ -87,6 +89,62 @@ class SmokeResult:
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token for mixed CJK/Latin."""
     return max(1, len(text) // 4)
+
+
+def _elapsed_ms(started_at: float) -> float:
+    return (time.monotonic() - started_at) * 1000
+
+
+async def _collect_stream_events(
+    stream: AsyncIterator[ContentDelta | ToolCallsComplete],
+) -> list[Any]:
+    events: list[Any] = []
+    async for event in stream:
+        events.append(event)
+    return events
+
+
+def _extract_first_tool_call(events: list[Any]) -> dict[str, Any] | None:
+    for event in events:
+        if isinstance(event, ToolCallsComplete) and event.tool_calls:
+            return event.tool_calls[0]
+    return None
+
+
+def _append_tool_interaction(
+    messages: list[dict[str, Any]],
+    tool_call: dict[str, Any],
+    tool_result: dict[str, Any],
+) -> None:
+    messages.append({
+        "role": "assistant",
+        "tool_calls": [{
+            "id": tool_call["id"],
+            "type": "function",
+            "function": {
+                "name": tool_call["name"],
+                "arguments": tool_call["arguments"],
+            },
+        }],
+    })
+    messages.append({
+        "role": "tool",
+        "tool_call_id": tool_call["id"],
+        "content": json.dumps(tool_result),
+    })
+
+
+def _collect_content_text(events: list[Any]) -> str:
+    return "".join(event.text for event in events if isinstance(event, ContentDelta))
+
+
+def _is_weather_followup_answer(text: str) -> bool:
+    normalized = text.lower()
+    return bool(text) and (
+        "18" in text
+        or "cloud" in normalized
+        or "paris" in normalized
+    )
 
 
 async def test_basic_chat(client: OpenAICompatModelClient) -> SmokeResult:
@@ -192,54 +250,36 @@ async def test_multi_turn_tool_loop(client: OpenAICompatModelClient) -> SmokeRes
         ]
 
         # Turn 1: expect tool call
-        events1 = []
-        async for event in client.chat_stream_with_tools(
-            messages=messages, model=MODEL, tools=[TOOL_DEF],
-        ):
-            events1.append(event)
-
-        tool_completes = [e for e in events1 if isinstance(e, ToolCallsComplete)]
-        if not tool_completes or not tool_completes[0].tool_calls:
+        events1 = await _collect_stream_events(
+            client.chat_stream_with_tools(messages=messages, model=MODEL, tools=[TOOL_DEF])
+        )
+        tool_call = _extract_first_tool_call(events1)
+        if not tool_call:
             r.detail = "Turn 1: no tool call returned"
-            r.duration_ms = (time.monotonic() - t0) * 1000
+            r.duration_ms = _elapsed_ms(t0)
             return r
 
-        tc = tool_completes[0].tool_calls[0]
-
-        # Append assistant tool_call + tool result
-        messages.append({
-            "role": "assistant",
-            "tool_calls": [{
-                "id": tc["id"],
-                "type": "function",
-                "function": {"name": tc["name"], "arguments": tc["arguments"]},
-            }],
-        })
-        messages.append({
-            "role": "tool",
-            "tool_call_id": tc["id"],
-            "content": json.dumps({"temperature": "18°C", "condition": "Cloudy"}),
-        })
+        _append_tool_interaction(
+            messages,
+            tool_call,
+            {"temperature": "18°C", "condition": "Cloudy"},
+        )
 
         # Turn 2: expect final text answer
-        events2 = []
-        async for event in client.chat_stream_with_tools(
-            messages=messages, model=MODEL, tools=[TOOL_DEF],
-        ):
-            events2.append(event)
-
-        content_deltas = [e for e in events2 if isinstance(e, ContentDelta)]
-        full_text = "".join(e.text for e in content_deltas)
-        r.duration_ms = (time.monotonic() - t0) * 1000
+        events2 = await _collect_stream_events(
+            client.chat_stream_with_tools(messages=messages, model=MODEL, tools=[TOOL_DEF])
+        )
+        full_text = _collect_content_text(events2)
+        r.duration_ms = _elapsed_ms(t0)
         r.tokens_est = _estimate_tokens(full_text)
 
-        if full_text and ("18" in full_text or "cloud" in full_text.lower() or "paris" in full_text.lower()):
+        if _is_weather_followup_answer(full_text):
             r.passed = True
             r.detail = f"Final answer len={len(full_text)}"
         else:
             r.detail = f"Unexpected answer: {full_text[:100]}"
     except Exception as e:
-        r.duration_ms = (time.monotonic() - t0) * 1000
+        r.duration_ms = _elapsed_ms(t0)
         r.detail = str(e)[:200]
     return r
 
@@ -340,7 +380,7 @@ async def main() -> int:
         print("ERROR: GEMINI_API_KEY not set in .env")
         return 1
 
-    print(f"M6 Gemini Smoke Test")
+    print("M6 Gemini Smoke Test")
     print(f"  model:    {MODEL}")
     print(f"  base_url: {BASE_URL}")
     print()

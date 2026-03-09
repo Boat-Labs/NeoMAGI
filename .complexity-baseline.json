@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-09T23:01:20+00:00",
+  "generated_at": "2026-03-09T23:03:46+00:00",
   "policy_version": 1,
   "thresholds": {
     "prod": {
@@ -31,17 +31,6 @@
     }
   },
   "block_findings": [
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_lines",
-      "path": "scripts/m6_smoke_gemini.py",
-      "actual": 60,
-      "limit": 50,
-      "fingerprint": "function_lines::scripts/m6_smoke_gemini.py::test_multi_turn_tool_loop::185",
-      "symbol": "test_multi_turn_tool_loop",
-      "line": 185
-    },
     {
       "severity": "block",
       "group": "prod",
