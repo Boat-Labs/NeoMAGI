@@ -374,3 +374,36 @@
 - Evidence: commit `7b3a60a`；merge `eaa56dd`；`uv run pytest -q tests/test_devcoord.py` 96 passed；全量 990 passed；计划 `dev_docs/plans/phase2/p2-devcoord-stage-c_grouped-cli-surface_2026-03-07.md`
 - Next: 进入 `Stage D` beads cutover / closeout hardening 的计划与实施准备
 - Risk: 无
+
+## 2026-03-07 (local) | P2-Devcoord Stage D
+- Status: done
+- Done: Devcoord Stage D（beads cutover / closeout hardening）已完成并验收通过 — `scripts/devcoord` steady-state runtime 已 hard cutover 到 SQLite-only，`BeadsCoordStore`、legacy beads path/flags 与 dual-backend 心智全部退役；`.devcoord/control.db` 成为唯一 control-plane SSOT，active governance docs / skills / runbook 已统一切到 SQLite 口径，devcoord control-plane 写入不再触发 beads sync
+- Track: 并行开发流程修复轨；不属于 `P2-M*` 产品里程碑序列
+- Evidence: implementation `00d09ae`；merge `25bd2c1`；计划 `dev_docs/plans/phase2/p2-devcoord-stage-d_beads-cutover-closeout-hardening_2026-03-07.md`；runbook `dev_docs/devcoord/sqlite_control_plane_runtime.md`
+- Validation: 全量 984 tests passed；retired flags fail-fast、split-brain guard、SQLite-only closeout 路径与 active doc cutover 已覆盖
+- Next: 执行独立的 SQLite control-plane 达成性验证，确认协议语义、事务原子性与 smoke evidence 全部闭环
+- Risk: 无阻断风险；设计达成性仍需单独验证出结论
+
+## 2026-03-08 (local) | P2-Devcoord SQLite Validation
+- Status: done
+- Done: Devcoord SQLite control-plane 达成性验证完成，结论为 `ACHIEVED` — 补齐 `PROTO-07` 的 `STOP / WAIT / RESUME / PING` command-send 覆盖、`PROTO-08` 的 ACK / gate-close 单事务原子性、`STA-03` 的 `journal_mode=WAL` 与 `busy_timeout` 校验、`PROJ-04` projection 篡改后重建验证，以及 `CLI-05` runtime docs 对 17 个 grouped commands 的 help smoke
+- Track: 并行验证轨；不属于 `P2-M*` 产品里程碑序列
+- Evidence: commit `b256d23`；计划 `dev_docs/plans/phase2/p2-devcoord_sqlite-control-plane-validation_2026-03-07.md`
+- Validation: `tests/test_devcoord.py` 126 passed（93 existing + 33 new）；临时 clone 中的 `E2E-01` / `E2E-02` / `CUT-01` / `CUT-02` / `CUT-03` smoke 全部通过
+- Next: Devcoord SQLite cutover 轨道可视为 achieved 并转入常规维护
+- Risk: 无
+
+## 2026-03-08 (local) | Complexity Governance
+- Status: done
+- Done: 复杂度治理正式落地 — ADR 0051 accepted，仓库引入 target/block 双层复杂度预算与 ratchet 机制，`.complexity-baseline.json` 成为 block 级技术债台账，`just lint` 新增复杂度回退保护，同时补充 `just complexity-report` / `just complexity-baseline` 命令；随后完成 `scripts/devcoord/service.py` 与 agent loop helpers 的拆分，并修复合并后超线热点以满足新预算
+- Evidence: commits `1ce3255` / `5cc7ba0` / `eda2680` / `b1e5393`；决议 `decisions/0051-adopt-code-complexity-budgets-and-ratchet-governance.md`
+- Next: 后续改动按 ratchet 规则逐步压低 baseline，优先继续治理 devcoord / agent 热点文件
+- Risk: 现有 baseline 仍保留部分历史复杂度债务，但新增或恶化的 block 问题已被门禁拦截
+
+## 2026-03-09 (local) | Beads Git-JSONL Backup Migration
+- Status: done
+- Done: beads 项目级备份路径已从 Dolt remote sync 迁移到 Git-tracked JSONL exports — 计划获批并执行，ADR 0052 accepted；`AGENTS.md` / `CLAUDE.md` / `.beads/README.md` / `justfile` 已统一到 `just beads-backup -> git push` 的 canonical workflow，`beads-pull` / `beads-push` 进入 deprecation 过渡，`.beads/config.yaml` 中旧 `sync.git-remote` 已注释废弃
+- Evidence: 计划 `dev_docs/plans/phase2/p2-beads_git-jsonl-backup-migration_2026-03-08.md`；决议 `decisions/0052-project-beads-backup-git-tracked-jsonl-exports.md`；恢复演练 `dev_docs/logs/phase2/p2-beads-migration_restore-drill_2026-03-09.md`；关键提交 `27edb96` / `00f161a` / `a51c6a1` / `8497f4f` / `6316abd`
+- Validation: Phase A 在干净环境、无 `.beads/dolt/` 前提下完成 118/118/118 三方计数一致恢复；Phase B 验证 `bd create/update/close` 后 `bd backup --force` 生成 post-mutation backup commit `776bd0e`，其中 `issues.jsonl` +1、`events.jsonl` +3；workflow review findings 全部闭环
+- Next: 稳定运行 2 周后再评估是否推进 `no-db: true`
+- Risk: 当前 workflow 依赖现版 `bd backup --force` auto-commit 语义；若未来 `bd` 行为变更，已文档化手工 `git add/commit` fallback
