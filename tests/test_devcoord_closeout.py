@@ -1,77 +1,67 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from tests.devcoord_helpers import (
+    DEFAULT_GATE_ID,
+    DEFAULT_MILESTONE,
+    DEFAULT_PHASE,
+    DEFAULT_TARGET_COMMIT,
     CoordError,
     CoordService,
-    FakeClock,
-    MemoryCoordStore,
+    ack_default_gate_open,
+    event_names,
+    gate_close_default,
+    gate_review_default,
+    init_default_control_plane,
     init_git_repo_with_review,
-    make_paths,
+    make_memory_service,
+    open_default_gate,
+    phase_complete_default,
+    read_heartbeat_events,
+    rendered_log_dir,
 )
 
 
-def test_full_flow_renders_projection_files(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    clock = FakeClock(
-        "2026-03-01T10:01:00Z",
-        "2026-03-01T10:05:00Z",
-        "2026-03-01T10:10:00Z",
-        "2026-03-01T10:15:00Z",
-    )
-    service = CoordService(paths=paths, store=store, now_fn=clock)
+def _open_ack(service: CoordService) -> None:
+    init_default_control_plane(service)
+    open_default_gate(service)
+    ack_default_gate_open(service)
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK GATE_OPEN, starting Phase 1",
-    )
-    service.heartbeat(
-        "M7",
-        role="backend",
-        phase="1",
-        status="working",
-        task="running implementation",
-        eta_min=25,
-        gate_id="G-M7-P1",
-        target_commit="abc1234",
-        branch="feat/backend-m7-control-plane",
-    )
-    service.phase_complete(
-        "M7",
-        role="backend",
-        phase="1",
-        gate_id="G-M7-P1",
-        commit="def5678",
-        task="Phase 1 complete",
-        branch="feat/backend-m7-control-plane",
-    )
-    service.render("M7")
 
-    log_dir = paths.log_dir("m7", "2026-03-01")
-    heartbeat_events = [
-        json.loads(line)
-        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
-        if line.strip()
-    ]
-    assert [event["event"] for event in heartbeat_events] == [
+def _review_closed_gate(
+    service: CoordService,
+    report_commit: str,
+    report_path: str,
+    *,
+    reviewer: str = "tester",
+    review_task: str = "Phase 1 review PASS",
+    close_task: str = "close gate after review",
+) -> None:
+    gate_review_default(
+        service,
+        report_commit,
+        report_path,
+        role=reviewer,
+        task=review_task,
+    )
+    service.render(DEFAULT_MILESTONE)
+    gate_close_default(service, report_commit, report_path, task=close_task)
+    service.render(DEFAULT_MILESTONE)
+
+
+def _assert_generated_progress(progress: str, *, status: str, next_line: str) -> None:
+    assert progress.count("<!-- devcoord:begin milestone=m7 -->") == 1
+    assert "## 2026-03-01 (generated) | M7" in progress
+    assert f"- Status: {status}" in progress
+    assert next_line in progress
+
+
+def _assert_full_flow_projection(paths, heartbeat_events: list[dict[str, object]]) -> None:
+    log_dir = rendered_log_dir(paths)
+    assert event_names(heartbeat_events) == [
         "GATE_OPEN_SENT",
         "ACK",
         "GATE_EFFECTIVE",
@@ -79,82 +69,77 @@ def test_full_flow_renders_projection_files(tmp_path: Path) -> None:
         "PHASE_COMPLETE",
     ]
     assert [event["event_seq"] for event in heartbeat_events] == [1, 2, 3, 4, 5]
-    assert heartbeat_events[1]["ack_of"] == "GATE_OPEN"
-    assert heartbeat_events[3]["branch"] == "feat/backend-m7-control-plane"
-    assert heartbeat_events[4]["target_commit"] == "def5678"
-
-    gate_state = (log_dir / "gate_state.md").read_text("utf-8")
-    assert "| G-M7-P1 | 1 | open |  | 2026-03-01T10:05:00Z |  | def5678 |  |" in gate_state
-
+    assert (
+        heartbeat_events[1]["ack_of"],
+        heartbeat_events[3]["branch"],
+        heartbeat_events[4]["target_commit"],
+    ) == ("GATE_OPEN", "feat/backend-m7-control-plane", "def5678")
+    assert (
+        f"| {DEFAULT_GATE_ID} | {DEFAULT_PHASE} | open |  | "
+        "2026-03-01T10:05:00Z |  | def5678 |  |"
+    ) in (log_dir / "gate_state.md").read_text("utf-8")
     watchdog_status = (log_dir / "watchdog_status.md").read_text("utf-8")
+    assert "| tester | idle |  |  | none | awaiting gate |" in watchdog_status
     assert (
         "| backend | done | 2026-03-01T10:15:00Z | Phase 1 complete | none | "
-        "waiting for next gate after G-M7-P1 |"
+        f"waiting for next gate after {DEFAULT_GATE_ID} |"
     ) in watchdog_status
-    assert "| tester | idle |  |  | none | awaiting gate |" in watchdog_status
-
-    progress = paths.progress_file.read_text("utf-8")
-    assert progress.count("<!-- devcoord:begin milestone=m7 -->") == 1
-    assert "## 2026-03-01 (generated) | M7" in progress
-    assert "- Status: in_progress" in progress
-    assert "- Next: 继续推进 G-M7-P1，当前 allowed_role=backend" in progress
 
 
-def test_phase_complete_is_idempotent_for_same_gate_commit(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    clock = FakeClock(
+def test_full_flow_renders_projection_files(tmp_path: Path) -> None:
+    paths, _, service = make_memory_service(
+        tmp_path,
         "2026-03-01T10:01:00Z",
         "2026-03-01T10:05:00Z",
         "2026-03-01T10:10:00Z",
         "2026-03-01T10:15:00Z",
     )
-    service = CoordService(paths=paths, store=store, now_fn=clock)
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.ack(
-        "M7",
+    _open_ack(service)
+    service.heartbeat(
+        DEFAULT_MILESTONE,
         role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK GATE_OPEN, starting Phase 1",
-    )
-    service.phase_complete(
-        "M7",
-        role="backend",
-        phase="1",
-        gate_id="G-M7-P1",
-        commit="def5678",
-        task="Phase 1 complete",
+        phase=DEFAULT_PHASE,
+        status="working",
+        task="running implementation",
+        eta_min=25,
+        gate_id=DEFAULT_GATE_ID,
+        target_commit=DEFAULT_TARGET_COMMIT,
         branch="feat/backend-m7-control-plane",
     )
-    service.phase_complete(
-        "M7",
-        role="backend",
-        phase="1",
-        gate_id="G-M7-P1",
+    phase_complete_default(service, commit="def5678", branch="feat/backend-m7-control-plane")
+    service.render(DEFAULT_MILESTONE)
+
+    heartbeat_events = read_heartbeat_events(paths)
+    _assert_full_flow_projection(paths, heartbeat_events)
+    _assert_generated_progress(
+        paths.progress_file.read_text("utf-8"),
+        status="in_progress",
+        next_line=f"- Next: 继续推进 {DEFAULT_GATE_ID}，当前 allowed_role=backend",
+    )
+
+
+def test_phase_complete_is_idempotent_for_same_gate_commit(tmp_path: Path) -> None:
+    paths, _, service = make_memory_service(
+        tmp_path,
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:10:00Z",
+        "2026-03-01T10:15:00Z",
+    )
+
+    _open_ack(service)
+    phase_complete_default(service, commit="def5678", branch="feat/backend-m7-control-plane")
+    phase_complete_default(
+        service,
         commit="def5678",
         task="Phase 1 complete duplicate retry",
         branch="feat/backend-m7-control-plane",
     )
-    service.render("M7")
+    service.render(DEFAULT_MILESTONE)
 
-    log_dir = paths.log_dir("m7", "2026-03-01")
-    heartbeat_events = [
-        json.loads(line)
-        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
-        if line.strip()
-    ]
-    assert [event["event"] for event in heartbeat_events] == [
+    heartbeat_events = read_heartbeat_events(paths)
+    assert event_names(heartbeat_events) == [
         "GATE_OPEN_SENT",
         "ACK",
         "GATE_EFFECTIVE",
@@ -164,11 +149,8 @@ def test_phase_complete_is_idempotent_for_same_gate_commit(tmp_path: Path) -> No
 
 
 def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
-    report_commit = init_git_repo_with_review(paths, report_path)
-    clock = FakeClock(
+    paths, _, service = make_memory_service(
+        tmp_path,
         "2026-03-01T10:01:00Z",
         "2026-03-01T10:05:00Z",
         "2026-03-01T10:10:00Z",
@@ -176,63 +158,16 @@ def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
         "2026-03-01T10:20:00Z",
         "2026-03-01T10:25:00Z",
     )
-    service = CoordService(paths=paths, store=store, now_fn=clock)
+    report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
+    report_commit = init_git_repo_with_review(paths, report_path)
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK GATE_OPEN, starting Phase 1",
-    )
-    service.phase_complete(
-        "M7",
-        role="backend",
-        phase="1",
-        gate_id="G-M7-P1",
-        commit="def5678",
-        task="Phase 1 complete",
-        branch="main",
-    )
-    service.gate_review(
-        "M7",
-        role="tester",
-        phase="1",
-        gate_id="G-M7-P1",
-        result="PASS",
-        report_commit=report_commit,
-        report_path=report_path,
-        task="Phase 1 review PASS",
-    )
-    service.render("M7")
-    service.gate_close(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        result="PASS",
-        report_commit=report_commit,
-        report_path=report_path,
-        task="close gate after review",
-    )
-    service.render("M7")
+    _open_ack(service)
+    phase_complete_default(service, commit="def5678", branch="main")
+    _review_closed_gate(service, report_commit, report_path)
 
-    log_dir = paths.log_dir("m7", "2026-03-01")
-    heartbeat_events = [
-        json.loads(line)
-        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
-        if line.strip()
-    ]
-    assert [event["event"] for event in heartbeat_events] == [
+    log_dir = rendered_log_dir(paths)
+    heartbeat_events = read_heartbeat_events(paths)
+    assert event_names(heartbeat_events) == [
         "GATE_OPEN_SENT",
         "ACK",
         "GATE_EFFECTIVE",
@@ -245,7 +180,7 @@ def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
 
     gate_state = (log_dir / "gate_state.md").read_text("utf-8")
     assert (
-        "| G-M7-P1 | 1 | closed | PASS | 2026-03-01T10:05:00Z | "
+        f"| {DEFAULT_GATE_ID} | {DEFAULT_PHASE} | closed | PASS | 2026-03-01T10:05:00Z | "
         "2026-03-01T10:20:00Z | def5678 | "
         f"{report_path} ({report_commit}) |"
     ) in gate_state
@@ -257,253 +192,120 @@ def test_gate_review_and_close_render_closed_state(tmp_path: Path) -> None:
     ) in watchdog_status
 
     progress = paths.progress_file.read_text("utf-8")
-    assert progress.count("<!-- devcoord:begin milestone=m7 -->") == 1
-    assert "- Status: done" in progress
-    assert f"`{report_path}` ({report_commit})" in progress
+    _assert_generated_progress(
+        progress,
+        status="done",
+        next_line=f"`{report_path}` ({report_commit})",
+    )
 
 
 def test_gate_close_requires_rendered_reconciliation(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
+    paths, _, service = make_memory_service(
+        tmp_path,
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:10:00Z",
+        "2026-03-01T10:15:00Z",
+    )
     report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
     report_commit = init_git_repo_with_review(paths, report_path)
-    service = CoordService(
-        paths=paths,
-        store=store,
-        now_fn=FakeClock(
-            "2026-03-01T10:01:00Z",
-            "2026-03-01T10:05:00Z",
-            "2026-03-01T10:10:00Z",
-            "2026-03-01T10:15:00Z",
-        ),
-    )
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK GATE_OPEN, starting Phase 1",
-    )
-    service.gate_review(
-        "M7",
-        role="tester",
-        phase="1",
-        gate_id="G-M7-P1",
-        result="PASS",
-        report_commit=report_commit,
-        report_path=report_path,
-        task="Phase 1 review PASS",
-    )
+    _open_ack(service)
+    gate_review_default(service, report_commit, report_path)
 
     with pytest.raises(
         CoordError,
         match="cannot close gate before heartbeat_events.jsonl has been rendered",
     ):
-        service.gate_close(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            result="PASS",
-            report_commit=report_commit,
-            report_path=report_path,
-            task="close gate after review",
-        )
+        gate_close_default(service, report_commit, report_path)
 
 
 def test_gate_close_requires_visible_report_commit(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
+    paths, _, service = make_memory_service(
+        tmp_path,
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:10:00Z",
+        "2026-03-01T10:15:00Z",
+    )
     report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
     init_git_repo_with_review(paths, report_path)
-    service = CoordService(
-        paths=paths,
-        store=store,
-        now_fn=FakeClock(
-            "2026-03-01T10:01:00Z",
-            "2026-03-01T10:05:00Z",
-            "2026-03-01T10:10:00Z",
-            "2026-03-01T10:15:00Z",
-        ),
-    )
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
+    _open_ack(service)
+    gate_review_default(
+        service,
+        "deadbeef",
+        report_path,
     )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK GATE_OPEN, starting Phase 1",
-    )
-    service.gate_review(
-        "M7",
-        role="tester",
-        phase="1",
-        gate_id="G-M7-P1",
-        result="PASS",
-        report_commit="deadbeef",
-        report_path=report_path,
-        task="Phase 1 review PASS",
-    )
-    service.render("M7")
+    service.render(DEFAULT_MILESTONE)
 
     with pytest.raises(CoordError, match="git cat-file -e deadbeef"):
-        service.gate_close(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            result="PASS",
-            report_commit="deadbeef",
-            report_path=report_path,
-            task="close gate after review",
-        )
+        gate_close_default(service, "deadbeef", report_path)
 
 
 def test_audit_ignores_pending_ack_for_closed_gate(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
+    paths, store, service = make_memory_service(
+        tmp_path,
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:10:00Z",
+        "2026-03-01T10:15:00Z",
+    )
     report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
     report_commit = init_git_repo_with_review(paths, report_path)
-    service = CoordService(
-        paths=paths,
-        store=store,
-        now_fn=FakeClock(
-            "2026-03-01T10:01:00Z",
-            "2026-03-01T10:05:00Z",
-            "2026-03-01T10:10:00Z",
-            "2026-03-01T10:15:00Z",
-        ),
+
+    init_default_control_plane(service)
+    open_default_gate(service, task="open backend gate that stays unacked")
+    _review_closed_gate(
+        service,
+        report_commit,
+        report_path,
+        reviewer="pm",
+        review_task="record blocked preflight review",
+        close_task="close blocked preflight gate",
     )
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend gate that stays unacked",
-    )
-    service.gate_review(
-        "M7",
-        role="pm",
-        phase="1",
-        gate_id="G-M7-P1",
-        result="PASS",
-        report_commit=report_commit,
-        report_path=report_path,
-        task="record blocked preflight review",
-    )
-    service.render("M7")
-    service.gate_close(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        result="PASS",
-        report_commit=report_commit,
-        report_path=report_path,
-        task="close blocked preflight gate",
-    )
-    service.render("M7")
-
-    audit = service.audit("M7")
+    audit = service.audit(DEFAULT_MILESTONE)
     assert audit["open_gates"] == []
     assert audit["pending_ack_messages"] == []
 
 
 def test_milestone_close_requires_clean_audit(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    service = CoordService(
-        paths=paths,
-        store=store,
-        now_fn=FakeClock("2026-03-01T10:01:00Z"),
-    )
+    _, _, service = make_memory_service(tmp_path, "2026-03-01T10:01:00Z")
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.render("M7")
+    init_default_control_plane(service)
+    open_default_gate(service)
+    service.render(DEFAULT_MILESTONE)
 
     with pytest.raises(CoordError, match="cannot close milestone while gates remain open"):
-        service.close_milestone("M7")
+        service.close_milestone(DEFAULT_MILESTONE)
 
 
 def test_milestone_close_closes_all_milestone_records(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
+    paths, store, service = make_memory_service(
+        tmp_path,
+        "2026-03-01T10:01:00Z",
+        "2026-03-01T10:05:00Z",
+        "2026-03-01T10:10:00Z",
+        "2026-03-01T10:15:00Z",
+    )
     report_path = "dev_docs/reviews/m7_phase1_2026-03-01.md"
     report_commit = init_git_repo_with_review(paths, report_path)
-    service = CoordService(
-        paths=paths,
-        store=store,
-        now_fn=FakeClock(
-            "2026-03-01T10:01:00Z",
-            "2026-03-01T10:05:00Z",
-            "2026-03-01T10:10:00Z",
-            "2026-03-01T10:15:00Z",
-        ),
-    )
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
+    init_default_control_plane(service)
+    open_default_gate(service)
+    _review_closed_gate(
+        service,
+        report_commit,
+        report_path,
+        reviewer="pm",
+        review_task="record blocked preflight review",
+        close_task="close blocked preflight gate",
     )
-    service.gate_review(
-        "M7",
-        role="pm",
-        phase="1",
-        gate_id="G-M7-P1",
-        result="PASS",
-        report_commit=report_commit,
-        report_path=report_path,
-        task="record blocked preflight review",
-    )
-    service.render("M7")
-    service.gate_close(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        result="PASS",
-        report_commit=report_commit,
-        report_path=report_path,
-        task="close blocked preflight gate",
-    )
-    service.render("M7")
 
     assert any(issue.status == "open" for issue in store.list_records("m7"))
 
-    service.close_milestone("M7")
+    service.close_milestone(DEFAULT_MILESTONE)
 
     milestone_issues = [
         issue

@@ -6,15 +6,128 @@ import pytest
 
 from scripts.devcoord import coord as coord_module
 from tests.devcoord_helpers import (
+    DEFAULT_GATE_ID,
+    DEFAULT_MILESTONE,
+    DEFAULT_PHASE,
+    DEFAULT_RUN_DATE,
+    DEFAULT_TARGET_COMMIT,
     SQLITE_SCHEMA_VERSION,
     CoordError,
     CoordService,
     FakeClock,
     SQLiteCoordStore,
     _resolve_paths,
+    ack_default_gate_open,
+    gate_close_default,
+    gate_review_default,
+    init_default_control_plane,
     init_git_repo_with_review,
     make_sqlite_paths,
+    make_sqlite_service,
+    open_default_gate,
+    phase_complete_default,
 )
+
+
+def _init_open_ack_gate(
+    service: CoordService,
+    *,
+    milestone: str = DEFAULT_MILESTONE,
+    gate_id: str = DEFAULT_GATE_ID,
+    target_commit: str = DEFAULT_TARGET_COMMIT,
+    open_task: str = "open gate",
+    ack_task: str = "ACK",
+) -> None:
+    init_default_control_plane(service, milestone=milestone)
+    open_default_gate(
+        service,
+        milestone=milestone,
+        gate_id=gate_id,
+        target_commit=target_commit,
+        task=open_task,
+    )
+    ack_default_gate_open(
+        service,
+        milestone=milestone,
+        gate_id=gate_id,
+        commit=target_commit,
+        phase=DEFAULT_PHASE,
+        task=ack_task,
+    )
+
+
+def _init_open_ack(service: CoordService) -> None:
+    _init_open_ack_gate(service)
+
+
+def _advance_gate(
+    service: CoordService,
+    *,
+    milestone: str = DEFAULT_MILESTONE,
+    gate_id: str = DEFAULT_GATE_ID,
+    target_commit: str = DEFAULT_TARGET_COMMIT,
+    heartbeat_task: str = "coding",
+    phase_task: str = "done",
+    eta_min: int = 30,
+) -> None:
+    service.heartbeat(
+        milestone,
+        role="backend",
+        phase=DEFAULT_PHASE,
+        status="working",
+        task=heartbeat_task,
+        eta_min=eta_min,
+        gate_id=gate_id,
+        target_commit=target_commit,
+    )
+    phase_complete_default(
+        service,
+        milestone=milestone,
+        gate_id=gate_id,
+        commit=target_commit,
+        task=phase_task,
+    )
+
+
+def _review_close_gate(
+    service: CoordService,
+    paths,
+    report_relpath: str,
+    *,
+    milestone: str = DEFAULT_MILESTONE,
+    gate_id: str = DEFAULT_GATE_ID,
+    review_task: str = "review",
+    close_task: str = "close gate",
+) -> str:
+    report_commit = init_git_repo_with_review(paths, report_relpath)
+    gate_review_default(
+        service,
+        report_commit,
+        report_relpath,
+        milestone=milestone,
+        gate_id=gate_id,
+        task=review_task,
+    )
+    service.render(milestone)
+    gate_close_default(
+        service,
+        report_commit,
+        report_relpath,
+        milestone=milestone,
+        gate_id=gate_id,
+        task=close_task,
+    )
+    service.render(milestone)
+    return report_commit
+
+
+def _assert_reconciled_closed_milestone(service: CoordService, store, milestone: str) -> None:
+    audit = service.audit(milestone)
+    assert audit["reconciled"] is True
+    assert audit["open_gates"] == []
+    assert audit["pending_ack_messages"] == []
+    service.close_milestone(milestone)
+    assert store.list_records(milestone.lower(), kind="milestone")[0].status == "closed"
 
 
 class TestSQLiteSchemaBootstrap:
@@ -65,9 +178,8 @@ class TestSQLiteSchemaBootstrap:
 
 class TestSQLiteFullLifecycle:
     def test_init_open_ack_heartbeat_phase_complete(self, tmp_path: Path) -> None:
-        paths = make_sqlite_paths(tmp_path)
-        store = SQLiteCoordStore(paths.control_db)
-        clock = FakeClock(
+        _, store, service = make_sqlite_service(
+            tmp_path,
             "2026-03-01T10:00:00Z",
             "2026-03-01T10:01:00Z",
             "2026-03-01T10:02:00Z",
@@ -77,62 +189,33 @@ class TestSQLiteFullLifecycle:
             "2026-03-01T10:06:00Z",
             "2026-03-01T10:07:00Z",
         )
-        service = CoordService(paths=paths, store=store, now_fn=clock)
-
-        service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-
-        records = store.list_records("m7")
+        init_default_control_plane(service)
+        records = store.list_records(DEFAULT_MILESTONE.lower())
         kinds = sorted(rec.metadata_str("coord_kind") for rec in records)
         assert kinds.count("milestone") == 1
         assert kinds.count("agent") == 3
 
-        service.open_gate(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            allowed_role="backend",
-            target_commit="abc1234",
-            task="open gate",
-        )
-
-        gates = store.list_records("m7", kind="gate")
+        open_default_gate(service, task="open gate")
+        gates = store.list_records(DEFAULT_MILESTONE.lower(), kind="gate")
         assert len(gates) == 1
         assert gates[0].metadata_str("gate_state") == "pending"
 
-        service.ack(
-            "M7",
-            role="backend",
-            command="GATE_OPEN",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            phase="1",
-            task="ACK",
-        )
-
-        gates = store.list_records("m7", kind="gate")
+        ack_default_gate_open(service, phase=DEFAULT_PHASE, task="ACK")
+        gates = store.list_records(DEFAULT_MILESTONE.lower(), kind="gate")
         assert gates[0].metadata_str("gate_state") == "open"
 
         service.heartbeat(
-            "M7",
+            DEFAULT_MILESTONE,
             role="backend",
-            phase="1",
+            phase=DEFAULT_PHASE,
             status="working",
             task="coding",
             eta_min=30,
-            gate_id="G-M7-P1",
-            target_commit="abc1234",
+            gate_id=DEFAULT_GATE_ID,
+            target_commit=DEFAULT_TARGET_COMMIT,
         )
-
-        service.phase_complete(
-            "M7",
-            role="backend",
-            phase="1",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            task="phase 1 done",
-        )
-
-        events = store.list_records("m7", kind="event")
+        phase_complete_default(service, commit=DEFAULT_TARGET_COMMIT, task="phase 1 done")
+        events = store.list_records(DEFAULT_MILESTONE.lower(), kind="event")
         event_types = [e.metadata_str("event") for e in events]
         assert "GATE_OPEN_SENT" in event_types
         assert "ACK" in event_types
@@ -184,9 +267,8 @@ class TestSQLiteFullLifecycle:
         store.close()
 
     def test_gate_close_and_milestone_close_with_sqlite(self, tmp_path: Path) -> None:
-        paths = make_sqlite_paths(tmp_path)
-        store = SQLiteCoordStore(paths.control_db)
-        clock = FakeClock(
+        paths, store, service = make_sqlite_service(
+            tmp_path,
             "2026-03-01T10:00:00Z",
             "2026-03-01T10:01:00Z",
             "2026-03-01T10:02:00Z",
@@ -196,74 +278,21 @@ class TestSQLiteFullLifecycle:
             "2026-03-01T10:06:00Z",
             "2026-03-01T10:07:00Z",
         )
-        service = CoordService(paths=paths, store=store, now_fn=clock)
-        service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-        service.open_gate(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            allowed_role="backend",
-            target_commit="abc1234",
-            task="open gate",
-        )
-        service.ack(
-            "M7",
-            role="backend",
-            command="GATE_OPEN",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            phase="1",
-            task="ACK",
-        )
-        service.phase_complete(
-            "M7",
-            role="backend",
-            phase="1",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            task="done",
-        )
+        _init_open_ack(service)
+        phase_complete_default(service, commit=DEFAULT_TARGET_COMMIT, task="done")
+        _review_close_gate(service, paths, "dev_docs/reports/m7_p1_review.md")
 
-        report_relpath = "dev_docs/reports/m7_p1_review.md"
-        report_commit = init_git_repo_with_review(paths, report_relpath)
-
-        service.gate_review(
-            "M7",
-            role="tester",
-            phase="1",
-            gate_id="G-M7-P1",
-            result="PASS",
-            report_commit=report_commit,
-            report_path=report_relpath,
-            task="review",
-        )
-        service.render("M7")
-        service.gate_close(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            result="PASS",
-            report_commit=report_commit,
-            report_path=report_relpath,
-            task="close gate",
-        )
-        service.render("M7")
-
-        audit = service.audit("M7")
+        audit = service.audit(DEFAULT_MILESTONE)
         assert audit["reconciled"] is True
         assert audit["open_gates"] == []
-
-        service.close_milestone("M7")
-
-        milestones = store.list_records("m7", kind="milestone")
-        assert milestones[0].status == "closed"
+        service.close_milestone(DEFAULT_MILESTONE)
+        assert store.list_records(DEFAULT_MILESTONE.lower(), kind="milestone")[0].status == "closed"
 
         store.close()
 
     def test_ping_and_ack_with_sqlite(self, tmp_path: Path) -> None:
-        paths = make_sqlite_paths(tmp_path)
-        store = SQLiteCoordStore(paths.control_db)
-        clock = FakeClock(
+        _, store, service = make_sqlite_service(
+            tmp_path,
             "2026-03-01T10:00:00Z",
             "2026-03-01T10:01:00Z",
             "2026-03-01T10:02:00Z",
@@ -271,43 +300,25 @@ class TestSQLiteFullLifecycle:
             "2026-03-01T10:04:00Z",
             "2026-03-01T10:05:00Z",
         )
-        service = CoordService(paths=paths, store=store, now_fn=clock)
-        service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-        service.open_gate(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            allowed_role="backend",
-            target_commit="abc1234",
-            task="open gate",
-        )
-        service.ack(
-            "M7",
-            role="backend",
-            command="GATE_OPEN",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            phase="1",
-            task="ACK",
-        )
+        _init_open_ack(service)
         service.ping(
-            "M7",
+            DEFAULT_MILESTONE,
             role="backend",
-            phase="1",
-            gate_id="G-M7-P1",
+            phase=DEFAULT_PHASE,
+            gate_id=DEFAULT_GATE_ID,
             task="checking in",
         )
         service.ack(
-            "M7",
+            DEFAULT_MILESTONE,
             role="backend",
             command="PING",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            phase="1",
+            gate_id=DEFAULT_GATE_ID,
+            commit=DEFAULT_TARGET_COMMIT,
+            phase=DEFAULT_PHASE,
             task="ACK PING",
         )
 
-        messages = store.list_records("m7", kind="message")
+        messages = store.list_records(DEFAULT_MILESTONE.lower(), kind="message")
         ping_msgs = [m for m in messages if m.metadata_str("command") == "PING"]
         assert len(ping_msgs) == 1
         assert ping_msgs[0].metadata_bool("effective") is True
@@ -526,9 +537,8 @@ class TestSQLiteUnconfirmedInstruction:
 
 class TestSQLiteFreshStartBootstrap:
     def test_fresh_start_from_empty_db(self, tmp_path: Path) -> None:
-        paths = make_sqlite_paths(tmp_path)
-        store = SQLiteCoordStore(paths.control_db)
-        clock = FakeClock(
+        paths, store, service = make_sqlite_service(
+            tmp_path,
             "2026-03-01T10:00:00Z",
             "2026-03-01T10:01:00Z",
             "2026-03-01T10:02:00Z",
@@ -539,80 +549,39 @@ class TestSQLiteFreshStartBootstrap:
             "2026-03-01T10:07:00Z",
             "2026-03-01T10:08:00Z",
         )
-        service = CoordService(paths=paths, store=store, now_fn=clock)
+        milestone = "P2-M1B"
+        gate_id = "G0"
+        target_commit = "deadbeef"
 
-        service.init_control_plane(
-            "P2-M1B", run_date="2026-03-01", roles=("pm", "backend", "tester")
+        _init_open_ack_gate(
+            service,
+            milestone=milestone,
+            gate_id=gate_id,
+            target_commit=target_commit,
+            open_task="open G0",
+            ack_task="ACK G0",
         )
-        service.open_gate(
-            "P2-M1B",
-            phase="1",
-            gate_id="G0",
-            allowed_role="backend",
-            target_commit="deadbeef",
-            task="open G0",
-        )
-        service.ack(
-            "P2-M1B",
-            role="backend",
-            command="GATE_OPEN",
-            gate_id="G0",
-            commit="deadbeef",
-            phase="1",
-            task="ACK G0",
-        )
-        service.heartbeat(
-            "P2-M1B",
-            role="backend",
-            phase="1",
-            status="working",
-            task="implementing",
+        _advance_gate(
+            service,
+            milestone=milestone,
+            gate_id=gate_id,
+            target_commit=target_commit,
+            heartbeat_task="implementing",
+            phase_task="P1 done",
             eta_min=60,
-            gate_id="G0",
-        )
-        service.phase_complete(
-            "P2-M1B",
-            role="backend",
-            phase="1",
-            gate_id="G0",
-            commit="deadbeef",
-            task="P1 done",
         )
 
-        report_relpath = "dev_docs/reports/p2m1b_review.md"
-        report_commit = init_git_repo_with_review(paths, report_relpath)
-
-        service.gate_review(
-            "P2-M1B",
-            role="tester",
-            phase="1",
-            gate_id="G0",
-            result="PASS",
-            report_commit=report_commit,
-            report_path=report_relpath,
-            task="review G0",
+        _review_close_gate(
+            service,
+            paths,
+            "dev_docs/reports/p2m1b_review.md",
+            milestone=milestone,
+            gate_id=gate_id,
+            review_task="review G0",
+            close_task="close G0",
         )
-        service.render("P2-M1B")
-        service.gate_close(
-            "P2-M1B",
-            phase="1",
-            gate_id="G0",
-            result="PASS",
-            report_commit=report_commit,
-            report_path=report_relpath,
-            task="close G0",
-        )
-        service.render("P2-M1B")
 
-        audit = service.audit("P2-M1B")
-        assert audit["reconciled"] is True
-        assert audit["open_gates"] == []
-        assert audit["pending_ack_messages"] == []
-
-        service.close_milestone("P2-M1B")
-
-        milestones = store.list_records("p2-m1b", kind="milestone")
-        assert milestones[0].status == "closed"
+        _assert_reconciled_closed_milestone(service, store, milestone)
 
         store.close()
 
@@ -640,9 +609,8 @@ class TestSQLiteCloseMilestoneContract:
     def test_close_milestone_preserves_event_status_and_closes_records(
         self, tmp_path: Path
     ) -> None:
-        paths = make_sqlite_paths(tmp_path)
-        store = SQLiteCoordStore(paths.control_db)
-        clock = FakeClock(
+        paths, store, service = make_sqlite_service(
+            tmp_path,
             "2026-03-01T10:00:00Z",
             "2026-03-01T10:01:00Z",
             "2026-03-01T10:02:00Z",
@@ -652,100 +620,35 @@ class TestSQLiteCloseMilestoneContract:
             "2026-03-01T10:06:00Z",
             "2026-03-01T10:07:00Z",
         )
-        service = CoordService(paths=paths, store=store, now_fn=clock)
-        service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-        service.open_gate(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            allowed_role="backend",
-            target_commit="abc1234",
-            task="open gate",
-        )
-        service.ack(
-            "M7",
-            role="backend",
-            command="GATE_OPEN",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            phase="1",
-            task="ACK",
-        )
-        service.phase_complete(
-            "M7",
-            role="backend",
-            phase="1",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            task="done",
-        )
+        _init_open_ack(service)
+        phase_complete_default(service, commit=DEFAULT_TARGET_COMMIT, task="done")
+        _review_close_gate(service, paths, "dev_docs/reports/m7_p1_review.md")
 
-        report_relpath = "dev_docs/reports/m7_p1_review.md"
-        report_commit = init_git_repo_with_review(paths, report_relpath)
-
-        service.gate_review(
-            "M7",
-            role="tester",
-            phase="1",
-            gate_id="G-M7-P1",
-            result="PASS",
-            report_commit=report_commit,
-            report_path=report_relpath,
-            task="review",
-        )
-        service.render("M7")
-        service.gate_close(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            result="PASS",
-            report_commit=report_commit,
-            report_path=report_relpath,
-            task="close gate",
-        )
-        service.render("M7")
-
-        events_before = store.list_records("m7", kind="event")
+        events_before = store.list_records(DEFAULT_MILESTONE.lower(), kind="event")
         event_statuses_before = {
             e.metadata_int("event_seq"): e.metadata_str("status") for e in events_before
         }
 
-        service.close_milestone("M7")
+        service.close_milestone(DEFAULT_MILESTONE)
 
-        events_after = store.list_records("m7", kind="event")
+        events_after = store.list_records(DEFAULT_MILESTONE.lower(), kind="event")
         for ev in events_after:
             seq = ev.metadata_int("event_seq")
             assert ev.metadata_str("status") == event_statuses_before[seq]
 
-        milestones = store.list_records("m7", kind="milestone")
-        assert all(m.status == "closed" for m in milestones)
-        phases = store.list_records("m7", kind="phase")
-        assert all(p.status == "closed" for p in phases)
-        gates = store.list_records("m7", kind="gate")
-        assert all(g.status == "closed" for g in gates)
-        roles = store.list_records("m7", kind="agent")
-        assert all(r.status == "closed" for r in roles)
+        for kind in ("milestone", "phase", "gate", "agent", "event", "message", None):
+            records = store.list_records(DEFAULT_MILESTONE.lower(), kind=kind)
+            assert records
+            assert all(record.status == "closed" for record in records)
 
-        events_after = store.list_records("m7", kind="event")
-        assert len(events_after) > 0
-        assert all(e.status == "closed" for e in events_after)
-
-        messages = store.list_records("m7", kind="message")
-        assert len(messages) > 0
-        assert all(m.status == "closed" for m in messages)
-
-        all_records = store.list_records("m7")
-        assert all(rec.status == "closed" for rec in all_records)
-
-        audit = service.audit("M7")
+        audit = service.audit(DEFAULT_MILESTONE)
         assert audit["reconciled"] is True
 
         store.close()
 
     def test_render_after_close_preserves_event_projection(self, tmp_path: Path) -> None:
-        paths = make_sqlite_paths(tmp_path)
-        store = SQLiteCoordStore(paths.control_db)
-        clock = FakeClock(
+        paths, store, service = make_sqlite_service(
+            tmp_path,
             "2026-03-01T10:00:00Z",
             "2026-03-01T10:01:00Z",
             "2026-03-01T10:02:00Z",
@@ -755,75 +658,15 @@ class TestSQLiteCloseMilestoneContract:
             "2026-03-01T10:06:00Z",
             "2026-03-01T10:07:00Z",
         )
-        service = CoordService(paths=paths, store=store, now_fn=clock)
-        service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-        service.open_gate(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            allowed_role="backend",
-            target_commit="abc1234",
-            task="open gate",
-        )
-        service.ack(
-            "M7",
-            role="backend",
-            command="GATE_OPEN",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            phase="1",
-            task="ACK",
-        )
-        service.heartbeat(
-            "M7",
-            role="backend",
-            phase="1",
-            status="working",
-            task="coding",
-            eta_min=30,
-            gate_id="G-M7-P1",
-            target_commit="abc1234",
-        )
-        service.phase_complete(
-            "M7",
-            role="backend",
-            phase="1",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            task="done",
-        )
+        _init_open_ack(service)
+        _advance_gate(service)
+        _review_close_gate(service, paths, "dev_docs/reports/m7_p1_review.md")
 
-        report_relpath = "dev_docs/reports/m7_p1_review.md"
-        report_commit = init_git_repo_with_review(paths, report_relpath)
-
-        service.gate_review(
-            "M7",
-            role="tester",
-            phase="1",
-            gate_id="G-M7-P1",
-            result="PASS",
-            report_commit=report_commit,
-            report_path=report_relpath,
-            task="review",
-        )
-        service.render("M7")
-        service.gate_close(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            result="PASS",
-            report_commit=report_commit,
-            report_path=report_relpath,
-            task="close gate",
-        )
-        service.render("M7")
-
-        log_dir = paths.log_dir("m7", "2026-03-01")
+        log_dir = paths.log_dir(DEFAULT_MILESTONE.lower(), DEFAULT_RUN_DATE)
         projection_before = (log_dir / "heartbeat_events.jsonl").read_text("utf-8")
 
-        service.close_milestone("M7")
-
-        service.render("M7")
+        service.close_milestone(DEFAULT_MILESTONE)
+        service.render(DEFAULT_MILESTONE)
         projection_after = (log_dir / "heartbeat_events.jsonl").read_text("utf-8")
 
         assert projection_before == projection_after

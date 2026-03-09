@@ -210,6 +210,121 @@ class TestGroupedCLISmoke:
     def _init_m7(self, store: MemoryCoordStore, paths: CoordPaths) -> None:
         run_cli(["init", "--milestone", "M7", "--run-date", "2026-03-01"], store=store, paths=paths)
 
+    def _open_gate(self, store: MemoryCoordStore, paths: CoordPaths, clock: FakeClock) -> None:
+        run_cli(
+            [
+                "gate",
+                "open",
+                "--milestone",
+                "M7",
+                "--phase",
+                "1",
+                "--gate",
+                "G-M7-P1",
+                "--allowed-role",
+                "backend",
+                "--target-commit",
+                "abc1234",
+            ],
+            store=store,
+            paths=paths,
+            now_fn=clock,
+        )
+
+    def _ack_gate_open(self, store: MemoryCoordStore, paths: CoordPaths, clock: FakeClock) -> None:
+        run_cli(
+            [
+                "command",
+                "ack",
+                "--milestone",
+                "M7",
+                "--role",
+                "backend",
+                "--cmd",
+                "GATE_OPEN",
+                "--gate",
+                "G-M7-P1",
+                "--commit",
+                "abc1234",
+                "--phase",
+                "1",
+            ],
+            store=store,
+            paths=paths,
+            now_fn=clock,
+        )
+
+    def _review_gate(
+        self,
+        store: MemoryCoordStore,
+        paths: CoordPaths,
+        clock: FakeClock,
+        report_commit: str,
+        report_path: str,
+        *,
+        command: str = "gate",
+        role: str = "pm",
+    ) -> None:
+        argv = [command, "review"] if command == "gate" else [command]
+        run_cli(
+            [
+                *argv,
+                "--milestone",
+                "M7",
+                "--role",
+                role,
+                "--phase",
+                "1",
+                "--gate",
+                "G-M7-P1",
+                "--result",
+                "PASS",
+                "--report-commit",
+                report_commit,
+                "--report-path",
+                report_path,
+                "--task",
+                "review",
+            ],
+            store=store,
+            paths=paths,
+            now_fn=clock,
+        )
+
+    def _close_gate(
+        self,
+        store: MemoryCoordStore,
+        paths: CoordPaths,
+        clock: FakeClock,
+        report_commit: str,
+        report_path: str,
+        *,
+        command: str = "gate",
+    ) -> int:
+        argv = [command, "close"] if command == "gate" else [command]
+        return run_cli(
+            [
+                *argv,
+                "--milestone",
+                "M7",
+                "--phase",
+                "1",
+                "--gate",
+                "G-M7-P1",
+                "--result",
+                "PASS",
+                "--report-commit",
+                report_commit,
+                "--report-path",
+                report_path,
+                "--task",
+                "close",
+            ],
+            store=store,
+            paths=paths,
+            now_fn=clock,
+        )
+
     def test_gate_open(self, tmp_path: Path) -> None:
         store = MemoryCoordStore()
         paths = make_paths(tmp_path)
@@ -240,25 +355,7 @@ class TestGroupedCLISmoke:
         store = MemoryCoordStore()
         paths = make_paths(tmp_path)
         self._init_m7(store, paths)
-        run_cli(
-            [
-                "gate",
-                "open",
-                "--milestone",
-                "M7",
-                "--phase",
-                "1",
-                "--gate",
-                "G-M7-P1",
-                "--allowed-role",
-                "backend",
-                "--target-commit",
-                "abc1234",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=FakeClock("2026-03-01T10:01:00Z"),
-        )
+        self._open_gate(store, paths, FakeClock("2026-03-01T10:01:00Z"))
         exit_code = run_cli(
             [
                 "command",
@@ -291,46 +388,8 @@ class TestGroupedCLISmoke:
             "2026-03-01T10:02:00Z",
             "2026-03-01T10:10:00Z",
         )
-        run_cli(
-            [
-                "gate",
-                "open",
-                "--milestone",
-                "M7",
-                "--phase",
-                "1",
-                "--gate",
-                "G-M7-P1",
-                "--allowed-role",
-                "backend",
-                "--target-commit",
-                "abc1234",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
-        )
-        run_cli(
-            [
-                "command",
-                "ack",
-                "--milestone",
-                "M7",
-                "--role",
-                "backend",
-                "--cmd",
-                "GATE_OPEN",
-                "--gate",
-                "G-M7-P1",
-                "--commit",
-                "abc1234",
-                "--phase",
-                "1",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
-        )
+        self._open_gate(store, paths, clock)
+        self._ack_gate_open(store, paths, clock)
         exit_code = run_cli(
             [
                 "command",
@@ -362,46 +421,8 @@ class TestGroupedCLISmoke:
         paths = make_paths(tmp_path)
         self._init_m7(store, paths)
         clock = FakeClock("2026-03-01T10:01:00Z", "2026-03-01T10:02:00Z", "2026-03-01T10:10:00Z")
-        run_cli(
-            [
-                "gate",
-                "open",
-                "--milestone",
-                "M7",
-                "--phase",
-                "1",
-                "--gate",
-                "G-M7-P1",
-                "--allowed-role",
-                "backend",
-                "--target-commit",
-                "abc1234",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
-        )
-        run_cli(
-            [
-                "command",
-                "ack",
-                "--milestone",
-                "M7",
-                "--role",
-                "backend",
-                "--cmd",
-                "GATE_OPEN",
-                "--gate",
-                "G-M7-P1",
-                "--commit",
-                "abc1234",
-                "--phase",
-                "1",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
-        )
+        self._open_gate(store, paths, clock)
+        self._ack_gate_open(store, paths, clock)
         exit_code = run_cli(
             [
                 "event",
@@ -482,74 +503,10 @@ class TestGroupedCLISmoke:
             "2026-03-01T10:04:00Z",
         )
         self._init_m7(store, paths)
-        run_cli(
-            [
-                "gate",
-                "open",
-                "--milestone",
-                "M7",
-                "--phase",
-                "1",
-                "--gate",
-                "G-M7-P1",
-                "--allowed-role",
-                "backend",
-                "--target-commit",
-                "abc1234",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
-        )
-        run_cli(
-            [
-                "gate",
-                "review",
-                "--milestone",
-                "M7",
-                "--role",
-                "pm",
-                "--phase",
-                "1",
-                "--gate",
-                "G-M7-P1",
-                "--result",
-                "PASS",
-                "--report-commit",
-                report_commit,
-                "--report-path",
-                report_path,
-                "--task",
-                "review",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
-        )
+        self._open_gate(store, paths, clock)
+        self._review_gate(store, paths, clock, report_commit, report_path)
         run_cli(["projection", "render", "--milestone", "M7"], store=store, paths=paths)
-        run_cli(
-            [
-                "gate",
-                "close",
-                "--milestone",
-                "M7",
-                "--phase",
-                "1",
-                "--gate",
-                "G-M7-P1",
-                "--result",
-                "PASS",
-                "--report-commit",
-                report_commit,
-                "--report-path",
-                report_path,
-                "--task",
-                "close",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
-        )
+        self._close_gate(store, paths, clock, report_commit, report_path)
         run_cli(["projection", "render", "--milestone", "M7"], store=store, paths=paths)
         exit_code = run_cli(
             ["milestone", "close", "--milestone", "M7"],
@@ -578,6 +535,94 @@ class TestFlatAliasCompatibility:
                 "backend",
                 "--target-commit",
                 "abc1234",
+            ],
+            store=store,
+            paths=paths,
+            now_fn=clock,
+        )
+
+    def _ack_open(self, store: MemoryCoordStore, paths: CoordPaths, clock: FakeClock) -> None:
+        run_cli(
+            [
+                "ack",
+                "--milestone",
+                "M7",
+                "--role",
+                "backend",
+                "--cmd",
+                "GATE_OPEN",
+                "--gate",
+                "G-M7-P1",
+                "--commit",
+                "abc1234",
+                "--phase",
+                "1",
+            ],
+            store=store,
+            paths=paths,
+            now_fn=clock,
+        )
+
+    def _review_alias(
+        self,
+        store: MemoryCoordStore,
+        paths: CoordPaths,
+        clock: FakeClock,
+        report_commit: str,
+        report_path: str,
+    ) -> None:
+        run_cli(
+            [
+                "gate-review",
+                "--milestone",
+                "M7",
+                "--role",
+                "pm",
+                "--phase",
+                "1",
+                "--gate",
+                "G-M7-P1",
+                "--result",
+                "PASS",
+                "--report-commit",
+                report_commit,
+                "--report-path",
+                report_path,
+                "--task",
+                "review",
+            ],
+            store=store,
+            paths=paths,
+            now_fn=clock,
+        )
+
+    def _close_gate(
+        self,
+        store: MemoryCoordStore,
+        paths: CoordPaths,
+        clock: FakeClock,
+        report_commit: str,
+        report_path: str,
+        *,
+        command: str = "gate-close",
+    ) -> int:
+        return run_cli(
+            [
+                command,
+                "--milestone",
+                "M7",
+                "--phase",
+                "1",
+                "--gate",
+                "G-M7-P1",
+                "--result",
+                "PASS",
+                "--report-commit",
+                report_commit,
+                "--report-path",
+                report_path,
+                "--task",
+                "close",
             ],
             store=store,
             paths=paths,
@@ -644,26 +689,7 @@ class TestFlatAliasCompatibility:
             "2026-03-01T10:10:00Z",
         )
         self._init_and_open(store, paths, clock)
-        run_cli(
-            [
-                "ack",
-                "--milestone",
-                "M7",
-                "--role",
-                "backend",
-                "--cmd",
-                "GATE_OPEN",
-                "--gate",
-                "G-M7-P1",
-                "--commit",
-                "abc1234",
-                "--phase",
-                "1",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
-        )
+        self._ack_open(store, paths, clock)
         exit_code = run_cli(
             [
                 "ping",
@@ -747,52 +773,15 @@ class TestFlatAliasCompatibility:
             "2026-03-01T10:03:00Z",
         )
         self._init_and_open(store, paths, clock)
-        run_cli(
-            [
-                "gate-review",
-                "--milestone",
-                "M7",
-                "--role",
-                "pm",
-                "--phase",
-                "1",
-                "--gate",
-                "G-M7-P1",
-                "--result",
-                "PASS",
-                "--report-commit",
-                report_commit,
-                "--report-path",
-                report_path,
-                "--task",
-                "review",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
-        )
+        self._review_alias(store, paths, clock, report_commit, report_path)
         run_cli(["render", "--milestone", "M7"], store=store, paths=paths)
-        exit_code = run_cli(
-            [
-                "gate-close",
-                "--milestone",
-                "M7",
-                "--phase",
-                "1",
-                "--gate",
-                "G-M7-P1",
-                "--result",
-                "PASS",
-                "--report-commit",
-                report_commit,
-                "--report-path",
-                report_path,
-                "--task",
-                "close",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
+        exit_code = self._close_gate(
+            store,
+            paths,
+            clock,
+            report_commit,
+            report_path,
+            command="gate-close",
         )
         assert exit_code == 0
 
@@ -808,53 +797,9 @@ class TestFlatAliasCompatibility:
             "2026-03-01T10:04:00Z",
         )
         self._init_and_open(store, paths, clock)
-        run_cli(
-            [
-                "gate-review",
-                "--milestone",
-                "M7",
-                "--role",
-                "pm",
-                "--phase",
-                "1",
-                "--gate",
-                "G-M7-P1",
-                "--result",
-                "PASS",
-                "--report-commit",
-                report_commit,
-                "--report-path",
-                report_path,
-                "--task",
-                "review",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
-        )
+        self._review_alias(store, paths, clock, report_commit, report_path)
         run_cli(["render", "--milestone", "M7"], store=store, paths=paths)
-        run_cli(
-            [
-                "gate-close",
-                "--milestone",
-                "M7",
-                "--phase",
-                "1",
-                "--gate",
-                "G-M7-P1",
-                "--result",
-                "PASS",
-                "--report-commit",
-                report_commit,
-                "--report-path",
-                report_path,
-                "--task",
-                "close",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=clock,
-        )
+        self._close_gate(store, paths, clock, report_commit, report_path, command="gate-close")
         run_cli(["render", "--milestone", "M7"], store=store, paths=paths)
         exit_code = run_cli(["milestone-close", "--milestone", "M7"], store=store, paths=paths)
         assert exit_code == 0

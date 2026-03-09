@@ -7,14 +7,48 @@ import pytest
 
 from scripts.devcoord import coord as coord_module
 from tests.devcoord_helpers import (
+    DEFAULT_GATE_ID,
+    DEFAULT_MILESTONE,
+    DEFAULT_PHASE,
+    DEFAULT_TARGET_COMMIT,
     CoordError,
     CoordService,
-    FakeClock,
-    MemoryCoordStore,
     _resolve_paths,
-    make_paths,
+    ack_default_gate_open,
+    event_names,
+    init_default_control_plane,
+    make_memory_service,
+    open_default_gate,
+    read_heartbeat_events,
+    rendered_log_dir,
     run_cli,
 )
+
+
+def _init_open_ack(service: CoordService) -> None:
+    init_default_control_plane(service)
+    open_default_gate(service)
+    ack_default_gate_open(service)
+
+
+def _open_gate_snapshot(status: str = "open") -> dict[str, str]:
+    return {
+        "gate": DEFAULT_GATE_ID,
+        "phase": DEFAULT_PHASE,
+        "status": status,
+        "allowed_role": "backend",
+        "target_commit": DEFAULT_TARGET_COMMIT,
+    }
+
+
+def _pending_ack_snapshot(command: str) -> dict[str, str]:
+    return {
+        "command": command,
+        "role": "backend",
+        "gate": DEFAULT_GATE_ID,
+        "phase": DEFAULT_PHASE,
+        "target_commit": DEFAULT_TARGET_COMMIT,
+    }
 
 
 def test_resolve_paths_returns_sqlite_control_root(
@@ -35,98 +69,34 @@ def test_resolve_paths_returns_sqlite_control_root(
 
 
 def test_ack_fails_closed_without_pending_message(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    service = CoordService(
-        paths=paths,
-        store=store,
-        now_fn=FakeClock("2026-03-01T10:00:00Z", "2026-03-01T10:05:00Z"),
+    _, _, service = make_memory_service(
+        tmp_path, "2026-03-01T10:00:00Z", "2026-03-01T10:05:00Z"
     )
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        phase="1",
-        task="ACK GATE_OPEN",
-    )
+    init_default_control_plane(service)
+    open_default_gate(service)
+    ack_default_gate_open(service, phase=DEFAULT_PHASE, task="ACK GATE_OPEN")
 
     with pytest.raises(CoordError, match="no pending GATE_OPEN message"):
-        service.ack(
-            "M7",
-            role="backend",
-            command="GATE_OPEN",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            phase="1",
-            task="ACK GATE_OPEN",
-        )
+        ack_default_gate_open(service, phase=DEFAULT_PHASE, task="ACK GATE_OPEN")
 
 
 def test_ack_deduplicates_duplicate_pending_gate_open(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    clock = FakeClock(
+    paths, _, service = make_memory_service(
+        tmp_path,
         "2026-03-01T10:01:00Z",
         "2026-03-01T10:05:00Z",
         "2026-03-01T10:06:00Z",
         "2026-03-01T10:10:00Z",
     )
-    service = CoordService(paths=paths, store=store, now_fn=clock)
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK GATE_OPEN, starting Phase 1",
-    )
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="re-open same backend gate by mistake",
-    )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK duplicate GATE_OPEN for same gate",
-    )
+    _init_open_ack(service)
+    open_default_gate(service, task="re-open same backend gate by mistake")
+    ack_default_gate_open(service, task="ACK duplicate GATE_OPEN for same gate")
     service.render("M7")
 
-    log_dir = paths.log_dir("m7", "2026-03-01")
-    heartbeat_events = [
-        json.loads(line)
-        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
-        if line.strip()
-    ]
-    assert [event["event"] for event in heartbeat_events] == [
+    heartbeat_events = read_heartbeat_events(paths)
+    assert event_names(heartbeat_events) == [
         "GATE_OPEN_SENT",
         "ACK",
         "GATE_EFFECTIVE",
@@ -137,132 +107,85 @@ def test_ack_deduplicates_duplicate_pending_gate_open(tmp_path: Path) -> None:
     assert audit["pending_ack_messages"] == []
     assert audit["open_gates"] == [
         {
-            "gate": "G-M7-P1",
-            "phase": "1",
+            "gate": DEFAULT_GATE_ID,
+            "phase": DEFAULT_PHASE,
             "status": "open",
             "allowed_role": "backend",
-            "target_commit": "abc1234",
+            "target_commit": DEFAULT_TARGET_COMMIT,
         }
     ]
 
 
 def test_recovery_check_and_state_sync_render_projection(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    clock = FakeClock(
+    paths, _, service = make_memory_service(
+        tmp_path,
         "2026-03-01T10:01:00Z",
         "2026-03-01T10:05:00Z",
         "2026-03-01T10:20:00Z",
         "2026-03-01T10:22:00Z",
     )
-    service = CoordService(paths=paths, store=store, now_fn=clock)
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK GATE_OPEN, starting Phase 1",
-    )
+    _init_open_ack(service)
     service.recovery_check(
-        "M7",
+        DEFAULT_MILESTONE,
         role="backend",
-        last_seen_gate="G-M7-P1",
+        last_seen_gate=DEFAULT_GATE_ID,
         task="context reset, requesting state sync",
     )
     service.state_sync_ok(
-        "M7",
+        DEFAULT_MILESTONE,
         role="backend",
-        gate_id="G-M7-P1",
-        target_commit="abc1234",
+        gate_id=DEFAULT_GATE_ID,
+        target_commit=DEFAULT_TARGET_COMMIT,
         task="state sync complete after recovery",
     )
-    service.render("M7")
+    service.render(DEFAULT_MILESTONE)
 
-    log_dir = paths.log_dir("m7", "2026-03-01")
-    heartbeat_events = [
-        json.loads(line)
-        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
-        if line.strip()
-    ]
-    assert [event["event"] for event in heartbeat_events] == [
+    heartbeat_events = read_heartbeat_events(paths)
+    assert event_names(heartbeat_events) == [
         "GATE_OPEN_SENT",
         "ACK",
         "GATE_EFFECTIVE",
         "RECOVERY_CHECK",
         "STATE_SYNC_OK",
     ]
-    assert heartbeat_events[3]["last_seen_gate"] == "G-M7-P1"
+    assert heartbeat_events[3]["last_seen_gate"] == DEFAULT_GATE_ID
     assert heartbeat_events[3]["allowed_role"] == "backend"
     assert heartbeat_events[4]["sync_role"] == "backend"
     assert heartbeat_events[4]["allowed_role"] == "backend"
 
-    watchdog_status = (log_dir / "watchdog_status.md").read_text("utf-8")
+    watchdog_status = (rendered_log_dir(paths) / "watchdog_status.md").read_text("utf-8")
     assert (
         "| backend | idle | 2026-03-01T10:22:00Z | state sync complete after recovery | none | "
-        "resume at G-M7-P1 (abc1234) |"
+        f"resume at {DEFAULT_GATE_ID} ({DEFAULT_TARGET_COMMIT}) |"
     ) in watchdog_status
 
 
 def test_recovery_check_is_idempotent_for_same_gate(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    clock = FakeClock(
+    paths, _, service = make_memory_service(
+        tmp_path,
         "2026-03-01T10:01:00Z",
         "2026-03-01T10:05:00Z",
         "2026-03-01T10:20:00Z",
         "2026-03-01T10:21:00Z",
     )
-    service = CoordService(paths=paths, store=store, now_fn=clock)
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK GATE_OPEN, starting Phase 1",
-    )
+    _init_open_ack(service)
     service.recovery_check(
-        "M7",
+        DEFAULT_MILESTONE,
         role="backend",
-        last_seen_gate="G-M7-P1",
+        last_seen_gate=DEFAULT_GATE_ID,
         task="context reset, requesting state sync",
     )
     service.recovery_check(
-        "M7",
+        DEFAULT_MILESTONE,
         role="backend",
-        last_seen_gate="G-M7-P1",
+        last_seen_gate=DEFAULT_GATE_ID,
         task="same recovery check re-sent after CLI retry",
     )
-    service.render("M7")
+    service.render(DEFAULT_MILESTONE)
 
-    log_dir = paths.log_dir("m7", "2026-03-01")
-    heartbeat_events = [
-        json.loads(line)
-        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
-        if line.strip()
-    ]
-    assert [event["event"] for event in heartbeat_events] == [
+    assert event_names(read_heartbeat_events(paths)) == [
         "GATE_OPEN_SENT",
         "ACK",
         "GATE_EFFECTIVE",
@@ -271,114 +194,68 @@ def test_recovery_check_is_idempotent_for_same_gate(tmp_path: Path) -> None:
 
 
 def test_stale_detected_marks_watchdog_risk(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    clock = FakeClock(
+    paths, _, service = make_memory_service(
+        tmp_path,
         "2026-03-01T10:01:00Z",
         "2026-03-01T10:05:00Z",
         "2026-03-01T10:40:00Z",
     )
-    service = CoordService(paths=paths, store=store, now_fn=clock)
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK GATE_OPEN, starting Phase 1",
-    )
+    _init_open_ack(service)
     service.stale_detected(
-        "M7",
+        DEFAULT_MILESTONE,
         role="backend",
-        phase="1",
-        gate_id="G-M7-P1",
-        target_commit="abc1234",
+        phase=DEFAULT_PHASE,
+        gate_id=DEFAULT_GATE_ID,
+        target_commit=DEFAULT_TARGET_COMMIT,
         ping_count=2,
         task="two unanswered PINGs; suspected stale",
     )
-    service.render("M7")
+    service.render(DEFAULT_MILESTONE)
 
-    log_dir = paths.log_dir("m7", "2026-03-01")
-    heartbeat_events = [
-        json.loads(line)
-        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
-        if line.strip()
-    ]
+    heartbeat_events = read_heartbeat_events(paths)
     assert heartbeat_events[-1]["event"] == "STALE_DETECTED"
     assert heartbeat_events[-1]["ping_count"] == 2
 
-    watchdog_status = (log_dir / "watchdog_status.md").read_text("utf-8")
+    watchdog_status = (rendered_log_dir(paths) / "watchdog_status.md").read_text("utf-8")
     assert (
         "| backend | stuck | 2026-03-01T10:40:00Z | two unanswered PINGs; suspected stale | "
-        "suspected_stale | stale detected on G-M7-P1; investigate and recover |"
+        f"suspected_stale | stale detected on {DEFAULT_GATE_ID}; investigate and recover |"
     ) in watchdog_status
 
 
 def test_ping_and_unconfirmed_instruction_render_projection(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    clock = FakeClock(
+    paths, _, service = make_memory_service(
+        tmp_path,
         "2026-03-01T10:01:00Z",
         "2026-03-01T10:05:00Z",
         "2026-03-01T10:20:00Z",
         "2026-03-01T10:31:00Z",
     )
-    service = CoordService(paths=paths, store=store, now_fn=clock)
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK GATE_OPEN, starting Phase 1",
-    )
+    _init_open_ack(service)
     service.ping(
-        "M7",
+        DEFAULT_MILESTONE,
         role="backend",
-        phase="1",
-        gate_id="G-M7-P1",
-        target_commit="abc1234",
+        phase=DEFAULT_PHASE,
+        gate_id=DEFAULT_GATE_ID,
+        target_commit=DEFAULT_TARGET_COMMIT,
         task="PING backend after 20 minutes idle",
     )
     service.unconfirmed_instruction(
-        "M7",
+        DEFAULT_MILESTONE,
         role="backend",
         command="GATE_OPEN",
-        phase="1",
-        gate_id="G-M7-P1",
-        target_commit="abc1234",
+        phase=DEFAULT_PHASE,
+        gate_id=DEFAULT_GATE_ID,
+        target_commit=DEFAULT_TARGET_COMMIT,
         ping_count=2,
         task="record unconfirmed gate open after repeated PING",
     )
-    service.render("M7")
+    service.render(DEFAULT_MILESTONE)
 
-    log_dir = paths.log_dir("m7", "2026-03-01")
-    heartbeat_events = [
-        json.loads(line)
-        for line in (log_dir / "heartbeat_events.jsonl").read_text("utf-8").splitlines()
-        if line.strip()
-    ]
-    assert [event["event"] for event in heartbeat_events] == [
+    heartbeat_events = read_heartbeat_events(paths)
+    assert event_names(heartbeat_events) == [
         "GATE_OPEN_SENT",
         "ACK",
         "GATE_EFFECTIVE",
@@ -394,84 +271,43 @@ def test_ping_and_unconfirmed_instruction_render_projection(tmp_path: Path) -> N
 def test_log_pending_and_audit_snapshot(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    clock = FakeClock(
+    paths, store, service = make_memory_service(
+        tmp_path,
         "2026-03-01T10:01:00Z",
         "2026-03-01T10:05:00Z",
         "2026-03-01T10:20:00Z",
         "2026-03-01T10:21:00Z",
     )
-    service = CoordService(paths=paths, store=store, now_fn=clock)
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
-    service.ack(
-        "M7",
-        role="backend",
-        command="GATE_OPEN",
-        gate_id="G-M7-P1",
-        commit="abc1234",
-        task="ACK GATE_OPEN, starting Phase 1",
-    )
+    _init_open_ack(service)
     service.log_pending(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        target_commit="abc1234",
+        DEFAULT_MILESTONE,
+        phase=DEFAULT_PHASE,
+        gate_id=DEFAULT_GATE_ID,
+        target_commit=DEFAULT_TARGET_COMMIT,
         task="append-first delayed; will backfill next PM turn",
     )
     service.ping(
-        "M7",
+        DEFAULT_MILESTONE,
         role="backend",
-        phase="1",
-        gate_id="G-M7-P1",
-        target_commit="abc1234",
+        phase=DEFAULT_PHASE,
+        gate_id=DEFAULT_GATE_ID,
+        target_commit=DEFAULT_TARGET_COMMIT,
         task="PING backend after append-first recovery",
     )
-    service.render("M7")
+    service.render(DEFAULT_MILESTONE)
 
-    audit = service.audit("M7")
-    assert audit["reconciled"] is True
-    assert audit["received_events"] == 5
-    assert audit["logged_events"] == 5
-    assert audit["open_gates"] == [
-        {
-            "gate": "G-M7-P1",
-            "phase": "1",
-            "status": "open",
-            "allowed_role": "backend",
-            "target_commit": "abc1234",
-        }
-    ]
-    assert audit["pending_ack_messages"] == [
-        {
-            "command": "PING",
-            "role": "backend",
-            "gate": "G-M7-P1",
-            "phase": "1",
-            "target_commit": "abc1234",
-        }
-    ]
-    assert len(audit["log_pending_events"]) == 1
-    assert audit["log_pending_events"][0]["event"] == "LOG_PENDING"
-
-    exit_code = run_cli(
-        [
-            "audit",
-            "--milestone",
-            "M7",
-        ],
-        store=store,
-        paths=paths,
+    audit = service.audit(DEFAULT_MILESTONE)
+    assert (audit["reconciled"], audit["received_events"], audit["logged_events"]) == (
+        True,
+        5,
+        5,
     )
+    assert audit["open_gates"] == [_open_gate_snapshot()]
+    assert audit["pending_ack_messages"] == [_pending_ack_snapshot("PING")]
+    assert [event["event"] for event in audit["log_pending_events"]] == ["LOG_PENDING"]
+
+    exit_code = run_cli(["audit", "--milestone", DEFAULT_MILESTONE], store=store, paths=paths)
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["reconciled"] is True
@@ -480,29 +316,18 @@ def test_log_pending_and_audit_snapshot(
 
 
 def test_state_sync_ok_fails_closed_on_target_commit_mismatch(tmp_path: Path) -> None:
-    store = MemoryCoordStore()
-    paths = make_paths(tmp_path)
-    service = CoordService(
-        paths=paths,
-        store=store,
-        now_fn=FakeClock("2026-03-01T10:01:00Z", "2026-03-01T10:05:00Z"),
+    _, _, service = make_memory_service(
+        tmp_path, "2026-03-01T10:01:00Z", "2026-03-01T10:05:00Z"
     )
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit="abc1234",
-        task="open backend phase 1 gate",
-    )
+    init_default_control_plane(service)
+    open_default_gate(service)
 
     with pytest.raises(CoordError, match="state sync target_commit mismatch"):
         service.state_sync_ok(
-            "M7",
+            DEFAULT_MILESTONE,
             role="backend",
-            gate_id="G-M7-P1",
+            gate_id=DEFAULT_GATE_ID,
             target_commit="wrong999",
             task="state sync complete after recovery",
         )

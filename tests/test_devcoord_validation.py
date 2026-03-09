@@ -5,15 +5,84 @@ from pathlib import Path
 import pytest
 
 from tests.devcoord_helpers import (
+    DEFAULT_GATE_ID,
+    DEFAULT_MILESTONE,
+    DEFAULT_PHASE,
+    DEFAULT_TARGET_COMMIT,
     CoordService,
     FakeClock,
     MemoryCoordStore,
     SQLiteCoordStore,
+    ack_default_gate_open,
     build_parser,
+    gate_review_default,
+    init_default_control_plane,
+    init_git_repo_with_review,
     make_paths,
     make_sqlite_paths,
+    make_sqlite_service,
+    open_default_gate,
+    phase_complete_default,
     run_cli,
 )
+
+
+def _init_open_ack_sqlite(service: CoordService) -> None:
+    init_default_control_plane(service)
+    open_default_gate(service, task="open gate")
+    ack_default_gate_open(service, phase=DEFAULT_PHASE, task="ACK")
+
+
+def _init_open_ack_cli(store, paths) -> None:
+    run_cli(
+        ["init", "--milestone", DEFAULT_MILESTONE, "--run-date", "2026-03-01"],
+        store=store,
+        paths=paths,
+    )
+    run_cli(
+        [
+            "gate",
+            "open",
+            "--milestone",
+            DEFAULT_MILESTONE,
+            "--phase",
+            DEFAULT_PHASE,
+            "--gate",
+            DEFAULT_GATE_ID,
+            "--allowed-role",
+            "backend",
+            "--target-commit",
+            DEFAULT_TARGET_COMMIT,
+            "--task",
+            "open",
+        ],
+        store=store,
+        paths=paths,
+        now_fn=lambda: "2026-03-01T10:01:00Z",
+    )
+    run_cli(
+        [
+            "command",
+            "ack",
+            "--milestone",
+            DEFAULT_MILESTONE,
+            "--role",
+            "backend",
+            "--cmd",
+            "GATE_OPEN",
+            "--gate",
+            DEFAULT_GATE_ID,
+            "--commit",
+            DEFAULT_TARGET_COMMIT,
+            "--phase",
+            DEFAULT_PHASE,
+            "--task",
+            "ack",
+        ],
+        store=store,
+        paths=paths,
+        now_fn=lambda: "2026-03-01T10:02:00Z",
+    )
 
 
 class TestSQLitePragmaSettings:
@@ -41,59 +110,39 @@ class TestCommandSendSurface:
     def test_command_send_creates_pending_message_and_event(
         self, tmp_path: Path, cmd_name: str
     ) -> None:
-        paths = make_sqlite_paths(tmp_path)
-        store = SQLiteCoordStore(paths.control_db)
-        clock = FakeClock(
+        _, store, service = make_sqlite_service(
+            tmp_path,
             "2026-03-01T10:00:00Z",
             "2026-03-01T10:01:00Z",
             "2026-03-01T10:02:00Z",
             "2026-03-01T10:03:00Z",
             "2026-03-01T10:04:00Z",
         )
-        service = CoordService(paths=paths, store=store, now_fn=clock)
-        service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-        service.open_gate(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            allowed_role="backend",
-            target_commit="abc1234",
-            task="open gate",
-        )
-        service.ack(
-            "M7",
-            role="backend",
-            command="GATE_OPEN",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            phase="1",
-            task="ACK",
-        )
+        _init_open_ack_sqlite(service)
         service.ping(
-            "M7",
+            DEFAULT_MILESTONE,
             role="backend",
-            phase="1",
-            gate_id="G-M7-P1",
+            phase=DEFAULT_PHASE,
+            gate_id=DEFAULT_GATE_ID,
             task=f"send {cmd_name}",
             command_name=cmd_name,
         )
-        messages = store.list_records("m7", kind="message")
+        messages = store.list_records(DEFAULT_MILESTONE.lower(), kind="message")
         sent_msgs = [
             m
             for m in messages
             if m.metadata.get("command") == cmd_name and not m.metadata_bool("effective")
         ]
         assert len(sent_msgs) >= 1
-        events = store.list_records("m7", kind="event")
+        events = store.list_records(DEFAULT_MILESTONE.lower(), kind="event")
         sent_events = [e for e in events if e.metadata.get("event") == f"{cmd_name}_SENT"]
         assert len(sent_events) >= 1
         store.close()
 
     @pytest.mark.parametrize("cmd_name", ["STOP", "WAIT", "RESUME"])
     def test_command_send_can_be_acked(self, tmp_path: Path, cmd_name: str) -> None:
-        paths = make_sqlite_paths(tmp_path)
-        store = SQLiteCoordStore(paths.control_db)
-        clock = FakeClock(
+        _, store, service = make_sqlite_service(
+            tmp_path,
             "2026-03-01T10:00:00Z",
             "2026-03-01T10:01:00Z",
             "2026-03-01T10:02:00Z",
@@ -101,43 +150,25 @@ class TestCommandSendSurface:
             "2026-03-01T10:04:00Z",
             "2026-03-01T10:05:00Z",
         )
-        service = CoordService(paths=paths, store=store, now_fn=clock)
-        service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-        service.open_gate(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            allowed_role="backend",
-            target_commit="abc1234",
-            task="open gate",
-        )
-        service.ack(
-            "M7",
-            role="backend",
-            command="GATE_OPEN",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            phase="1",
-            task="ACK",
-        )
+        _init_open_ack_sqlite(service)
         service.ping(
-            "M7",
+            DEFAULT_MILESTONE,
             role="backend",
-            phase="1",
-            gate_id="G-M7-P1",
+            phase=DEFAULT_PHASE,
+            gate_id=DEFAULT_GATE_ID,
             task=f"send {cmd_name}",
             command_name=cmd_name,
         )
         service.ack(
-            "M7",
+            DEFAULT_MILESTONE,
             role="backend",
             command=cmd_name,
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            phase="1",
+            gate_id=DEFAULT_GATE_ID,
+            commit=DEFAULT_TARGET_COMMIT,
+            phase=DEFAULT_PHASE,
             task=f"ACK {cmd_name}",
         )
-        messages = store.list_records("m7", kind="message")
+        messages = store.list_records(DEFAULT_MILESTONE.lower(), kind="message")
         acked = [
             m
             for m in messages
@@ -150,51 +181,7 @@ class TestCommandSendSurface:
     def test_command_send_cli_surface(self, tmp_path: Path, cmd_name: str) -> None:
         store = MemoryCoordStore()
         paths = make_paths(tmp_path)
-        run_cli(["init", "--milestone", "M7", "--run-date", "2026-03-01"], store=store, paths=paths)
-        run_cli(
-            [
-                "gate",
-                "open",
-                "--milestone",
-                "M7",
-                "--phase",
-                "1",
-                "--gate",
-                "G-M7-P1",
-                "--allowed-role",
-                "backend",
-                "--target-commit",
-                "abc1234",
-                "--task",
-                "open",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=FakeClock("2026-03-01T10:01:00Z"),
-        )
-        run_cli(
-            [
-                "command",
-                "ack",
-                "--milestone",
-                "M7",
-                "--role",
-                "backend",
-                "--cmd",
-                "GATE_OPEN",
-                "--gate",
-                "G-M7-P1",
-                "--commit",
-                "abc1234",
-                "--phase",
-                "1",
-                "--task",
-                "ack",
-            ],
-            store=store,
-            paths=paths,
-            now_fn=FakeClock("2026-03-01T10:02:00Z"),
-        )
+        _init_open_ack_cli(store, paths)
         exit_code = run_cli(
             [
                 "command",
@@ -202,22 +189,22 @@ class TestCommandSendSurface:
                 "--name",
                 cmd_name,
                 "--milestone",
-                "M7",
+                DEFAULT_MILESTONE,
                 "--role",
                 "backend",
                 "--phase",
-                "1",
+                DEFAULT_PHASE,
                 "--gate",
-                "G-M7-P1",
+                DEFAULT_GATE_ID,
                 "--task",
                 f"send {cmd_name}",
             ],
             store=store,
             paths=paths,
-            now_fn=FakeClock("2026-03-01T10:03:00Z"),
+            now_fn=lambda: "2026-03-01T10:03:00Z",
         )
         assert exit_code == 0
-        records = store.list_records("m7")
+        records = store.list_records(DEFAULT_MILESTONE.lower())
         sent_msgs = [
             r
             for r in records
@@ -228,24 +215,15 @@ class TestCommandSendSurface:
 
 class TestTransactionAtomicity:
     def test_ack_rolls_back_on_failure(self, tmp_path: Path) -> None:
-        paths = make_sqlite_paths(tmp_path)
-        store = SQLiteCoordStore(paths.control_db)
-        clock = FakeClock(
+        _, store, service = make_sqlite_service(
+            tmp_path,
             "2026-03-01T10:00:00Z",
             "2026-03-01T10:01:00Z",
             "2026-03-01T10:02:00Z",
             "2026-03-01T10:03:00Z",
         )
-        service = CoordService(paths=paths, store=store, now_fn=clock)
-        service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-        service.open_gate(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            allowed_role="backend",
-            target_commit="abc1234",
-            task="open gate",
-        )
+        init_default_control_plane(service)
+        open_default_gate(service, task="open gate")
 
         original_create = store.create_record
 
@@ -259,31 +237,30 @@ class TestTransactionAtomicity:
 
         with pytest.raises(RuntimeError, match="injected fault"):
             service.ack(
-                "M7",
+                DEFAULT_MILESTONE,
                 role="backend",
                 command="GATE_OPEN",
-                gate_id="G-M7-P1",
-                commit="abc1234",
-                phase="1",
+                gate_id=DEFAULT_GATE_ID,
+                commit=DEFAULT_TARGET_COMMIT,
+                phase=DEFAULT_PHASE,
                 task="ACK",
             )
 
         store.create_record = original_create  # type: ignore[assignment]
 
-        messages = store.list_records("m7", kind="message")
+        messages = store.list_records(DEFAULT_MILESTONE.lower(), kind="message")
         gate_open_msgs = [m for m in messages if m.metadata.get("command") == "GATE_OPEN"]
         assert len(gate_open_msgs) == 1
         assert gate_open_msgs[0].metadata_bool("effective") is False
 
-        gates = store.list_records("m7", kind="gate")
-        gate = [g for g in gates if g.metadata.get("gate_id") == "G-M7-P1"][0]
+        gates = store.list_records(DEFAULT_MILESTONE.lower(), kind="gate")
+        gate = [g for g in gates if g.metadata.get("gate_id") == DEFAULT_GATE_ID][0]
         assert gate.metadata_str("gate_state") == "pending"
         store.close()
 
     def test_gate_close_rolls_back_on_failure(self, tmp_path: Path) -> None:
-        paths = make_sqlite_paths(tmp_path)
-        store = SQLiteCoordStore(paths.control_db)
-        clock = FakeClock(
+        paths, store, service = make_sqlite_service(
+            tmp_path,
             "2026-03-01T10:00:00Z",
             "2026-03-01T10:01:00Z",
             "2026-03-01T10:02:00Z",
@@ -293,67 +270,28 @@ class TestTransactionAtomicity:
             "2026-03-01T10:06:00Z",
             "2026-03-01T10:07:00Z",
         )
-        service = CoordService(paths=paths, store=store, now_fn=clock)
-        service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-        service.open_gate(
-            "M7",
-            phase="1",
-            gate_id="G-M7-P1",
-            allowed_role="backend",
-            target_commit="abc1234",
-            task="open gate",
-        )
-        service.ack(
-            "M7",
-            role="backend",
-            command="GATE_OPEN",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            phase="1",
-            task="ACK",
-        )
-        service.phase_complete(
-            "M7",
-            role="backend",
-            phase="1",
-            gate_id="G-M7-P1",
-            commit="abc1234",
-            task="done",
-        )
+        _init_open_ack_sqlite(service)
+        phase_complete_default(service, commit=DEFAULT_TARGET_COMMIT, task="done")
 
         report_relpath = "dev_docs/reports/m7_p1_review.md"
-        from tests.devcoord_helpers import init_git_repo_with_review
-
         report_commit = init_git_repo_with_review(paths, report_relpath)
-
-        service.gate_review(
-            "M7",
-            role="tester",
-            phase="1",
-            gate_id="G-M7-P1",
-            result="PASS",
-            report_commit=report_commit,
-            report_path=report_relpath,
-            task="review",
-        )
-        service.render("M7")
+        gate_review_default(service, report_commit, report_relpath, task="review")
+        service.render(DEFAULT_MILESTONE)
 
         original_create = store.create_record
 
         def failing_create(**kwargs):
-            if kwargs.get("metadata", {}).get("coord_kind") == "event":
-                event_type = kwargs.get("metadata", {}).get("event", "")
-                if event_type == "GATE_CLOSE":
-                    raise RuntimeError("injected fault: GATE_CLOSE event write failure")
+            if kwargs.get("metadata", {}).get("event") == "GATE_CLOSE":
+                raise RuntimeError("injected fault: GATE_CLOSE event write failure")
             return original_create(**kwargs)
 
         store.create_record = failing_create  # type: ignore[assignment]
 
         with pytest.raises(RuntimeError, match="injected fault"):
             service.gate_close(
-                "M7",
-                phase="1",
-                gate_id="G-M7-P1",
+                DEFAULT_MILESTONE,
+                phase=DEFAULT_PHASE,
+                gate_id=DEFAULT_GATE_ID,
                 result="PASS",
                 report_commit=report_commit,
                 report_path=report_relpath,
@@ -362,12 +300,12 @@ class TestTransactionAtomicity:
 
         store.create_record = original_create  # type: ignore[assignment]
 
-        gates = store.list_records("m7", kind="gate")
-        gate = [g for g in gates if g.metadata.get("gate_id") == "G-M7-P1"][0]
+        gates = store.list_records(DEFAULT_MILESTONE.lower(), kind="gate")
+        gate = [g for g in gates if g.metadata.get("gate_id") == DEFAULT_GATE_ID][0]
         assert gate.metadata_str("gate_state") != "closed"
 
-        phases = store.list_records("m7", kind="phase")
-        phase = [p for p in phases if p.metadata.get("phase") == "1"][0]
+        phases = store.list_records(DEFAULT_MILESTONE.lower(), kind="phase")
+        phase = [p for p in phases if p.metadata.get("phase") == DEFAULT_PHASE][0]
         assert phase.metadata_str("phase_state") != "closed"
         store.close()
 

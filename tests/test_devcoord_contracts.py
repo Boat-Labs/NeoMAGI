@@ -9,14 +9,33 @@ import pytest
 
 from scripts.devcoord import coord as coord_module
 from tests.devcoord_helpers import (
+    DEFAULT_ALLOWED_ROLE,
+    DEFAULT_GATE_ID,
+    DEFAULT_MILESTONE,
+    DEFAULT_PHASE,
+    DEFAULT_RUN_DATE,
+    DEFAULT_TARGET_COMMIT,
     CoordRecord,
     CoordService,
     FakeClock,
     MemoryCoordStore,
+    init_default_control_plane,
     init_git_repo_with_review,
     make_paths,
+    open_default_gate,
     run_cli,
+    write_json,
 )
+
+
+def _run_apply_with_payload(
+    store: MemoryCoordStore, paths, command: str, payload_path: Path
+) -> int:
+    return run_cli(
+        ["apply", command, "--payload-file", str(payload_path)],
+        store=store,
+        paths=paths,
+    )
 
 
 def test_init_creates_milestone_and_agent_records(tmp_path: Path) -> None:
@@ -52,57 +71,38 @@ def test_apply_payload_file_executes_open_gate(tmp_path: Path) -> None:
     store = MemoryCoordStore()
     paths = make_paths(tmp_path)
     init_payload_path = tmp_path / "init.json"
-    init_payload_path.write_text(
-        json.dumps(
-            {
-                "milestone": "M7",
-                "run_date": "2026-03-01",
-                "roles": ["pm", "backend", "tester"],
-            }
-        ),
-        "utf-8",
+    write_json(
+        init_payload_path,
+        {
+            "milestone": DEFAULT_MILESTONE,
+            "run_date": DEFAULT_RUN_DATE,
+            "roles": ["pm", "backend", "tester"],
+        },
     )
-
-    run_cli(
-        [
-            "apply",
-            "init",
-            "--payload-file",
-            str(init_payload_path),
-        ],
-        store=store,
-        paths=paths,
-    )
+    _run_apply_with_payload(store, paths, "init", init_payload_path)
 
     payload_path = tmp_path / "open_gate.json"
-    payload_path.write_text(
-        json.dumps(
-            {
-                "milestone": "M7",
-                "phase": "1",
-                "gate_id": "G-M7-P1",
-                "allowed_role": "backend",
-                "target_commit": "abc1234",
-                "task": "open backend phase 1 gate",
-            }
-        ),
-        "utf-8",
+    write_json(
+        payload_path,
+        {
+            "milestone": DEFAULT_MILESTONE,
+            "phase": DEFAULT_PHASE,
+            "gate_id": DEFAULT_GATE_ID,
+            "allowed_role": DEFAULT_ALLOWED_ROLE,
+            "target_commit": DEFAULT_TARGET_COMMIT,
+            "task": "open backend phase 1 gate",
+        },
     )
 
     exit_code = run_cli(
-        [
-            "apply",
-            "open-gate",
-            "--payload-file",
-            str(payload_path),
-        ],
+        ["apply", "open-gate", "--payload-file", str(payload_path)],
         store=store,
         paths=paths,
         now_fn=FakeClock("2026-03-01T10:01:00Z"),
     )
 
     assert exit_code == 0
-    issues = store.list_records("m7")
+    issues = store.list_records(DEFAULT_MILESTONE.lower())
     assert any(issue.metadata.get("coord_kind") == "gate" for issue in issues)
     assert any(issue.metadata.get("event") == "GATE_OPEN_SENT" for issue in issues)
 
@@ -158,22 +158,15 @@ def test_open_gate_canonicalizes_target_commit_when_git_can_resolve_it(tmp_path:
         now_fn=FakeClock("2026-03-01T10:00:00Z"),
     )
 
-    service.init_control_plane("M7", run_date="2026-03-01", roles=("pm", "backend", "tester"))
-    service.open_gate(
-        "M7",
-        phase="1",
-        gate_id="G-M7-P1",
-        allowed_role="backend",
-        target_commit=short_commit,
-        task="open gate with short git ref",
-    )
-    service.render("M7")
+    init_default_control_plane(service)
+    open_default_gate(service, target_commit=short_commit, task="open gate with short git ref")
+    service.render(DEFAULT_MILESTONE)
 
-    audit = service.audit("M7")
+    audit = service.audit(DEFAULT_MILESTONE)
     assert audit["open_gates"] == [
         {
-            "gate": "G-M7-P1",
-            "phase": "1",
+            "gate": DEFAULT_GATE_ID,
+            "phase": DEFAULT_PHASE,
             "status": "pending",
             "allowed_role": "backend",
             "target_commit": full_commit,
@@ -183,8 +176,8 @@ def test_open_gate_canonicalizes_target_commit_when_git_can_resolve_it(tmp_path:
         {
             "command": "GATE_OPEN",
             "role": "backend",
-            "gate": "G-M7-P1",
-            "phase": "1",
+            "gate": DEFAULT_GATE_ID,
+            "phase": DEFAULT_PHASE,
             "target_commit": full_commit,
         }
     ]
