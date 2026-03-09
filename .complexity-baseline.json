@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-09T22:54:36+00:00",
+  "generated_at": "2026-03-09T22:56:22+00:00",
   "policy_version": 1,
   "thresholds": {
     "prod": {
@@ -31,28 +31,6 @@
     }
   },
   "block_findings": [
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_branches",
-      "path": "scripts/backup.py",
-      "actual": 9,
-      "limit": 6,
-      "fingerprint": "function_branches::scripts/backup.py::run_backup::95",
-      "symbol": "run_backup",
-      "line": 95
-    },
-    {
-      "severity": "block",
-      "group": "scripts",
-      "metric": "function_lines",
-      "path": "scripts/backup.py",
-      "actual": 58,
-      "limit": 50,
-      "fingerprint": "function_lines::scripts/backup.py::run_backup::95",
-      "symbol": "run_backup",
-      "line": 95
-    },
     {
       "severity": "block",
       "group": "scripts",
