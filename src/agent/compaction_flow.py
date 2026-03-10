@@ -119,11 +119,15 @@ async def _finalize_compaction_result(
     if result.status == "noop":
         _log_compaction_noop(session_id, last_compaction_seq)
         return result
-    await loop._session_manager.store_compaction_result(
-        session_id,
-        result,
-        lock_token=lock_token,
-    )
+    try:
+        await loop._session_manager.store_compaction_result(
+            session_id,
+            result,
+            lock_token=lock_token,
+        )
+    except Exception:
+        _agent_logger().exception("compaction_store_failed", session_id=session_id)
+        return result
     await _persist_flush_candidates(loop, result, session_id, scope_key)
     _log_compaction_complete(session_id, result)
     return result
