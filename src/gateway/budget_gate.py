@@ -46,70 +46,72 @@ class BudgetGate:
         session_id: str = "",
         eval_run_id: str = "",
     ) -> Reservation:
-        """Atomic: check global budget + reserve estimated cost in one PG transaction.
-
-        PG READ COMMITTED + row-level lock on budget_state ensures
-        concurrent requests are serialized and cannot oversell.
-        """
+        """Atomic: check global budget + reserve estimated cost in one PG transaction."""
         async with self._engine.begin() as conn:
-            # Atomic: UPDATE with WHERE guard; PG row lock serializes concurrent attempts
-            row = await conn.execute(
-                text(f"""
-                    UPDATE {self._schema}.budget_state
-                    SET cumulative_eur = cumulative_eur + :cost, updated_at = NOW()
-                    WHERE id = 'global'
-                      AND cumulative_eur + :cost < :stop
-                    RETURNING cumulative_eur
-                """),
-                {"cost": Decimal(str(estimated_cost_eur)), "stop": Decimal(str(BUDGET_STOP_EUR))},
-            )
-            result = row.fetchone()
-
+            result = await self._try_debit(conn, estimated_cost_eur)
             if result is None:
-                # Budget exceeded — read current for error message
-                current_row = await conn.execute(
-                    text(
-                        f"SELECT cumulative_eur FROM {self._schema}.budget_state"
-                        " WHERE id = 'global'"
-                    )
-                )
-                current = float(current_row.scalar_one())
-                return Reservation(
-                    denied=True,
-                    message=(
-                        f"Budget exceeded (cumulative €{current:.2f} "
-                        f"+ estimated €{estimated_cost_eur:.2f} "
-                        f">= stop €{BUDGET_STOP_EUR})."
-                    ),
-                )
-
-            # Record reservation
-            rid_row = await conn.execute(
-                text(f"""
-                    INSERT INTO {self._schema}.budget_reservations
-                        (provider, model, session_id, eval_run_id, reserved_eur, status)
-                    VALUES (:provider, :model, :session_id, :eval_run_id, :reserved_eur, 'reserved')
-                    RETURNING reservation_id
-                """),
-                {
-                    "provider": provider,
-                    "model": model,
-                    "session_id": session_id,
-                    "eval_run_id": eval_run_id,
-                    "reserved_eur": Decimal(str(estimated_cost_eur)),
-                },
+                return await self._denied_reservation(conn, estimated_cost_eur)
+            return await self._record_reservation(
+                conn, result, provider=provider, model=model,
+                estimated_cost_eur=estimated_cost_eur,
+                session_id=session_id, eval_run_id=eval_run_id,
             )
-            rid = str(rid_row.scalar_one())
 
-            cumulative = float(result[0])
-            if cumulative >= BUDGET_WARN_EUR:
-                logger.warning("budget_warning", cumulative_eur=cumulative, provider=provider)
+    async def _try_debit(self, conn, estimated_cost_eur: float):
+        """Atomically increment budget; returns cumulative row or None if over limit."""
+        row = await conn.execute(
+            text(f"""
+                UPDATE {self._schema}.budget_state
+                SET cumulative_eur = cumulative_eur + :cost, updated_at = NOW()
+                WHERE id = 'global'
+                  AND cumulative_eur + :cost < :stop
+                RETURNING cumulative_eur
+            """),
+            {"cost": Decimal(str(estimated_cost_eur)), "stop": Decimal(str(BUDGET_STOP_EUR))},
+        )
+        return row.fetchone()
 
-            return Reservation(
-                denied=False,
-                reservation_id=rid,
-                reserved_eur=estimated_cost_eur,
+    async def _denied_reservation(self, conn, estimated_cost_eur: float) -> Reservation:
+        """Build a denied Reservation with current cumulative info."""
+        current_row = await conn.execute(
+            text(
+                f"SELECT cumulative_eur FROM {self._schema}.budget_state"
+                " WHERE id = 'global'"
             )
+        )
+        current = float(current_row.scalar_one())
+        return Reservation(
+            denied=True,
+            message=(
+                f"Budget exceeded (cumulative €{current:.2f} "
+                f"+ estimated €{estimated_cost_eur:.2f} "
+                f">= stop €{BUDGET_STOP_EUR})."
+            ),
+        )
+
+    async def _record_reservation(
+        self, conn, result, *, provider: str, model: str,
+        estimated_cost_eur: float, session_id: str, eval_run_id: str,
+    ) -> Reservation:
+        """Insert reservation row and return success Reservation."""
+        rid_row = await conn.execute(
+            text(f"""
+                INSERT INTO {self._schema}.budget_reservations
+                    (provider, model, session_id, eval_run_id, reserved_eur, status)
+                VALUES (:provider, :model, :session_id, :eval_run_id, :reserved_eur, 'reserved')
+                RETURNING reservation_id
+            """),
+            {
+                "provider": provider, "model": model, "session_id": session_id,
+                "eval_run_id": eval_run_id,
+                "reserved_eur": Decimal(str(estimated_cost_eur)),
+            },
+        )
+        rid = str(rid_row.scalar_one())
+        cumulative = float(result[0])
+        if cumulative >= BUDGET_WARN_EUR:
+            logger.warning("budget_warning", cumulative_eur=cumulative, provider=provider)
+        return Reservation(denied=False, reservation_id=rid, reserved_eur=estimated_cost_eur)
 
     async def settle(
         self,

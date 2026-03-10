@@ -53,6 +53,42 @@ class _FakeModel(ModelClient):
 # ---------------------------------------------------------------------------
 
 
+async def _init_budget_schema(conn, initial_cumulative: float) -> None:
+    """Create budget tables and seed initial state."""
+    await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA}"))
+    await conn.run_sync(Base.metadata.create_all)
+    await conn.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.budget_state (
+            id TEXT PRIMARY KEY DEFAULT 'global',
+            cumulative_eur NUMERIC(10,4) NOT NULL DEFAULT 0,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """))
+    await conn.execute(text(f"""
+        CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.budget_reservations (
+            reservation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            session_id TEXT NOT NULL DEFAULT '',
+            eval_run_id TEXT NOT NULL DEFAULT '',
+            reserved_eur NUMERIC(10,4) NOT NULL,
+            actual_eur NUMERIC(10,4),
+            status TEXT NOT NULL DEFAULT 'reserved',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            settled_at TIMESTAMPTZ
+        )
+    """))
+    await conn.execute(text(f"""
+        INSERT INTO {DB_SCHEMA}.budget_state (id, cumulative_eur)
+        VALUES ('global', :cum)
+        ON CONFLICT (id) DO UPDATE SET cumulative_eur = :cum, updated_at = NOW()
+    """), {"cum": initial_cumulative})
+    await conn.execute(text(f"TRUNCATE {DB_SCHEMA}.budget_reservations CASCADE"))
+    await conn.execute(
+        text(f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions CASCADE")
+    )
+
+
 def _make_budget_app(pg_url: str, tmp_path, *, initial_cumulative: float = 0.0):
     """Create a gateway app with real BudgetGate (real DB, budget tables)."""
     from src.gateway.app import _handle_rpc_message
@@ -63,63 +99,23 @@ def _make_budget_app(pg_url: str, tmp_path, *, initial_cumulative: float = 0.0):
     async def lifespan(app: FastAPI):
         engine = create_async_engine(pg_url, echo=False)
         async with engine.begin() as conn:
-            await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA}"))
-            await conn.run_sync(Base.metadata.create_all)
-            # Budget tables (migration-managed, not ORM)
-            await conn.execute(text(f"""
-                CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.budget_state (
-                    id TEXT PRIMARY KEY DEFAULT 'global',
-                    cumulative_eur NUMERIC(10,4) NOT NULL DEFAULT 0,
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-            """))
-            await conn.execute(text(f"""
-                CREATE TABLE IF NOT EXISTS {DB_SCHEMA}.budget_reservations (
-                    reservation_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    provider TEXT NOT NULL,
-                    model TEXT NOT NULL,
-                    session_id TEXT NOT NULL DEFAULT '',
-                    eval_run_id TEXT NOT NULL DEFAULT '',
-                    reserved_eur NUMERIC(10,4) NOT NULL,
-                    actual_eur NUMERIC(10,4),
-                    status TEXT NOT NULL DEFAULT 'reserved',
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    settled_at TIMESTAMPTZ
-                )
-            """))
-            # Seed global budget row + set initial cumulative
-            await conn.execute(text(f"""
-                INSERT INTO {DB_SCHEMA}.budget_state (id, cumulative_eur)
-                VALUES ('global', :cum)
-                ON CONFLICT (id) DO UPDATE SET cumulative_eur = :cum, updated_at = NOW()
-            """), {"cum": initial_cumulative})
-            # Clean previous test data
-            await conn.execute(text(f"TRUNCATE {DB_SCHEMA}.budget_reservations CASCADE"))
-            await conn.execute(
-                text(f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions CASCADE")
-            )
+            await _init_budget_schema(conn, initial_cumulative)
 
-        db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
-        session_manager = SessionManager(db_session_factory=db_session_factory)
-        agent_loop = AgentLoop(
-            model_client=model,
-            session_manager=session_manager,
-            workspace_dir=tmp_path,
-            model="test-model",
+        db_factory = async_sessionmaker(engine, expire_on_commit=False)
+        sm = SessionManager(db_session_factory=db_factory)
+        agent = AgentLoop(
+            model_client=model, session_manager=sm,
+            workspace_dir=tmp_path, model="test-model",
         )
         registry = AgentLoopRegistry(default_provider="openai")
-        registry.register("openai", agent_loop, "test-model")
-
-        budget_gate = BudgetGate(engine, schema=DB_SCHEMA)
+        registry.register("openai", agent, "test-model")
 
         app.state.agent_loop_registry = registry
-        app.state.agent_loop = agent_loop
-        app.state.session_manager = session_manager
-        app.state.budget_gate = budget_gate
+        app.state.agent_loop = agent
+        app.state.session_manager = sm
+        app.state.budget_gate = BudgetGate(engine, schema=DB_SCHEMA)
         app.state.db_engine = engine
-
         yield
-
         await engine.dispose()
 
     app = FastAPI(lifespan=lifespan)

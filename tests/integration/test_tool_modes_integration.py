@@ -72,6 +72,16 @@ class FakeModelClient(ModelClient):
                 yield event
 
 
+async def _init_test_schema(engine) -> None:
+    """Initialize schema and clean leftover data."""
+    async with engine.begin() as conn:
+        await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA}"))
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text(f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions CASCADE")
+        )
+
+
 def _make_app(pg_url: str, tmp_path: Path):
     """Create a FastAPI app with real builtins registry for tool mode testing."""
     from src.gateway.app import _handle_rpc_message
@@ -81,41 +91,29 @@ def _make_app(pg_url: str, tmp_path: Path):
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         engine = create_async_engine(pg_url, echo=False)
-        async with engine.begin() as conn:
-            await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA}"))
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(
-                text(f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions CASCADE")
-            )
-        db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        await _init_test_schema(engine)
+        db_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-        session_manager = SessionManager(db_session_factory=db_session_factory)
+        sm = SessionManager(db_session_factory=db_factory)
         registry = ToolRegistry()
         register_builtins(registry, tmp_path)
 
-        agent_loop = AgentLoop(
-            model_client=fake_model,
-            session_manager=session_manager,
-            workspace_dir=tmp_path,
-            model="test-model",
-            tool_registry=registry,
+        agent = AgentLoop(
+            model_client=fake_model, session_manager=sm,
+            workspace_dir=tmp_path, model="test-model", tool_registry=registry,
         )
-
-        # Build registry (M6: _handle_chat_send uses registry)
         loop_registry = AgentLoopRegistry(default_provider="openai")
-        loop_registry.register("openai", agent_loop, "test-model")
+        loop_registry.register("openai", agent, "test-model")
 
         from tests.conftest import StubBudgetGate
 
         app.state.agent_loop_registry = loop_registry
-        app.state.agent_loop = agent_loop
-        app.state.session_manager = session_manager
+        app.state.agent_loop = agent
+        app.state.session_manager = sm
         app.state.budget_gate = StubBudgetGate()
         app.state.fake_model = fake_model
-        app.state.db_session_factory = db_session_factory
-
+        app.state.db_session_factory = db_factory
         yield
-
         await engine.dispose()
 
     app = FastAPI(lifespan=lifespan)

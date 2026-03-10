@@ -153,28 +153,36 @@ class OpenAICompatModelClient(ModelClient):
                     self._health_tracker.record_provider_success(self._provider_name)
                 return result
             except _RETRYABLE as e:
-                if attempt == self._max_retries:
-                    if self._health_tracker:
-                        self._health_tracker.record_provider_failure(self._provider_name)
-                    raise LLMError(
-                        f"LLM call failed after {self._max_retries + 1} attempts: {e}"
-                    ) from e
-                delay = self._base_delay * (2**attempt) + random.uniform(0, 0.5)
-                logger.warning(
-                    "llm_retry",
-                    attempt=attempt + 1,
-                    max_retries=self._max_retries,
-                    delay=round(delay, 2),
-                    error=str(e),
-                    context=context,
+                self._handle_retryable(attempt, e, context)
+                await asyncio.sleep(
+                    self._base_delay * (2**attempt) + random.uniform(0, 0.5)
                 )
-                await asyncio.sleep(delay)
             except APIStatusError as e:
-                if self._health_tracker:
-                    self._health_tracker.record_provider_failure(self._provider_name)
+                self._record_failure()
                 raise LLMError(f"LLM API error: {e.status_code} {e.message}") from e
         # Unreachable, but satisfies type checker
         raise LLMError("Retry loop exhausted")  # pragma: no cover
+
+    def _handle_retryable(self, attempt: int, error: Exception, context: str) -> None:
+        """Handle a retryable error: raise on last attempt, log otherwise."""
+        if attempt == self._max_retries:
+            self._record_failure()
+            raise LLMError(
+                f"LLM call failed after {self._max_retries + 1} attempts: {error}"
+            ) from error
+        delay = self._base_delay * (2**attempt) + random.uniform(0, 0.5)
+        logger.warning(
+            "llm_retry",
+            attempt=attempt + 1,
+            max_retries=self._max_retries,
+            delay=round(delay, 2),
+            error=str(error),
+            context=context,
+        )
+
+    def _record_failure(self) -> None:
+        if self._health_tracker:
+            self._health_tracker.record_provider_failure(self._provider_name)
 
     async def chat(
         self,
@@ -271,91 +279,97 @@ class OpenAICompatModelClient(ModelClient):
         tools: list[dict] | None = None,
         temperature: float | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        """Stream LLM response, yielding content deltas and accumulated tool calls.
-
-        Content tokens are yielded immediately as ContentDelta.
-        Tool call deltas are accumulated silently; after the stream ends,
-        a single ToolCallsComplete is yielded if any tool calls were detected.
-
-        OpenAI streaming tool_calls format:
-        - First chunk per tool: {index, id, function: {name, arguments: ""}}
-        - Subsequent chunks: {index, function: {arguments: "partial..."}}
-        - Arguments are partial JSON strings that must be concatenated.
-        """
-        logger.debug(
-            "chat_stream_with_tools_request",
-            model=model,
-            message_count=len(messages),
-            tool_count=len(tools) if tools else 0,
-        )
-        stream = await self._retry_call(
-            lambda: self._client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=tools if tools else NOT_GIVEN,
-                stream=True,
-                **({"temperature": temperature} if temperature is not None else {}),
-            ),
-            context="chat_stream_with_tools",
-            defer_health=True,
-        )
-
-        # Accumulate tool_calls delta fragments.
-        # Prefer index (OpenAI format), fallback to id (Gemini may emit index=None).
-        # Keep insertion order explicitly; dict key sort is not meaningful across key types.
-        pending_tool_calls: dict[str, dict[str, str]] = {}
-        pending_order: list[str] = []
-        fallback_seq = 0
-        last_key: str | None = None
-
+        """Stream LLM response, yielding content deltas and accumulated tool calls."""
+        stream = await self._open_stream(messages, model, tools=tools, temperature=temperature)
+        accumulator = _ToolCallAccumulator()
         try:
-            async for chunk in stream:
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-
-                # Content path: yield immediately
+            async for delta in _iter_deltas(stream):
                 if delta.content:
                     yield ContentDelta(text=delta.content)
-
-                # Tool calls path: accumulate delta fragments
-                if delta.tool_calls:
-                    for tc_delta in delta.tool_calls:
-                        if tc_delta.index is not None:
-                            key = f"idx:{tc_delta.index}"
-                        elif tc_delta.id:
-                            key = f"id:{tc_delta.id}"
-                        elif tc_delta.function and tc_delta.function.name:
-                            key = f"fallback:{fallback_seq}"
-                            fallback_seq += 1
-                        elif last_key is not None:
-                            # Best-effort continuation when provider omits both index and id.
-                            key = last_key
-                        else:
-                            key = f"fallback:{fallback_seq}"
-                            fallback_seq += 1
-
-                        if key not in pending_tool_calls:
-                            pending_tool_calls[key] = {"id": "", "name": "", "arguments": ""}
-                            pending_order.append(key)
-                        entry = pending_tool_calls[key]
-                        last_key = key
-
-                        if tc_delta.id:
-                            entry["id"] = tc_delta.id
-                        if tc_delta.function:
-                            if tc_delta.function.name:
-                                entry["name"] = tc_delta.function.name
-                            if tc_delta.function.arguments:
-                                entry["arguments"] += tc_delta.function.arguments
-
+                accumulator.ingest_delta(delta)
             if self._health_tracker:
                 self._health_tracker.record_provider_success(self._provider_name)
         except Exception:
-            if self._health_tracker:
-                self._health_tracker.record_provider_failure(self._provider_name)
+            self._record_failure()
             raise
+        if accumulator.has_calls():
+            yield ToolCallsComplete(tool_calls=accumulator.collect())
 
-        # After stream ends: yield accumulated tool calls if any
-        if pending_tool_calls:
-            yield ToolCallsComplete(tool_calls=[pending_tool_calls[k] for k in pending_order])
+    async def _open_stream(self, messages, model, *, tools=None, temperature=None):
+        """Create a streaming completion with retry and health deferral."""
+        logger.debug(
+            "chat_stream_with_tools_request", model=model,
+            message_count=len(messages), tool_count=len(tools) if tools else 0,
+        )
+        return await self._retry_call(
+            lambda: self._client.chat.completions.create(
+                model=model, messages=messages,
+                tools=tools if tools else NOT_GIVEN, stream=True,
+                **({"temperature": temperature} if temperature is not None else {}),
+            ),
+            context="chat_stream_with_tools", defer_health=True,
+        )
+
+
+async def _iter_deltas(stream):
+    """Yield choice deltas from a streaming response, skipping empty chunks."""
+    async for chunk in stream:
+        if chunk.choices:
+            yield chunk.choices[0].delta
+
+
+class _ToolCallAccumulator:
+    """Accumulate streaming tool-call deltas into complete calls.
+
+    Prefer index (OpenAI format), fallback to id (Gemini may emit index=None).
+    """
+
+    def __init__(self) -> None:
+        self._calls: dict[str, dict[str, str]] = {}
+        self._order: list[str] = []
+        self._fallback_seq = 0
+        self._last_key: str | None = None
+
+    def ingest_delta(self, delta: Any) -> None:
+        """Ingest all tool_calls from a choice delta (no-op if none)."""
+        if not delta.tool_calls:
+            return
+        for tc in delta.tool_calls:
+            self._ingest_one(tc)
+
+    def _ingest_one(self, tc_delta: Any) -> None:
+        key = self._resolve_key(tc_delta)
+        if key not in self._calls:
+            self._calls[key] = {"id": "", "name": "", "arguments": ""}
+            self._order.append(key)
+        entry = self._calls[key]
+        self._last_key = key
+
+        if tc_delta.id:
+            entry["id"] = tc_delta.id
+        if tc_delta.function:
+            if tc_delta.function.name:
+                entry["name"] = tc_delta.function.name
+            if tc_delta.function.arguments:
+                entry["arguments"] += tc_delta.function.arguments
+
+    def has_calls(self) -> bool:
+        return bool(self._calls)
+
+    def collect(self) -> list[dict[str, str]]:
+        return [self._calls[k] for k in self._order]
+
+    def _resolve_key(self, tc_delta: Any) -> str:
+        if tc_delta.index is not None:
+            return f"idx:{tc_delta.index}"
+        if tc_delta.id:
+            return f"id:{tc_delta.id}"
+        if tc_delta.function and tc_delta.function.name:
+            key = f"fallback:{self._fallback_seq}"
+            self._fallback_seq += 1
+            return key
+        if self._last_key is not None:
+            return self._last_key
+        key = f"fallback:{self._fallback_seq}"
+        self._fallback_seq += 1
+        return key

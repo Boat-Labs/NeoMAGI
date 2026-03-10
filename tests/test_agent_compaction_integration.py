@@ -100,6 +100,54 @@ def _make_settings(**overrides) -> CompactionSettings:
     return CompactionSettings(**defaults)
 
 
+_EMPTY_SUMMARY = (
+    '{"facts":[],"decisions":[],"open_todos":[],'
+    '"user_prefs":[],"timeline":[]}'
+)
+
+
+def _make_compaction_model_client(*, stream_text: str = "OK"):
+    """Create a model client with compaction summary + stream response."""
+    mc = MagicMock()
+    mc.chat = AsyncMock(return_value=_EMPTY_SUMMARY)
+    mc.chat_stream_with_tools = MagicMock(
+        side_effect=[_make_stream_response(stream_text)()]
+    )
+    return mc
+
+
+def _make_effective_history_tracker(history):
+    """Create a side_effect for get_effective_history that filters by watermark."""
+    def _side_effect(session_id, last_seq):
+        if last_seq is None:
+            return history
+        return [m for m in history if m.seq > last_seq]
+    return _side_effect
+
+
+def _assert_watermark_before_current(sm, current_user_seq: int) -> None:
+    """Assert that after compaction, watermark is before current user message."""
+    if not sm.store_compaction_result.called:
+        return
+    last_call = sm.get_effective_history.call_args_list[-1]
+    new_watermark = (
+        last_call.args[1] if len(last_call.args) > 1
+        else last_call.kwargs.get("last_compaction_seq")
+    )
+    if new_watermark is not None:
+        assert current_user_seq > new_watermark
+
+
+def _assert_failopen_response(events) -> None:
+    """Assert fail-open error message is present in events."""
+    text_events = [e for e in events if isinstance(e, TextChunk)]
+    assert len(text_events) >= 1
+    assert any(
+        "压缩过程中遇到错误" in e.content or "无法进一步压缩" in e.content
+        for e in text_events
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -209,63 +257,27 @@ class TestAgentCompactionIntegration:
 
     async def test_current_turn_preserved_after_compaction(self, tmp_path):
         """P0: After compaction, current user message is still in effective history."""
-        summary_response = (
-            '{"facts":[],"decisions":[],"open_todos":[],'
-            '"user_prefs":[],"timeline":[]}'
-        )
-        model_client = MagicMock()
-        model_client.chat = AsyncMock(return_value=summary_response)
-        model_client.chat_stream_with_tools = MagicMock(
-            side_effect=[_make_stream_response()()]
-        )
-
+        model_client = _make_compaction_model_client()
         current_user_seq = 40
         history = _make_long_history(20, start_seq=0)
-        # Add current user message
         history.append(_msg_with_seq(current_user_seq, "user", "Current question"))
 
         sm = _make_session_manager(history, user_seq=current_user_seq)
-
-        # Track calls to get_effective_history
-        call_count = [0]
-        original_return = history
-
-        def effective_history_side_effect(session_id, last_seq):
-            call_count[0] += 1
-            if last_seq is None:
-                return original_return
-            return [m for m in original_return if m.seq > last_seq]
-
-        sm.get_effective_history = MagicMock(side_effect=effective_history_side_effect)
+        sm.get_effective_history = MagicMock(
+            side_effect=_make_effective_history_tracker(history),
+        )
 
         settings = _make_settings(context_limit=2000, compact_ratio=0.50, warn_ratio=0.30)
-
         agent = AgentLoop(
-            model_client=model_client,
-            session_manager=sm,
-            workspace_dir=tmp_path,
-            compaction_settings=settings,
-            model="gpt-4o-mini",
+            model_client=model_client, session_manager=sm,
+            workspace_dir=tmp_path, compaction_settings=settings, model="gpt-4o-mini",
         )
 
         async for _ in agent.handle_message("test", "Current question", lock_token="lock"):
             pass
 
-        # Verify that effective_history was called at least once
         assert sm.get_effective_history.call_count >= 1
-
-        # If compaction happened, verify the second call has a non-None watermark
-        if sm.store_compaction_result.called:
-            # After compaction, get_effective_history is called again with new watermark
-            last_call = sm.get_effective_history.call_args_list[-1]
-            new_watermark = (
-                last_call.args[1]
-                if len(last_call.args) > 1
-                else last_call.kwargs.get("last_compaction_seq")
-            )
-            # The current user message seq should be > watermark
-            if new_watermark is not None:
-                assert current_user_seq > new_watermark
+        _assert_watermark_before_current(sm, current_user_seq)
 
     async def test_noop_does_not_call_store(self, tmp_path):
         """Noop status: no store_compaction_result called."""
@@ -606,20 +618,10 @@ class TestPostCompactionOverflow:
         """store_compaction_result throws during overflow → fail-open."""
         from src.infra.errors import SessionFencingError
 
-        summary_response = (
-            '{"facts":[],"decisions":[],"open_todos":[],'
-            '"user_prefs":[],"timeline":[]}'
-        )
-        model_client = MagicMock()
-        model_client.chat = AsyncMock(return_value=summary_response)
-        model_client.chat_stream_with_tools = MagicMock(
-            side_effect=[_make_stream_response("Should not see this")()]
-        )
-
+        model_client = _make_compaction_model_client(stream_text="Should not see this")
         history = _make_long_history(30, start_seq=0)
         sm = _make_session_manager(history, user_seq=60)
 
-        # Make store fail on the SECOND call (first call is from _try_compact)
         call_count = [0]
 
         async def store_side_effect(*args, **kwargs):
@@ -630,36 +632,20 @@ class TestPostCompactionOverflow:
         sm.store_compaction_result = AsyncMock(side_effect=store_side_effect)
 
         settings = _make_settings(
-            context_limit=500,
-            compact_ratio=0.50,
-            warn_ratio=0.30,
-            min_preserved_turns=4,
+            context_limit=500, compact_ratio=0.50,
+            warn_ratio=0.30, min_preserved_turns=4,
         )
-
         agent = AgentLoop(
-            model_client=model_client,
-            session_manager=sm,
-            workspace_dir=tmp_path,
-            compaction_settings=settings,
-            model="gpt-4o-mini",
+            model_client=model_client, session_manager=sm,
+            workspace_dir=tmp_path, compaction_settings=settings, model="gpt-4o-mini",
         )
 
         events = []
         async for event in agent.handle_message("test", "Go", lock_token="lock"):
             events.append(event)
 
-        # Fail-open: error message present (exception path uses different wording)
-        text_events = [e for e in events if isinstance(e, TextChunk)]
-        assert len(text_events) >= 1
-        assert any(
-            "压缩过程中遇到错误" in e.content or "无法进一步压缩" in e.content
-            for e in text_events
-        )
-
-        # store was called at least twice (normal + overflow retry that threw)
+        _assert_failopen_response(events)
         assert sm.store_compaction_result.call_count >= 2
-
-        # Model streaming MUST NOT be called (fail-open = no model call)
         model_client.chat_stream_with_tools.assert_not_called()
 
     async def test_min_preserved_1_still_tries_emergency_trim(self, tmp_path):

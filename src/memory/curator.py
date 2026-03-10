@@ -86,61 +86,50 @@ class MemoryCurator:
     ) -> CurationResult:
         """Execute curation pass. Returns summary of changes."""
         days = lookback_days or self._settings.curation_lookback_days
-
-        # 1. Read recent daily notes
         daily_content = self._read_recent_daily_notes(workspace_path, days=days)
         if not daily_content:
             logger.info("curation_skipped_no_notes", workspace=str(workspace_path))
             return CurationResult(status="no_changes")
 
-        # 2. Read current MEMORY.md
         memory_md_path = workspace_path / "MEMORY.md"
-        current_curated = ""
-        if memory_md_path.is_file():
-            current_curated = memory_md_path.read_text(encoding="utf-8").strip()
+        current_curated = (
+            memory_md_path.read_text(encoding="utf-8").strip() if memory_md_path.is_file() else ""
+        )
 
-        # 3. Generate proposal via LLM
         proposal = await self.propose_updates(daily_content, current_curated)
-
-        # 3b. Empty output guard: LLM returned empty → preserve existing MEMORY.md
-        if not proposal.new_content or not proposal.new_content.strip():
+        if not (proposal.new_content and proposal.new_content.strip()):
             logger.warning("curation_empty_proposal", workspace=str(workspace_path))
             return CurationResult(status="no_changes")
-
-        # 4. Check if content changed
         if proposal.new_content.strip() == current_curated.strip():
             logger.info("curation_no_changes")
             return CurationResult(status="no_changes")
 
-        # 5. Enforce size limit
-        max_chars = self._settings.curated_max_tokens * 4
-        new_content = proposal.new_content
-        if len(new_content) > max_chars:
-            new_content = new_content[:max_chars]
-            logger.warning("curation_truncated", max_chars=max_chars)
-
-        # 6. Write updated MEMORY.md
+        new_content = self._enforce_size_limit(proposal.new_content)
         memory_md_path.write_text(new_content + "\n", encoding="utf-8")
-
-        # 7. Reindex if indexer available
-        if self._indexer:
-            try:
-                await self._indexer.index_curated_memory(memory_md_path, scope_key=scope_key)
-            except Exception:
-                logger.exception("curation_reindex_failed")
+        await self._try_reindex(memory_md_path, scope_key=scope_key)
 
         result = CurationResult(
-            status="updated",
-            additions_count=len(proposal.additions),
-            removals_count=len(proposal.removals),
-            new_content=new_content,
+            status="updated", additions_count=len(proposal.additions),
+            removals_count=len(proposal.removals), new_content=new_content,
         )
-        logger.info(
-            "curation_complete",
-            additions=result.additions_count,
-            removals=result.removals_count,
-        )
+        logger.info("curation_complete", additions=result.additions_count,
+                     removals=result.removals_count)
         return result
+
+    def _enforce_size_limit(self, content: str) -> str:
+        max_chars = self._settings.curated_max_tokens * 4
+        if len(content) > max_chars:
+            logger.warning("curation_truncated", max_chars=max_chars)
+            return content[:max_chars]
+        return content
+
+    async def _try_reindex(self, memory_md_path: Path, *, scope_key: str) -> None:
+        if not self._indexer:
+            return
+        try:
+            await self._indexer.index_curated_memory(memory_md_path, scope_key=scope_key)
+        except Exception:
+            logger.exception("curation_reindex_failed")
 
     async def propose_updates(
         self,

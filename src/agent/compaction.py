@@ -141,178 +141,208 @@ class CompactionEngine:
         model: str,
         session_id: str = "",
     ) -> CompactionResult:
-        """Execute compaction pipeline.
+        """Execute compaction pipeline: split → flush → summarise → anchor-check."""
+        zones = self._identify_zones(messages, current_user_seq, last_compaction_seq)
+        if zones is None:
+            return self._noop(last_compaction_seq)
 
-        Steps:
-        1. Split messages into turns
-        2. Exclude current unfinished turn (seq >= current_user_seq)
-        3. Identify compressible range (after last_compaction_seq, before preserved zone)
-        4. If no compressible range -> return noop
-        5. Generate memory flush candidates from compressible turns
-        6. Build rolling summary via LLM
-        7. Anchor visibility validation (ADR 0030)
-        8. Return CompactionResult
-        """
-        all_turns = split_turns(messages)
-
-        if not all_turns:
-            return CompactionResult(
-                status="noop",
-                new_compaction_seq=last_compaction_seq or 0,
-                compaction_metadata=self._make_metadata("noop"),
-            )
-
-        # Step 2: Exclude current unfinished turn
-        completed_turns = [t for t in all_turns if t.start_seq < current_user_seq]
-        if not completed_turns:
-            return CompactionResult(
-                status="noop",
-                new_compaction_seq=last_compaction_seq or 0,
-                compaction_metadata=self._make_metadata("noop"),
-            )
-
-        # Step 3: Identify preserved and compressible zones
-        min_preserved = self._settings.min_preserved_turns
-        if len(completed_turns) <= min_preserved:
-            return CompactionResult(
-                status="noop",
-                new_compaction_seq=last_compaction_seq or 0,
-                compaction_metadata=self._make_metadata("noop"),
-                preserved_messages=[m for t in completed_turns for m in t.messages],
-            )
-
-        preserved_turns = completed_turns[-min_preserved:]
-        compressible_turns = completed_turns[:-min_preserved]
-
-        # Filter out already-compacted turns
-        if last_compaction_seq is not None:
-            compressible_turns = [t for t in compressible_turns if t.end_seq > last_compaction_seq]
-
+        preserved_turns, compressible_turns, preserved_msgs = zones
         if not compressible_turns:
-            return CompactionResult(
-                status="noop",
-                new_compaction_seq=last_compaction_seq or 0,
-                compaction_metadata=self._make_metadata("noop"),
-                preserved_messages=[m for t in preserved_turns for m in t.messages],
+            return self._noop(last_compaction_seq, preserved_msgs)
+
+        new_seq = min(compressible_turns[-1].end_seq, current_user_seq - 1)
+        flush_candidates, flush_skipped = await self._run_flush(compressible_turns, session_id)
+
+        summary_text, status = await self._run_summary(
+            compressible_turns, previous_compacted_context, model, session_id,
+        )
+        if status == "degraded_small_input":
+            return self._build_result(
+                "degraded", previous_compacted_context, new_seq,
+                flush_candidates, preserved_msgs, preserved_turns,
+                compressible_turns, flush_skipped=flush_skipped,
             )
 
-        # New watermark: end_seq of last compressible turn
-        new_compaction_seq = compressible_turns[-1].end_seq
-        # Invariant: must not exceed current_user_seq - 1
-        new_compaction_seq = min(new_compaction_seq, current_user_seq - 1)
+        anchor_passed, anchor_retry_used, summary_text, status = (
+            await self._run_anchor_validation(
+                summary_text, status, system_prompt, preserved_turns,
+                previous_compacted_context, compressible_turns, model, session_id,
+            )
+        )
+        return self._build_result(
+            status, summary_text, new_seq, flush_candidates,
+            preserved_msgs, preserved_turns, compressible_turns,
+            flush_skipped=flush_skipped, anchor_validation_passed=anchor_passed,
+            anchor_retry_used=anchor_retry_used,
+        )
 
-        # Step 5: Memory flush (with timeout protection)
-        flush_candidates: list[MemoryFlushCandidate] = []
-        flush_skipped = False
+    def _noop(
+        self, last_compaction_seq: int | None,
+        preserved_messages: list[MessageWithSeq] | None = None,
+    ) -> CompactionResult:
+        return CompactionResult(
+            status="noop", new_compaction_seq=last_compaction_seq or 0,
+            compaction_metadata=self._make_metadata("noop"),
+            preserved_messages=preserved_messages or [],
+        )
+
+    # ------------------------------------------------------------------
+    # compact sub-steps
+    # ------------------------------------------------------------------
+
+    def _identify_zones(
+        self,
+        messages: list[MessageWithSeq],
+        current_user_seq: int,
+        last_compaction_seq: int | None,
+    ) -> tuple[list[Turn], list[Turn], list[MessageWithSeq]] | None:
+        """Return (preserved_turns, compressible_turns, preserved_msgs) or None for noop."""
+        all_turns = split_turns(messages)
+        if not all_turns:
+            return None
+
+        completed = [t for t in all_turns if t.start_seq < current_user_seq]
+        if not completed:
+            return None
+
+        min_preserved = self._settings.min_preserved_turns
+        if len(completed) <= min_preserved:
+            return None
+
+        preserved = completed[-min_preserved:]
+        compressible = completed[:-min_preserved]
+        if last_compaction_seq is not None:
+            compressible = [t for t in compressible if t.end_seq > last_compaction_seq]
+
+        preserved_msgs = [m for t in preserved for m in t.messages]
+        return preserved, compressible, preserved_msgs
+
+    async def _run_flush(
+        self, compressible_turns: list[Turn], session_id: str,
+    ) -> tuple[list[MemoryFlushCandidate], bool]:
+        """Generate memory flush candidates with timeout protection."""
         try:
-            flush_candidates = await asyncio.wait_for(
+            candidates = await asyncio.wait_for(
                 asyncio.get_event_loop().run_in_executor(
-                    None,
-                    self._flush_generator.generate,
-                    compressible_turns,
-                    session_id,
+                    None, self._flush_generator.generate, compressible_turns, session_id,
                 ),
                 timeout=self._settings.flush_timeout_s,
             )
+            return candidates, False
         except (TimeoutError, Exception):
             logger.warning("flush_timeout_or_error", session_id=session_id)
-            flush_skipped = True
+            return [], True
 
-        # Step 6: Rolling summary via LLM
+    async def _run_summary(
+        self,
+        compressible_turns: list[Turn],
+        previous_compacted_context: str | None,
+        model: str,
+        session_id: str,
+    ) -> tuple[str | None, Literal["success", "degraded", "degraded_small_input"]]:
+        """Generate rolling summary via LLM. Returns (text, status)."""
         conversation_text = self._turns_to_text(compressible_turns)
         input_tokens = self._counter.count_text(conversation_text)
         max_summary_tokens = int(input_tokens * 0.3)
 
-        # Input too small for meaningful summary → degraded (trim-only, watermark advances)
         if max_summary_tokens < 100:
             logger.info(
                 "input_too_small_for_summary",
                 input_tokens=input_tokens,
                 max_summary_tokens=max_summary_tokens,
             )
-            return CompactionResult(
-                status="degraded",
-                compacted_context=previous_compacted_context,
-                compaction_metadata=self._make_metadata(
-                    "degraded",
-                    preserved_count=len(preserved_turns),
-                    summarized_count=len(compressible_turns),
-                    flush_skipped=flush_skipped,
-                ),
-                new_compaction_seq=new_compaction_seq,
-                memory_flush_candidates=flush_candidates,
-                preserved_messages=[m for t in preserved_turns for m in t.messages],
-            )
-
-        summary_text: str | None = None
-        anchor_retry_used = False
-        status: Literal["success", "degraded", "failed", "noop"] = "success"
+            return None, "degraded_small_input"
 
         try:
-            summary_text = await asyncio.wait_for(
+            text = await asyncio.wait_for(
                 self._generate_summary(
-                    previous_compacted_context,
-                    conversation_text,
-                    max_summary_tokens,
-                    model,
+                    previous_compacted_context, conversation_text,
+                    max_summary_tokens, model,
                 ),
                 timeout=self._settings.compact_timeout_s,
             )
+            return text, "success"
         except (TimeoutError, Exception) as e:
             logger.warning("compaction_llm_failed", error=str(e), session_id=session_id)
-            status = "degraded"
+            return None, "degraded"
 
-        # Step 7: Anchor visibility validation (ADR 0030)
-        # effective_history_text = preserved turns text (approximation of what the
-        # model will see alongside system_prompt + compacted_context)
+    async def _run_anchor_validation(
+        self,
+        summary_text: str | None,
+        status: str,
+        system_prompt: str,
+        preserved_turns: list[Turn],
+        previous_compacted_context: str | None,
+        compressible_turns: list[Turn],
+        model: str,
+        session_id: str,
+    ) -> tuple[bool, bool, str | None, Literal["success", "degraded", "failed", "noop"]]:
+        """Anchor visibility validation (ADR 0030). Returns (passed, retry_used, text, status)."""
+        if not summary_text or status != "success":
+            return True, False, summary_text, status  # type: ignore[return-value]
+
         preserved_text = self._turns_to_text(preserved_turns)
-        anchor_passed = True
-        if summary_text and status == "success":
-            anchor_passed = self._validate_anchors(system_prompt, summary_text, preserved_text)
-            if not anchor_passed and self._settings.anchor_retry_enabled:
-                anchor_retry_used = True
-                logger.info("anchor_retry", session_id=session_id)
-                try:
-                    summary_text = await asyncio.wait_for(
-                        self._generate_summary(
-                            previous_compacted_context,
-                            conversation_text,
-                            max_summary_tokens,
-                            model,
-                        ),
-                        timeout=self._settings.compact_timeout_s,
-                    )
-                    anchor_passed = self._validate_anchors(
-                        system_prompt, summary_text, preserved_text
-                    )
-                except (TimeoutError, Exception):
-                    anchor_passed = False
+        passed = self._validate_anchors(system_prompt, summary_text, preserved_text)
 
-                if not anchor_passed:
-                    status = "degraded"
-                    logger.warning("anchor_validation_failed_after_retry", session_id=session_id)
+        if passed or not self._settings.anchor_retry_enabled:
+            final_status: Literal["success", "degraded"] = "success" if passed else "degraded"
+            return passed, False, summary_text, final_status
 
-        # Build metadata
+        logger.info("anchor_retry", session_id=session_id)
+        conversation_text = self._turns_to_text(compressible_turns)
+        input_tokens = self._counter.count_text(conversation_text)
+        max_summary_tokens = int(input_tokens * 0.3)
+        try:
+            summary_text = await asyncio.wait_for(
+                self._generate_summary(
+                    previous_compacted_context, conversation_text,
+                    max_summary_tokens, model,
+                ),
+                timeout=self._settings.compact_timeout_s,
+            )
+            passed = self._validate_anchors(system_prompt, summary_text, preserved_text)
+        except (TimeoutError, Exception):
+            passed = False
+
+        if not passed:
+            logger.warning("anchor_validation_failed_after_retry", session_id=session_id)
+        return passed, True, summary_text, "success" if passed else "degraded"
+
+    def _build_result(
+        self,
+        status: str,
+        compacted_context: str | None,
+        new_compaction_seq: int,
+        flush_candidates: list[MemoryFlushCandidate],
+        preserved_msgs: list[MessageWithSeq],
+        preserved_turns: list[Turn],
+        compressible_turns: list[Turn],
+        *,
+        flush_skipped: bool = False,
+        anchor_validation_passed: bool = True,
+        anchor_retry_used: bool = False,
+    ) -> CompactionResult:
         metadata = self._make_metadata(
             status,
             preserved_count=len(preserved_turns),
             summarized_count=len(compressible_turns),
             flush_skipped=flush_skipped,
-            anchor_validation_passed=anchor_passed,
+            anchor_validation_passed=anchor_validation_passed,
             anchor_retry_used=anchor_retry_used,
             compacted_context_tokens=(
-                self._counter.count_text(summary_text) if summary_text else 0
+                self._counter.count_text(compacted_context) if compacted_context else 0
             ),
-            rolling_summary_input_tokens=input_tokens,
+            rolling_summary_input_tokens=(
+                self._counter.count_text(self._turns_to_text(compressible_turns))
+            ),
         )
-
         return CompactionResult(
-            status=status,
-            compacted_context=summary_text,
+            status=status,  # type: ignore[arg-type]
+            compacted_context=compacted_context,
             compaction_metadata=metadata,
             new_compaction_seq=new_compaction_seq,
             memory_flush_candidates=flush_candidates,
-            preserved_messages=[m for t in preserved_turns for m in t.messages],
+            preserved_messages=preserved_msgs,
         )
 
     async def _generate_summary(
@@ -348,19 +378,26 @@ class CompactionEngine:
             return []
         anchors: list[str] = []
         for filename in self._ANCHOR_FILES:
-            filepath = self._workspace_dir / filename
-            if not filepath.exists():
-                continue
-            try:
-                text = filepath.read_text(encoding="utf-8")
-                for line in text.splitlines():
-                    stripped = line.strip()
-                    if stripped:
-                        anchors.append(stripped)
-                        break
-            except OSError:
-                logger.warning("anchor_file_read_error", file=filename)
+            phrase = self._read_first_line(self._workspace_dir / filename)
+            if phrase is not None:
+                anchors.append(phrase)
         return anchors
+
+    @staticmethod
+    def _read_first_line(filepath: Path) -> str | None:
+        """Return first non-empty line from *filepath*, or None."""
+        if not filepath.exists():
+            return None
+        try:
+            text = filepath.read_text(encoding="utf-8")
+        except OSError:
+            logger.warning("anchor_file_read_error", file=filepath.name)
+            return None
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped:
+                return stripped
+        return None
 
     def _validate_anchors(
         self,

@@ -139,10 +139,7 @@ class EvolutionEngine:
     async def evaluate(self, version: int) -> EvalResult:
         """Run eval checks against a proposed version.
 
-        Checks:
-        1. Content coherence: well-formed, non-empty
-        2. Size limit: within configured max tokens
-        3. Diff sanity: not identical to current active version
+        Checks: content coherence, size limit, diff sanity.
         """
         async with self._db_factory() as db:
             record = await self._get_version(db, version)
@@ -152,140 +149,33 @@ class EvolutionEngine:
                     summary=f"Version {version} is '{record.status}', not 'proposed'",
                 )
 
-            checks: list[EvalCheck] = []
-
-            # Check 1: Content coherence
-            content = record.content
-            is_coherent = bool(content and content.strip())
-            checks.append(
-                EvalCheck(
-                    name="content_coherence",
-                    passed=is_coherent,
-                    detail="Content is non-empty and well-formed"
-                    if is_coherent
-                    else "Content is empty or whitespace-only",
-                )
-            )
-
-            # Check 2: Size limit
-            max_tokens = 4000
-            if self._settings:
-                max_tokens = self._settings.curated_max_tokens
-            max_chars = max_tokens * 4
-            within_limit = len(content) <= max_chars
-            checks.append(
-                EvalCheck(
-                    name="size_limit",
-                    passed=within_limit,
-                    detail=f"Content size {len(content)} chars"
-                    + (f" (limit: {max_chars})" if not within_limit else ""),
-                )
-            )
-
-            # Check 3: Diff sanity — not identical to current
-            current = await self._get_active_version(db)
-            is_different = current is None or current.content.strip() != content.strip()
-            checks.append(
-                EvalCheck(
-                    name="diff_sanity",
-                    passed=is_different,
-                    detail="Content differs from current active version"
-                    if is_different
-                    else "Content identical to current active version",
-                )
-            )
-
+            checks = await self._build_eval_checks(db, record)
             passed = all(c.passed for c in checks)
             summary = (
                 "All checks passed"
                 if passed
                 else "Failed: " + ", ".join(c.name for c in checks if not c.passed)
             )
-
-            # Store eval result
-            eval_dict = {
-                "passed": passed,
-                "checks": [
-                    {"name": c.name, "passed": c.passed, "detail": c.detail} for c in checks
-                ],
-                "summary": summary,
-            }
-            await db.execute(
-                update(SoulVersionRecord)
-                .where(SoulVersionRecord.version == version)
-                .values(eval_result=eval_dict)
-            )
-            await db.commit()
+            await self._store_eval_result(db, version, passed, checks, summary)
 
         logger.info("soul_evaluated", version=version, passed=passed)
         return EvalResult(passed=passed, checks=checks, summary=summary)
 
     async def apply(self, version: int) -> None:
-        """Apply a proposed version that passed eval (ADR 0036 compensation).
-
-        1. Verify status == 'proposed' and eval passed
-        2. Save old SOUL.md content (for compensation)
-        3. Write new content to workspace/SOUL.md
-        4. Update DB: new version → 'active', old active → 'superseded'
-        5. On ANY failure after file write: restore old file content + raise
-        """
+        """Apply a proposed version that passed eval (ADR 0036 compensation)."""
         async with self._db_factory() as db:
             record = await self._get_version(db, version)
+            self._validate_for_apply(record, version)
 
-            if record.status != "proposed":
-                raise EvolutionError(
-                    f"Cannot apply version {version}: status is '{record.status}'",
-                    code="INVALID_STATUS",
-                )
-            if not record.eval_result or not record.eval_result.get("passed"):
-                raise EvolutionError(
-                    f"Cannot apply version {version}: eval not passed",
-                    code="EVAL_NOT_PASSED",
-                )
-
-            # ADR 0036: save old content for compensation
-            soul_path = self._workspace_path / "SOUL.md"
-            old_content: str | None = None
-            if soul_path.is_file():
-                old_content = soul_path.read_text(encoding="utf-8")
-
-            # Write new content to file BEFORE DB mutation
+            soul_path, old_content = self._read_soul_file()
             soul_path.write_text(record.content, encoding="utf-8")
 
             try:
-                # Supersede current active version
-                await db.execute(
-                    update(SoulVersionRecord)
-                    .where(SoulVersionRecord.status == "active")
-                    .values(status="superseded")
-                )
-
-                # Activate proposed version
-                await db.execute(
-                    update(SoulVersionRecord)
-                    .where(SoulVersionRecord.version == version)
-                    .values(status="active")
-                )
-
-                await db.commit()
+                await self._activate_version(db, version)
             except Exception:
-                # ADR 0036: compensate — restore old file content
-                try:
-                    if old_content is not None:
-                        soul_path.write_text(old_content, encoding="utf-8")
-                    else:
-                        soul_path.unlink(missing_ok=True)
-                    logger.error(
-                        "soul_apply_db_failed_compensated",
-                        version=version,
-                        msg="DB operation failed, file write compensated",
-                    )
-                except Exception:
-                    logger.error(
-                        "soul_apply_compensation_failed",
-                        version=version,
-                        msg="DB failed AND file rollback failed; manual intervention required",
-                    )
+                self._compensate_file_write(
+                    soul_path, old_content, operation="apply", version=version,
+                )
                 raise
 
         logger.info("soul_applied", version=version)
@@ -297,71 +187,17 @@ class EvolutionEngine:
         Returns the new active version number.
         """
         async with self._db_factory() as db:
-            # Find target
-            if to_version is not None:
-                target = await self._get_version(db, to_version)
-            else:
-                result = await db.execute(
-                    select(SoulVersionRecord)
-                    .where(SoulVersionRecord.status == "superseded")
-                    .order_by(SoulVersionRecord.version.desc())
-                    .limit(1)
-                )
-                target = result.scalars().first()
-                if not target:
-                    raise EvolutionError(
-                        "No previous version to rollback to",
-                        code="NO_ROLLBACK_TARGET",
-                    )
-
-            # ADR 0036: save old content for compensation
-            soul_path = self._workspace_path / "SOUL.md"
-            old_content: str | None = None
-            if soul_path.is_file():
-                old_content = soul_path.read_text(encoding="utf-8")
-
-            # Write target content to file BEFORE DB mutation
+            target = await self._find_rollback_target(db, to_version)
+            soul_path, old_content = self._read_soul_file()
             soul_path.write_text(target.content, encoding="utf-8")
 
             try:
-                # Mark current active as rolled_back
-                await db.execute(
-                    update(SoulVersionRecord)
-                    .where(SoulVersionRecord.status == "active")
-                    .values(status="rolled_back")
-                )
-
-                # Create new version with target content
-                next_version = await self._next_version(db)
-                new_record = SoulVersionRecord(
-                    version=next_version,
-                    content=target.content,
-                    status="active",
-                    proposal={"rollback_from": target.version},
-                    eval_result=None,
-                    created_by="system",
-                )
-                db.add(new_record)
-
-                await db.commit()
+                next_version = await self._create_rollback_version(db, target)
             except Exception:
-                # ADR 0036: compensate — restore old file content
-                try:
-                    if old_content is not None:
-                        soul_path.write_text(old_content, encoding="utf-8")
-                    else:
-                        soul_path.unlink(missing_ok=True)
-                    logger.error(
-                        "soul_rollback_db_failed_compensated",
-                        target_version=target.version,
-                        msg="DB operation failed, file write compensated",
-                    )
-                except Exception:
-                    logger.error(
-                        "soul_rollback_compensation_failed",
-                        target_version=target.version,
-                        msg="DB failed AND file rollback failed; manual intervention required",
-                    )
+                self._compensate_file_write(
+                    soul_path, old_content,
+                    operation="rollback", target_version=target.version,
+                )
                 raise
 
         logger.info("soul_rolled_back", new_version=next_version, target=target.version)
@@ -459,6 +295,168 @@ class EvolutionEngine:
             await db.commit()
 
         logger.info("soul_bootstrapped", version=0, chars=len(content))
+
+    # ── extracted helpers (evaluate / apply / rollback) ──
+
+    async def _build_eval_checks(
+        self, db: AsyncSession, record: SoulVersionRecord,
+    ) -> list[EvalCheck]:
+        """Build the three evaluation checks for a proposed version."""
+        content = record.content
+        checks: list[EvalCheck] = []
+
+        # Check 1: Content coherence
+        is_coherent = bool(content and content.strip())
+        checks.append(EvalCheck(
+            name="content_coherence",
+            passed=is_coherent,
+            detail="Content is non-empty and well-formed"
+            if is_coherent else "Content is empty or whitespace-only",
+        ))
+
+        # Check 2: Size limit
+        max_tokens = 4000
+        if self._settings:
+            max_tokens = self._settings.curated_max_tokens
+        max_chars = max_tokens * 4
+        within_limit = len(content) <= max_chars
+        checks.append(EvalCheck(
+            name="size_limit",
+            passed=within_limit,
+            detail=f"Content size {len(content)} chars"
+            + (f" (limit: {max_chars})" if not within_limit else ""),
+        ))
+
+        # Check 3: Diff sanity — not identical to current
+        current = await self._get_active_version(db)
+        is_different = current is None or current.content.strip() != content.strip()
+        checks.append(EvalCheck(
+            name="diff_sanity",
+            passed=is_different,
+            detail="Content differs from current active version"
+            if is_different else "Content identical to current active version",
+        ))
+        return checks
+
+    @staticmethod
+    async def _store_eval_result(
+        db: AsyncSession, version: int,
+        passed: bool, checks: list[EvalCheck], summary: str,
+    ) -> None:
+        """Persist evaluation result to the version record."""
+        eval_dict = {
+            "passed": passed,
+            "checks": [
+                {"name": c.name, "passed": c.passed, "detail": c.detail} for c in checks
+            ],
+            "summary": summary,
+        }
+        await db.execute(
+            update(SoulVersionRecord)
+            .where(SoulVersionRecord.version == version)
+            .values(eval_result=eval_dict)
+        )
+        await db.commit()
+
+    @staticmethod
+    def _validate_for_apply(record: SoulVersionRecord, version: int) -> None:
+        """Validate preconditions for applying a version."""
+        if record.status != "proposed":
+            raise EvolutionError(
+                f"Cannot apply version {version}: status is '{record.status}'",
+                code="INVALID_STATUS",
+            )
+        if not record.eval_result or not record.eval_result.get("passed"):
+            raise EvolutionError(
+                f"Cannot apply version {version}: eval not passed",
+                code="EVAL_NOT_PASSED",
+            )
+
+    def _read_soul_file(self) -> tuple[Path, str | None]:
+        """Read current SOUL.md for ADR 0036 compensation backup."""
+        soul_path = self._workspace_path / "SOUL.md"
+        old_content = soul_path.read_text(encoding="utf-8") if soul_path.is_file() else None
+        return soul_path, old_content
+
+    @staticmethod
+    def _compensate_file_write(
+        soul_path: Path, old_content: str | None,
+        *, operation: str, **log_kw: object,
+    ) -> None:
+        """ADR 0036: restore file content after DB failure."""
+        try:
+            if old_content is not None:
+                soul_path.write_text(old_content, encoding="utf-8")
+            else:
+                soul_path.unlink(missing_ok=True)
+            logger.error(
+                f"soul_{operation}_db_failed_compensated",
+                msg="DB operation failed, file write compensated",
+                **log_kw,
+            )
+        except Exception:
+            logger.error(
+                f"soul_{operation}_compensation_failed",
+                msg="DB failed AND file rollback failed; manual intervention required",
+                **log_kw,
+            )
+
+    @staticmethod
+    async def _activate_version(db: AsyncSession, version: int) -> None:
+        """Supersede current active version and activate the specified one."""
+        await db.execute(
+            update(SoulVersionRecord)
+            .where(SoulVersionRecord.status == "active")
+            .values(status="superseded")
+        )
+        await db.execute(
+            update(SoulVersionRecord)
+            .where(SoulVersionRecord.version == version)
+            .values(status="active")
+        )
+        await db.commit()
+
+    async def _find_rollback_target(
+        self, db: AsyncSession, to_version: int | None,
+    ) -> SoulVersionRecord:
+        """Find the version record to roll back to."""
+        if to_version is not None:
+            return await self._get_version(db, to_version)
+        result = await db.execute(
+            select(SoulVersionRecord)
+            .where(SoulVersionRecord.status == "superseded")
+            .order_by(SoulVersionRecord.version.desc())
+            .limit(1)
+        )
+        target = result.scalars().first()
+        if not target:
+            raise EvolutionError(
+                "No previous version to rollback to",
+                code="NO_ROLLBACK_TARGET",
+            )
+        return target
+
+    async def _create_rollback_version(
+        self, db: AsyncSession, target: SoulVersionRecord,
+    ) -> int:
+        """Mark active as rolled_back and create new active version from target."""
+        await db.execute(
+            update(SoulVersionRecord)
+            .where(SoulVersionRecord.status == "active")
+            .values(status="rolled_back")
+        )
+        next_version = await self._next_version(db)
+        new_record = SoulVersionRecord(
+            version=next_version,
+            content=target.content,
+            status="active",
+            proposal={"rollback_from": target.version},
+            eval_result=None,
+            created_by="system",
+        )
+        db.add(new_record)
+        await db.commit()
+        return next_version
 
     # ── helpers ──
 

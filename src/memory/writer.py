@@ -50,11 +50,6 @@ class MemoryWriter:
     ) -> Path:
         """Append a timestamped entry to daily note file.
 
-        Format:
-        ---
-        [HH:MM] (source: {source}, scope: {scope_key})
-        {text}
-
         Returns: path to the written file.
         Raises: MemoryWriteError if file exceeds max size.
         """
@@ -66,16 +61,28 @@ class MemoryWriter:
 
         now = datetime.now(UTC)
         entry = f"---\n[{now.strftime('%H:%M')}] (source: {source}, scope: {scope_key})\n{text}\n"
-
-        # Check file size limit before writing
-        current_size = filepath.stat().st_size if filepath.exists() else 0
         entry_bytes = entry.encode("utf-8")
+
+        self._check_size_limit(filepath, entry_bytes, filename)
+
+        with filepath.open("a", encoding="utf-8") as f:
+            f.write(entry)
+
+        logger.info("daily_note_appended", path=str(filepath), scope_key=scope_key,
+                     source=source, bytes_written=len(entry_bytes))
+
+        await self._try_incremental_index(filepath, text, scope_key, today)
+        return filepath
+
+    def _check_size_limit(
+        self, filepath: Path, entry_bytes: bytes, filename: str,
+    ) -> None:
+        """Raise MemoryWriteError if appending would exceed daily note size limit."""
+        current_size = filepath.stat().st_size if filepath.exists() else 0
         if current_size + len(entry_bytes) > self._settings.max_daily_note_bytes:
             logger.warning(
-                "daily_note_size_limit",
-                path=str(filepath),
-                current_size=current_size,
-                entry_size=len(entry_bytes),
+                "daily_note_size_limit", path=str(filepath),
+                current_size=current_size, entry_size=len(entry_bytes),
                 max_bytes=self._settings.max_daily_note_bytes,
             )
             raise MemoryWriteError(
@@ -83,37 +90,21 @@ class MemoryWriter:
                 f"({current_size + len(entry_bytes)} > {self._settings.max_daily_note_bytes})"
             )
 
-        # Append to file (create if not exist)
-        with filepath.open("a", encoding="utf-8") as f:
-            f.write(entry)
-
-        logger.info(
-            "daily_note_appended",
-            path=str(filepath),
-            scope_key=scope_key,
-            source=source,
-            bytes_written=len(entry_bytes),
-        )
-
-        # Incremental index: best-effort, failure must not block write path
-        if self._indexer:
-            try:
-                rel_path = str(filepath.relative_to(self._workspace_path))
-                await self._indexer.index_entry_direct(
-                    content=text,
-                    scope_key=scope_key,
-                    source_type="daily_note",
-                    source_path=rel_path,
-                    source_date=today,
-                )
-            except Exception:
-                logger.warning(
-                    "memory_index_after_write_failed",
-                    path=str(filepath),
-                    scope_key=scope_key,
-                )
-
-        return filepath
+    async def _try_incremental_index(
+        self, filepath: Path, text: str, scope_key: str, today: date,
+    ) -> None:
+        """Best-effort incremental index after write."""
+        if not self._indexer:
+            return
+        try:
+            rel_path = str(filepath.relative_to(self._workspace_path))
+            await self._indexer.index_entry_direct(
+                content=text, scope_key=scope_key, source_type="daily_note",
+                source_path=rel_path, source_date=today,
+            )
+        except Exception:
+            logger.warning("memory_index_after_write_failed",
+                           path=str(filepath), scope_key=scope_key)
 
     async def process_flush_candidates(
         self,

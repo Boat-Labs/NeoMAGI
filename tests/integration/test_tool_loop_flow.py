@@ -131,6 +131,16 @@ class FailingTool(BaseTool):
         raise RuntimeError("Tool execution failed!")
 
 
+async def _init_test_schema(engine) -> None:
+    """Initialize schema and clean leftover data."""
+    async with engine.begin() as conn:
+        await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA}"))
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text(f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions CASCADE")
+        )
+
+
 def _make_app(pg_url: str, tmp_path, *, tools: list[BaseTool] | None = None):
     """Create a FastAPI app with its own engine (created within TestClient's event loop)."""
     from src.gateway.app import _handle_rpc_message
@@ -140,42 +150,30 @@ def _make_app(pg_url: str, tmp_path, *, tools: list[BaseTool] | None = None):
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         engine = create_async_engine(pg_url, echo=False)
-        async with engine.begin() as conn:
-            await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA}"))
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(
-                text(f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions CASCADE")
-            )
-        db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        await _init_test_schema(engine)
+        db_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-        session_manager = SessionManager(db_session_factory=db_session_factory)
+        sm = SessionManager(db_session_factory=db_factory)
         registry = ToolRegistry()
         for tool in (tools or []):
             registry.register(tool)
 
-        agent_loop = AgentLoop(
-            model_client=fake_model,
-            session_manager=session_manager,
-            workspace_dir=tmp_path,
-            model="test-model",
-            tool_registry=registry,
+        agent = AgentLoop(
+            model_client=fake_model, session_manager=sm,
+            workspace_dir=tmp_path, model="test-model", tool_registry=registry,
         )
-
-        # Build registry (M6: _handle_chat_send uses registry)
         loop_registry = AgentLoopRegistry(default_provider="openai")
-        loop_registry.register("openai", agent_loop, "test-model")
+        loop_registry.register("openai", agent, "test-model")
 
         from tests.conftest import StubBudgetGate
 
         app.state.agent_loop_registry = loop_registry
-        app.state.agent_loop = agent_loop
-        app.state.session_manager = session_manager
+        app.state.agent_loop = agent
+        app.state.session_manager = sm
         app.state.budget_gate = StubBudgetGate()
         app.state.fake_model = fake_model
-        app.state.db_session_factory = db_session_factory
-
+        app.state.db_session_factory = db_factory
         yield
-
         await engine.dispose()
 
     app = FastAPI(lifespan=lifespan)
@@ -339,6 +337,20 @@ class TestMaxIterationsSafety:
             assert "maximum number of tool calls" in content.lower()
 
 
+def _make_stealing_execute(app, original_execute):
+    """Create a tool execute that steals the session lock mid-execution."""
+    async def stealing_execute(self_tool, arguments, context=None):
+        db_factory = app.state.db_session_factory
+        async with db_factory() as db:
+            await db.execute(text(
+                f"UPDATE {DB_SCHEMA}.sessions SET lock_token = 'stolen-token' "
+                "WHERE id = 'main'"
+            ))
+            await db.commit()
+        return await original_execute(self_tool, arguments, context)
+    return stealing_execute
+
+
 class TestFencingMidLoop:
     """SessionFencingError during tool loop → RPC error to client."""
 
@@ -351,43 +363,14 @@ class TestFencingMidLoop:
             [ContentDelta(text="Should not reach")],
         )
 
-        # Store original execute and create a version that steals the lock
         original_execute = EchoTool.execute
-
-        async def stealing_execute(self_tool, arguments, context=None):
-            # Steal the lock mid-execution by updating lock_token directly
-            db_factory = app.state.db_session_factory
-            async with db_factory() as db:
-                await db.execute(
-                    text(
-                        f"UPDATE {DB_SCHEMA}.sessions SET lock_token = 'stolen-token' "
-                        "WHERE id = 'main'"
-                    )
-                )
-                await db.commit()
-            return await original_execute(self_tool, arguments, context)
-
-        EchoTool.execute = stealing_execute
+        EchoTool.execute = _make_stealing_execute(app, original_execute)
 
         try:
             with TestClient(app) as client, client.websocket_connect("/ws") as ws:
-                msg = {
-                    "type": "request",
-                    "id": "req-fenced",
-                    "method": "chat.send",
-                    "params": {"content": "fencing test", "session_id": "main"},
-                }
-                ws.send_text(json.dumps(msg))
-
-                messages = []
-                while True:
-                    data = json.loads(ws.receive_text())
-                    messages.append(data)
-                    if data.get("type") == "stream_chunk" and data["data"]["done"]:
-                        break
-                    if data.get("type") == "error":
-                        break
-
+                messages = _send_and_collect(
+                    ws, content="fencing test", request_id="req-fenced",
+                )
                 errors = [m for m in messages if m["type"] == "error"]
                 assert len(errors) == 1
                 assert errors[0]["error"]["code"] == "SESSION_FENCED"

@@ -37,6 +37,38 @@ def _make_long_history(n_turns: int = 30) -> list[MessageWithSeq]:
     return msgs
 
 
+def _assert_compaction_success(result, *, session_id: str, min_preserved: int) -> None:
+    """Assert compaction result has expected structure."""
+    assert result.status == "success"
+    assert result.compacted_context is not None
+    assert len(result.compacted_context) > 0
+    assert result.new_compaction_seq > 0
+    meta = result.compaction_metadata
+    assert meta["schema_version"] == 1
+    assert meta["status"] == "success"
+    assert meta["preserved_count"] == min_preserved
+    assert meta["summarized_count"] > 0
+    assert meta["anchor_validation_passed"] is True
+    assert len(result.memory_flush_candidates) > 0
+    for c in result.memory_flush_candidates:
+        assert 0.0 <= c.confidence <= 1.0
+        assert len(c.candidate_id) > 0
+        assert c.source_session_id == session_id
+
+
+def _extend_history(base_msgs, extra_turns: int):
+    """Extend a message history with additional turns, fixing seq numbers."""
+    extra = _make_long_history(extra_turns)
+    msgs = list(base_msgs) + extra
+    max_seq = max(m.seq for m in base_msgs) + 1
+    for i, m in enumerate(msgs[len(base_msgs):]):
+        msgs[len(base_msgs) + i] = MessageWithSeq(
+            seq=max_seq + i, role=m.role, content=m.content,
+            tool_calls=None, tool_call_id=None,
+        )
+    return msgs
+
+
 @pytest.mark.asyncio
 class TestCompactionSmoke:
 
@@ -86,28 +118,7 @@ class TestCompactionSmoke:
             session_id="smoke-test",
         )
 
-        # Structure complete
-        assert result.status == "success"
-        assert result.compacted_context is not None
-        assert len(result.compacted_context) > 0
-
-        # Watermark advanced
-        assert result.new_compaction_seq > 0
-
-        # Metadata complete (ADR 0028)
-        meta = result.compaction_metadata
-        assert meta["schema_version"] == 1
-        assert meta["status"] == "success"
-        assert meta["preserved_count"] == 8  # min_preserved_turns
-        assert meta["summarized_count"] > 0
-        assert meta["anchor_validation_passed"] is True
-
-        # Flush candidates present (some turns had explicit preferences)
-        assert len(result.memory_flush_candidates) > 0
-        for c in result.memory_flush_candidates:
-            assert 0.0 <= c.confidence <= 1.0
-            assert len(c.candidate_id) > 0
-            assert c.source_session_id == "smoke-test"
+        _assert_compaction_success(result, session_id="smoke-test", min_preserved=8)
 
     async def test_second_compaction_advances_watermark(self, tmp_path):
         """Rolling compaction: second call advances watermark further."""
@@ -117,59 +128,34 @@ class TestCompactionSmoke:
         )
 
         settings = CompactionSettings(
-            context_limit=10_000,
-            warn_ratio=0.70,
-            compact_ratio=0.85,
-            reserved_output_tokens=500,
-            safety_margin_tokens=200,
+            context_limit=10_000, warn_ratio=0.70, compact_ratio=0.85,
+            reserved_output_tokens=500, safety_margin_tokens=200,
             min_preserved_turns=3,
         )
         counter = TokenCounter("gpt-4o-mini")
         engine = CompactionEngine(model_client, counter, settings, workspace_dir=tmp_path)
+        budget = BudgetStatus("compact_needed", 9000, 9300, 6510, 7905, "exact")
+        sys_prompt = (
+            "System prompt content for validation purposes"
+            " - this is long enough to pass the check"
+        )
 
-        # First compaction (30 turns to exceed F6 small-input threshold)
+        # First compaction
         msgs1 = _make_long_history(30)
         result1 = await engine.compact(
-            messages=msgs1,
-            system_prompt=(
-                "System prompt content for validation purposes"
-                " - this is long enough to pass the check"
-            ),
-            tools_schema=[],
-            budget_status=BudgetStatus("compact_needed", 9000, 9300, 6510, 7905, "exact"),
-            last_compaction_seq=None,
-            previous_compacted_context=None,
-            current_user_seq=100,
-            model="gpt-4o-mini",
+            messages=msgs1, system_prompt=sys_prompt, tools_schema=[],
+            budget_status=budget, last_compaction_seq=None,
+            previous_compacted_context=None, current_user_seq=100, model="gpt-4o-mini",
         )
         assert result1.status == "success"
-        seq1 = result1.new_compaction_seq
 
-        # Add more messages and compact again
-        msgs2 = msgs1 + _make_long_history(30)
-        # Fix seq for the second batch
-        max_seq = max(m.seq for m in msgs1) + 1
-        for i, m in enumerate(msgs2[len(msgs1):]):
-            msgs2[len(msgs1) + i] = MessageWithSeq(
-                seq=max_seq + i,
-                role=m.role,
-                content=m.content,
-                tool_calls=None,
-                tool_call_id=None,
-            )
-
+        # Second compaction with extended history
+        msgs2 = _extend_history(msgs1, 30)
         result2 = await engine.compact(
-            messages=msgs2,
-            system_prompt=(
-                "System prompt content for validation purposes"
-                " - this is long enough to pass the check"
-            ),
-            tools_schema=[],
-            budget_status=BudgetStatus("compact_needed", 9000, 9300, 6510, 7905, "exact"),
-            last_compaction_seq=seq1,
+            messages=msgs2, system_prompt=sys_prompt, tools_schema=[],
+            budget_status=budget, last_compaction_seq=result1.new_compaction_seq,
             previous_compacted_context=result1.compacted_context,
-            current_user_seq=200,
-            model="gpt-4o-mini",
+            current_user_seq=200, model="gpt-4o-mini",
         )
         assert result2.status == "success"
-        assert result2.new_compaction_seq > seq1  # Watermark advanced
+        assert result2.new_compaction_seq > result1.new_compaction_seq

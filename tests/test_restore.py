@@ -63,22 +63,21 @@ def _make_restore_patches(
     preflight_report: PreflightReport | None = None,
     reindex_count: int = 42,
 ):
-    """Build context manager patches for restore tests.
-
-    Returns a dict of (name -> patch_context_manager).
-    Patches are at source-module level because restore.py uses deferred imports.
-    """
+    """Build context manager patches for restore tests."""
     if execution_log is None:
         execution_log = []
 
-    mock_check = patch(
-        "scripts.restore._check_pg_restore", return_value="/usr/bin/pg_restore"
-    )
-    mock_dsn = patch(
-        "scripts.restore._get_dsn",
-        return_value="postgresql://user@localhost/neomagi",
+    return (
+        *_make_cli_patches(execution_log),
+        _make_settings_patch(tmp_path),
+        *_make_db_patches(execution_log),
+        *_make_service_patches(execution_log, reindex_count),
+        _make_preflight_patch(execution_log, preflight_report),
     )
 
+
+def _make_cli_patches(execution_log: list[str]):
+    """Patches for CLI-level dependencies (pg_restore, DSN, subprocess)."""
     def track_subprocess(cmd, **kwargs):
         if "pg_restore" in str(cmd[0]):
             execution_log.append("step2_pg_restore")
@@ -86,18 +85,26 @@ def _make_restore_patches(
             execution_log.append("step4_tar_extract")
         return MagicMock(returncode=0, stderr="", stdout="")
 
-    mock_subprocess = patch("scripts.restore.subprocess.run", side_effect=track_subprocess)
+    return (
+        patch("scripts.restore._check_pg_restore", return_value="/usr/bin/pg_restore"),
+        patch("scripts.restore._get_dsn", return_value="postgresql://user@localhost/neomagi"),
+        patch("scripts.restore.subprocess.run", side_effect=track_subprocess),
+    )
 
+
+def _make_settings_patch(tmp_path: Path):
+    """Patch for get_settings with a workspace directory."""
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     mock_settings = MagicMock()
     mock_settings.database = MagicMock()
     mock_settings.workspace_dir = workspace
     mock_settings.memory.workspace_path = workspace
-    mock_get_settings = patch(
-        "src.config.settings.get_settings", return_value=mock_settings
-    )
+    return patch("src.config.settings.get_settings", return_value=mock_settings)
 
+
+def _make_db_patches(execution_log: list[str]):
+    """Patches for DB engine, ensure_schema, session_factory."""
     mock_conn = AsyncMock()
 
     async def track_execute(stmt):
@@ -107,39 +114,31 @@ def _make_restore_patches(
         return MagicMock(scalar=lambda: 0)
 
     mock_conn.execute = track_execute
-
     begin_cm = MagicMock()
     begin_cm.__aenter__ = AsyncMock(return_value=mock_conn)
     begin_cm.__aexit__ = AsyncMock(return_value=None)
-
     mock_engine = MagicMock()
     mock_engine.begin = MagicMock(return_value=begin_cm)
     mock_engine.dispose = AsyncMock()
-    mock_create_engine = patch(
-        "src.session.database.create_db_engine", return_value=mock_engine
-    )
 
     async def track_ensure_schema(*args, **kwargs):
         execution_log.append("step3_ensure_schema")
 
-    mock_ensure = patch(
-        "src.session.database.ensure_schema", side_effect=track_ensure_schema
+    return (
+        patch("src.session.database.create_db_engine", return_value=mock_engine),
+        patch("src.session.database.ensure_schema", side_effect=track_ensure_schema),
+        patch("src.session.database.make_session_factory", return_value=MagicMock()),
     )
 
-    mock_session_factory = MagicMock()
-    mock_make_sf = patch(
-        "src.session.database.make_session_factory", return_value=mock_session_factory
-    )
 
+def _make_service_patches(execution_log: list[str], reindex_count: int):
+    """Patches for EvolutionEngine and MemoryIndexer."""
     mock_evolution = AsyncMock()
 
     async def track_reconcile():
         execution_log.append("step5_reconcile")
 
     mock_evolution.reconcile_soul_projection = track_reconcile
-    mock_evolution_cls = patch(
-        "src.memory.evolution.EvolutionEngine", return_value=mock_evolution
-    )
 
     mock_indexer = AsyncMock()
 
@@ -148,40 +147,28 @@ def _make_restore_patches(
         return reindex_count
 
     mock_indexer.reindex_all = track_reindex
-    mock_indexer_cls = patch(
-        "src.memory.indexer.MemoryIndexer", return_value=mock_indexer
+
+    return (
+        patch("src.memory.evolution.EvolutionEngine", return_value=mock_evolution),
+        patch("src.memory.indexer.MemoryIndexer", return_value=mock_indexer),
     )
 
+
+def _make_preflight_patch(execution_log: list[str], preflight_report=None):
+    """Patch for run_preflight."""
     if preflight_report is None:
         preflight_report = PreflightReport(
-            checks=[
-                CheckResult(
-                    name="test", status=CheckStatus.OK,
-                    evidence="ok", impact="none", next_action="none",
-                )
-            ]
+            checks=[CheckResult(
+                name="test", status=CheckStatus.OK,
+                evidence="ok", impact="none", next_action="none",
+            )]
         )
 
     async def track_preflight(*args, **kwargs):
         execution_log.append("step8_preflight")
         return preflight_report
 
-    mock_preflight = patch(
-        "src.infra.preflight.run_preflight", side_effect=track_preflight
-    )
-
-    return (
-        mock_check,
-        mock_dsn,
-        mock_subprocess,
-        mock_get_settings,
-        mock_create_engine,
-        mock_ensure,
-        mock_make_sf,
-        mock_evolution_cls,
-        mock_indexer_cls,
-        mock_preflight,
-    )
+    return patch("src.infra.preflight.run_preflight", side_effect=track_preflight)
 
 
 class TestRunRestore:

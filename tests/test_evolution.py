@@ -420,6 +420,38 @@ class TestApplyCompensation:
             )
 
 
+def _make_mock_db_with_record(record) -> AsyncMock:
+    """Create a mock DB session that returns the given record for queries."""
+    async def execute_side_effect(*args, **kwargs):
+        result = MagicMock()
+        scalars = MagicMock()
+        scalars.first.return_value = record
+        result.scalars.return_value = scalars
+        result.scalar.return_value = 1
+        return result
+
+    mock_db = AsyncMock()
+    mock_db.execute = AsyncMock(side_effect=execute_side_effect)
+    mock_db.add = MagicMock()
+    mock_db.__aenter__ = AsyncMock(return_value=mock_db)
+    mock_db.__aexit__ = AsyncMock(return_value=False)
+    return mock_db
+
+
+def _make_failing_write_text(*, fail_after: int):
+    """Create a write_text replacement that fails after N calls."""
+    original_write = Path.write_text
+    call_count = [0]
+
+    def _write_text(self_path, *args, **kwargs):
+        call_count[0] += 1
+        if call_count[0] > fail_after:
+            raise OSError("Disk full")
+        return original_write(self_path, *args, **kwargs)
+
+    return _write_text
+
+
 class TestRollbackCompensation:
     """ADR 0036: rollback DB failure must compensate file write."""
 
@@ -509,40 +541,16 @@ class TestRollbackCompensation:
         soul_path = tmp_path / "SOUL.md"
         soul_path.write_text("# Current", encoding="utf-8")
 
-        superseded = _make_mock_record(
-            version=1, content="# Previous", status="superseded",
+        mock_db = _make_mock_db_with_record(
+            _make_mock_record(version=1, content="# Previous", status="superseded"),
         )
-
-        async def execute_side_effect(*args, **kwargs):
-            result = MagicMock()
-            scalars = MagicMock()
-            scalars.first.return_value = superseded
-            result.scalars.return_value = scalars
-            result.scalar.return_value = 1
-            return result
-
-        mock_db = AsyncMock()
-        mock_db.execute = AsyncMock(side_effect=execute_side_effect)
-        mock_db.add = MagicMock()
         mock_db.commit = AsyncMock(side_effect=RuntimeError("DB commit failed"))
-        mock_db.__aenter__ = AsyncMock(return_value=mock_db)
-        mock_db.__aexit__ = AsyncMock(return_value=False)
+        engine = EvolutionEngine(MagicMock(return_value=mock_db), tmp_path)
 
-        factory = MagicMock(return_value=mock_db)
-        engine = EvolutionEngine(factory, tmp_path)
-
-        original_write = Path.write_text
-        call_count = 0
-
-        def write_text_side_effect(self_path, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count >= 2:
-                raise OSError("Disk full")
-            return original_write(self_path, *args, **kwargs)
+        write_text_fail = _make_failing_write_text(fail_after=1)
 
         with (
-            _patch.object(Path, "write_text", write_text_side_effect),
+            _patch.object(Path, "write_text", write_text_fail),
             _patch("src.memory.evolution.logger") as mock_logger,
         ):
             with pytest.raises(RuntimeError, match="DB commit failed"):

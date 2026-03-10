@@ -53,6 +53,22 @@ def _async_ctx(obj: object) -> MagicMock:
     return ctx
 
 
+def _apply_response_to_mock(result: MagicMock, value: object) -> None:
+    """Configure a mock result object based on the value type."""
+    if isinstance(value, list):
+        result.fetchall.return_value = value
+        result.fetchone.return_value = value[0] if value else None
+        result.scalar.return_value = value[0][0] if value and value[0] else 0
+    elif value is None:
+        result.fetchall.return_value = []
+        result.fetchone.return_value = None
+        result.scalar.return_value = 0
+    else:
+        result.fetchall.return_value = [(value,)]
+        result.fetchone.return_value = (value,)
+        result.scalar.return_value = value
+
+
 def _mock_engine_with_responses(responses: dict[str, object]) -> AsyncMock:
     """Create a mock engine that returns different responses based on query content."""
     conn = AsyncMock()
@@ -64,20 +80,8 @@ def _mock_engine_with_responses(responses: dict[str, object]) -> AsyncMock:
             if key in stmt_str:
                 if isinstance(value, Exception):
                     raise value
-                if isinstance(value, list):
-                    result.fetchall.return_value = value
-                    result.fetchone.return_value = value[0] if value else None
-                    result.scalar.return_value = value[0][0] if value and value[0] else 0
-                elif value is None:
-                    result.fetchall.return_value = []
-                    result.fetchone.return_value = None
-                    result.scalar.return_value = 0
-                else:
-                    result.fetchall.return_value = [(value,)]
-                    result.fetchone.return_value = (value,)
-                    result.scalar.return_value = value
+                _apply_response_to_mock(result, value)
                 return result
-        # Default: return empty
         result.fetchall.return_value = []
         result.fetchone.return_value = None
         result.scalar.return_value = 0
@@ -91,43 +95,44 @@ def _mock_engine_with_responses(responses: dict[str, object]) -> AsyncMock:
 
 def _mock_engine_all_ok() -> AsyncMock:
     """Create a mock engine that returns OK responses for all check queries."""
-    tables = ["sessions", "messages", "memory_entries", "soul_versions"]
-    budget_tables = ["budget_state", "budget_reservations"]
-
     conn = AsyncMock()
-
-    async def _execute(stmt, params=None):
-        result = MagicMock()
-        stmt_str = str(stmt) if not hasattr(stmt, "text") else str(stmt.text)
-
-        if "information_schema.tables" in stmt_str:
-            if "budget" in stmt_str:
-                result.fetchall.return_value = [(t,) for t in budget_tables]
-            else:
-                result.fetchall.return_value = [(t,) for t in tables]
-        elif "information_schema.triggers" in stmt_str:
-            result.fetchone.return_value = (1,)
-        elif "soul_versions" in stmt_str and "status = 'active'" in stmt_str:
-            result.fetchall.return_value = [(1, 0, "soul content")]
-        elif "soul_versions" in stmt_str:
-            result.fetchone.return_value = (1,)
-        elif "COUNT" in stmt_str and "memory_entries" in stmt_str:
-            result.scalar.return_value = 0
-        elif "cumulative_eur" in stmt_str:
-            result.fetchone.return_value = (5.0,)
-        elif "processing_since" in stmt_str:
-            result.fetchall.return_value = []
-        elif "source_path" in stmt_str:
-            result.fetchall.return_value = []
-        else:
-            result.fetchone.return_value = (1,)
-            result.scalar.return_value = 1
-        return result
-
-    conn.execute = _execute
+    conn.execute = _make_all_ok_execute()
     engine = AsyncMock()
     engine.connect = MagicMock(return_value=_async_ctx(conn))
     return engine
+
+
+# Ordered dispatch: each entry is ([required_substrings], {attr: return_value}).
+# First match wins; more-specific entries must come before less-specific ones.
+_ALL_OK_DISPATCH = [
+    (["information_schema.tables", "budget"],
+     {"fetchall": [("budget_state",), ("budget_reservations",)]}),
+    (["information_schema.tables"],
+     {"fetchall": [("sessions",), ("messages",), ("memory_entries",), ("soul_versions",)]}),
+    (["information_schema.triggers"], {"fetchone": (1,)}),
+    (["soul_versions", "status = 'active'"], {"fetchall": [(1, 0, "soul content")]}),
+    (["soul_versions"], {"fetchone": (1,)}),
+    (["COUNT", "memory_entries"], {"scalar": 0}),
+    (["cumulative_eur"], {"fetchone": (5.0,)}),
+    (["processing_since"], {"fetchall": []}),
+    (["source_path"], {"fetchall": []}),
+]
+
+
+def _make_all_ok_execute():
+    """Build an async execute function using data-driven dispatch."""
+    async def _execute(stmt, params=None):
+        result = MagicMock()
+        stmt_str = str(stmt) if not hasattr(stmt, "text") else str(stmt.text)
+        for keys, response in _ALL_OK_DISPATCH:
+            if all(k in stmt_str for k in keys):
+                for attr, val in response.items():
+                    getattr(result, attr).return_value = val
+                return result
+        result.fetchone.return_value = (1,)
+        result.scalar.return_value = 1
+        return result
+    return _execute
 
 
 # ── D1: soul_consistency ──

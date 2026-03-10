@@ -88,52 +88,42 @@ class MemoryFlushGenerator:
         for turn in compressible_turns:
             if len(candidates) >= self._max_candidates:
                 break
-
-            # Extract user messages for analysis
             user_msgs = [m for m in turn.messages if m.role == "user" and m.content]
-            if not user_msgs:
-                continue
-
             for msg in user_msgs:
                 if len(candidates) >= self._max_candidates:
                     break
-
-                content = msg.content or ""
-                stripped = content.strip()
-
-                # Skip casual/acknowledgment messages
-                if any(p.match(stripped) for p in _SKIP_PATTERNS):
-                    continue
-
-                # Classify and extract
-                tags, confidence = self._classify(stripped)
-                if confidence < 0.1:
-                    continue
-
-                # Truncate to max bytes (UTF-8 safe)
-                encoded = stripped.encode("utf-8")
-                if len(encoded) > self._max_text_bytes:
-                    text = encoded[: self._max_text_bytes].decode("utf-8", errors="ignore")
-                else:
-                    text = stripped
-
-                candidates.append(
-                    MemoryFlushCandidate(
-                        source_session_id=session_id,
-                        source_message_ids=[str(msg.seq)],
-                        candidate_text=text,
-                        constraint_tags=tags,
-                        confidence=min(max(confidence, 0.0), 1.0),
-                    )
-                )
+                candidate = self._try_extract(msg, session_id)
+                if candidate is not None:
+                    candidates.append(candidate)
 
         logger.info(
-            "memory_flush_generated",
-            session_id=session_id,
-            candidate_count=len(candidates),
-            turn_count=len(compressible_turns),
+            "memory_flush_generated", session_id=session_id,
+            candidate_count=len(candidates), turn_count=len(compressible_turns),
         )
         return candidates
+
+    def _try_extract(self, msg, session_id: str) -> MemoryFlushCandidate | None:
+        """Try to extract a candidate from a single user message."""
+        stripped = (msg.content or "").strip()
+        if not stripped or any(p.match(stripped) for p in _SKIP_PATTERNS):
+            return None
+        tags, confidence = self._classify(stripped)
+        if confidence < 0.1:
+            return None
+        text = self._truncate_utf8(stripped)
+        return MemoryFlushCandidate(
+            source_session_id=session_id,
+            source_message_ids=[str(msg.seq)],
+            candidate_text=text,
+            constraint_tags=tags,
+            confidence=min(max(confidence, 0.0), 1.0),
+        )
+
+    def _truncate_utf8(self, text: str) -> str:
+        encoded = text.encode("utf-8")
+        if len(encoded) <= self._max_text_bytes:
+            return text
+        return encoded[: self._max_text_bytes].decode("utf-8", errors="ignore")
 
     def _classify(self, text: str) -> tuple[list[str], float]:
         """Classify text and return (tags, confidence)."""

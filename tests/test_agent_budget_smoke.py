@@ -41,6 +41,18 @@ def _make_session_manager(history_msgs: list[MessageWithSeq] | None = None):
     return sm
 
 
+_BUDGET_CHECK_REQUIRED_FIELDS = [
+    "session_id", "model", "iteration", "current_tokens",
+    "status", "usable_budget", "warn_threshold", "compact_threshold", "tokenizer_mode",
+]
+
+
+def _assert_budget_check_fields(call_kwargs: dict) -> None:
+    """Assert all required budget_check fields are present."""
+    for field in _BUDGET_CHECK_REQUIRED_FIELDS:
+        assert field in call_kwargs, f"Missing field: {field}"
+
+
 @pytest.mark.asyncio
 class TestAgentBudgetSmoke:
     """Verify budget_check log is emitted with correct fields."""
@@ -60,44 +72,25 @@ class TestAgentBudgetSmoke:
         session_manager = _make_session_manager(history)
 
         settings = CompactionSettings(
-            context_limit=10_000,
-            warn_ratio=0.80,
-            compact_ratio=0.90,
-            reserved_output_tokens=1000,
-            safety_margin_tokens=500,
+            context_limit=10_000, warn_ratio=0.80, compact_ratio=0.90,
+            reserved_output_tokens=1000, safety_margin_tokens=500,
         )
 
         agent = AgentLoop(
-            model_client=model_client,
-            session_manager=session_manager,
-            workspace_dir=tmp_path,
-            compaction_settings=settings,
+            model_client=model_client, session_manager=session_manager,
+            workspace_dir=tmp_path, compaction_settings=settings,
         )
 
         with patch("src.agent.agent.logger") as mock_logger:
-            events = []
-            async for event in agent.handle_message("test-session", "Hi"):
-                events.append(event)
+            async for _ in agent.handle_message("test-session", "Hi"):
+                pass
 
-            # Verify budget_check was logged
             budget_calls = [
-                call
-                for call in mock_logger.info.call_args_list
+                call for call in mock_logger.info.call_args_list
                 if call.args and call.args[0] == "budget_check"
             ]
             assert len(budget_calls) >= 1
-
-            # Check all required fields present
-            call_kwargs = budget_calls[0].kwargs
-            assert "session_id" in call_kwargs
-            assert "model" in call_kwargs
-            assert "iteration" in call_kwargs
-            assert "current_tokens" in call_kwargs
-            assert "status" in call_kwargs
-            assert "usable_budget" in call_kwargs
-            assert "warn_threshold" in call_kwargs
-            assert "compact_threshold" in call_kwargs
-            assert "tokenizer_mode" in call_kwargs
+            _assert_budget_check_fields(budget_calls[0].kwargs)
 
     async def test_budget_check_tokenizer_mode_exact(self, tmp_path):
         """Verify tokenizer_mode=exact for known OpenAI model."""

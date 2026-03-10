@@ -126,31 +126,28 @@ class PromptBuilder:
 
     def _layer_workspace(self, session_id: str, *, scope_key: str = "main") -> str:
         """Load workspace bootstrap files and concatenate their contents."""
-        parts: list[str] = []
-
-        for filename in WORKSPACE_CONTEXT_FILES:
-            content = self._read_workspace_file(filename)
-            if content:
-                parts.append(content)
-                logger.info("prompt_file_injected", file=filename, layer="workspace")
-
-        # MEMORY.md only for main scope
+        filenames = list(WORKSPACE_CONTEXT_FILES)
         if scope_key == "main":
-            for filename in MAIN_SESSION_ONLY:
-                content = self._read_workspace_file(filename)
-                if content:
-                    parts.append(content)
-                    logger.info("prompt_file_injected", file=filename, layer="workspace")
+            filenames.extend(MAIN_SESSION_ONLY)
 
-        # Daily notes auto-load (Phase 1)
+        parts = self._load_workspace_files(filenames)
+
         daily_notes = self._load_daily_notes(scope_key=scope_key)
         if daily_notes:
             parts.append(daily_notes)
 
         if not parts:
             return ""
-
         return "## Project Context\n\n" + "\n\n---\n\n".join(parts)
+
+    def _load_workspace_files(self, filenames: list[str]) -> list[str]:
+        parts: list[str] = []
+        for filename in filenames:
+            content = self._read_workspace_file(filename)
+            if content:
+                parts.append(content)
+                logger.info("prompt_file_injected", file=filename, layer="workspace")
+        return parts
 
     def _layer_compacted_context(self, compacted_context: str | None) -> str:
         """Inject rolling summary from compaction (if any)."""
@@ -227,19 +224,7 @@ class PromptBuilder:
         return f"Current date and time (UTC): {now.strftime('%Y-%m-%d %H:%M:%S')}"
 
     def _load_daily_notes(self, *, scope_key: str = "main") -> str:
-        """Load today + yesterday daily notes, filtered by scope_key.
-
-        scope_key comes from session_resolver (ADR 0034).
-        Only entries matching the current scope_key are included.
-
-        Old data compatibility: entries without scope metadata are treated as
-        scope_key='main' (all pre-M3 daily notes were written in main session).
-
-        Format injected:
-        [Recent Daily Notes]
-        === 2026-02-22 ===
-        {content of memory/2026-02-22.md, filtered by scope}
-        """
+        """Load today + yesterday daily notes, filtered by scope_key."""
         load_days = 2
         max_tokens = 4000
         if self._memory_settings:
@@ -252,37 +237,36 @@ class PromptBuilder:
 
         today = date.today()
         parts: list[str] = []
+        max_chars = max_tokens * 4
 
         for offset in range(load_days):
-            target_date = today - timedelta(days=offset)
-            filepath = memory_dir / f"{target_date.isoformat()}.md"
-            if not filepath.is_file():
-                continue
-            try:
-                raw = filepath.read_text(encoding="utf-8").strip()
-                if not raw:
-                    continue
-                filtered = self._filter_entries_by_scope(raw, scope_key)
-                if not filtered:
-                    continue
-                # Rough truncation: ~4 chars per token estimate
-                max_chars = max_tokens * 4
-                if len(filtered) > max_chars:
-                    filtered = filtered[:max_chars] + "\n...(truncated)"
-                parts.append(f"=== {target_date.isoformat()} ===\n{filtered}")
-                logger.info(
-                    "daily_notes_loaded",
-                    date=target_date.isoformat(),
-                    scope_key=scope_key,
-                    chars=len(filtered),
-                )
-            except OSError:
-                logger.exception("daily_notes_read_error", path=str(filepath))
+            part = self._load_single_day(memory_dir, today - timedelta(days=offset),
+                                         scope_key, max_chars)
+            if part:
+                parts.append(part)
 
-        if not parts:
-            return ""
+        return "[Recent Daily Notes]\n" + "\n\n".join(parts) if parts else ""
 
-        return "[Recent Daily Notes]\n" + "\n\n".join(parts)
+    def _load_single_day(self, memory_dir: Path, target_date: date,
+                         scope_key: str, max_chars: int) -> str | None:
+        filepath = memory_dir / f"{target_date.isoformat()}.md"
+        if not filepath.is_file():
+            return None
+        try:
+            raw = filepath.read_text(encoding="utf-8").strip()
+        except OSError:
+            logger.exception("daily_notes_read_error", path=str(filepath))
+            return None
+        if not raw:
+            return None
+        filtered = self._filter_entries_by_scope(raw, scope_key)
+        if not filtered:
+            return None
+        if len(filtered) > max_chars:
+            filtered = filtered[:max_chars] + "\n...(truncated)"
+        logger.info("daily_notes_loaded", date=target_date.isoformat(),
+                    scope_key=scope_key, chars=len(filtered))
+        return f"=== {target_date.isoformat()} ===\n{filtered}"
 
     @staticmethod
     def _filter_entries_by_scope(content: str, scope_key: str) -> str:

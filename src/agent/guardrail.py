@@ -66,14 +66,21 @@ def _extract_anchors_from_content(content: str) -> list[str]:
     """
     anchors: list[str] = []
     for line in content.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("# ") and len(stripped) > 2:
-            anchors.append(stripped[2:].strip())
-        elif stripped.startswith("- **"):
-            end = stripped.find("**", 4)
-            if end > 4:
-                anchors.append(stripped[4:end].strip())
+        anchor = _parse_anchor_line(line.strip())
+        if anchor:
+            anchors.append(anchor)
     return anchors
+
+
+def _parse_anchor_line(stripped: str) -> str | None:
+    """Return anchor text from a heading or bold-list line, or None."""
+    if stripped.startswith("# ") and len(stripped) > 2:
+        return stripped[2:].strip()
+    if stripped.startswith("- **"):
+        end = stripped.find("**", 4)
+        if end > 4:
+            return stripped[4:end].strip()
+    return None
 
 
 def load_contract(workspace_dir: Path) -> CoreSafetyContract:

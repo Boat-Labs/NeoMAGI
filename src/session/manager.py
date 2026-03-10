@@ -292,8 +292,6 @@ class SessionManager:
         """Persist compaction state (ADR 0031 + ADR 0021 fencing).
 
         MUST NOT be called when result.status == "noop" (caller responsibility).
-
-        Atomic UPDATE with lock_token fencing and monotonic seq protection.
         """
         from src.infra.errors import SessionFencingError
 
@@ -308,46 +306,24 @@ class SessionManager:
                         SessionRecord.last_compaction_seq < result.new_compaction_seq,
                     ),
                 )
-                .values(
-                    compacted_context=result.compacted_context,
-                    compaction_metadata=result.compaction_metadata,
-                    last_compaction_seq=result.new_compaction_seq,
-                    memory_flush_candidates=[
-                        c if isinstance(c, dict) else c.__dict__
-                        for c in (result.memory_flush_candidates or [])
-                    ],
-                )
+                .values(**self._build_compaction_values(result))
                 .returning(SessionRecord.id)
             )
             exec_result = await db_session.execute(stmt)
-            updated = exec_result.scalar_one_or_none()
-
-            if updated is None:
+            if exec_result.scalar_one_or_none() is None:
                 raise SessionFencingError(
                     f"Compaction store failed for session {session_id}: "
                     "lock_token mismatch or seq not monotonic"
                 )
-
             await db_session.commit()
 
-        logger.info(
-            "compaction_stored",
-            session_id=session_id,
-            new_compaction_seq=result.new_compaction_seq,
-            status=result.status,
-        )
+        logger.info("compaction_stored", session_id=session_id,
+                     new_compaction_seq=result.new_compaction_seq, status=result.status)
 
     async def load_session_from_db(self, session_id: str, *, force: bool = False) -> bool:
         """Load a session from DB into memory cache. Returns True if found.
 
-        When force=True, unconditionally reload from DB even if session exists
-        in local cache. Required for cross-worker handoff to ensure prompt is
-        built from latest DB state, not stale local cache.
-
-        [Decision 0021] force=True changes exception semantics: DB errors
-        propagate instead of returning False. Prevents silent degradation to
-        empty/stale context. "Session not found" (record is None) still
-        returns False — a new session with no history is legitimate.
+        [Decision 0021] force=True: DB errors propagate instead of returning False.
         """
         if session_id in self._sessions and not force:
             return True
@@ -355,8 +331,7 @@ class SessionManager:
         try:
             async with self._db() as db_session:
                 stmt = select(SessionRecord).where(SessionRecord.id == session_id)
-                result = await db_session.execute(stmt)
-                record = result.scalar_one_or_none()
+                record = (await db_session.execute(stmt)).scalar_one_or_none()
                 if record is None:
                     return False
 
@@ -365,47 +340,17 @@ class SessionManager:
                     .where(MessageRecord.session_id == session_id)
                     .order_by(MessageRecord.seq)
                 )
-                msg_result = await db_session.execute(msg_stmt)
-                msg_records = msg_result.scalars().all()
+                msg_records = (await db_session.execute(msg_stmt)).scalars().all()
 
-                messages = [
-                    Message(
-                        role=mr.role,
-                        content=mr.content,
-                        timestamp=(
-                            mr.created_at.replace(tzinfo=UTC)
-                            if mr.created_at
-                            else datetime.now(UTC)
-                        ),
-                        tool_calls=mr.tool_calls,
-                        tool_call_id=mr.tool_call_id,
-                        seq=mr.seq,
-                    )
-                    for mr in msg_records
-                ]
-                self._sessions[session_id] = Session(
-                    id=session_id,
-                    messages=messages,
-                    created_at=(
-                        record.created_at.replace(tzinfo=UTC)
-                        if record.created_at
-                        else datetime.now(UTC)
-                    ),
-                    updated_at=(
-                        record.updated_at.replace(tzinfo=UTC)
-                        if record.updated_at
-                        else datetime.now(UTC)
-                    ),
+                self._sessions[session_id] = self._build_session_from_records(
+                    session_id, record, msg_records,
                 )
-                logger.info(
-                    "session_loaded_from_db",
-                    session_id=session_id,
-                    message_count=len(messages),
-                )
+                logger.info("session_loaded_from_db", session_id=session_id,
+                            message_count=len(msg_records))
                 return True
         except Exception:
             if force:
-                raise  # [Decision 0021] force reload failure must not silently degrade
+                raise
             logger.exception("session_load_failed", session_id=session_id)
             return False
 
@@ -426,61 +371,89 @@ class SessionManager:
         """Persist a single message to DB with atomic seq allocation and fencing.
 
         [Decision 0021] Raises on failure — no silent drop.
-        SQLAlchemy async context manager auto-rollbacks on exception.
-
-        When lock_token is provided, the ON CONFLICT WHERE clause atomically
-        verifies the token matches the current session holder. Single statement,
-        no race window between lock check and seq allocation.
-
         Returns the allocated seq number.
         """
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
-
         from src.infra.errors import SessionFencingError
 
         async with self._db() as db_session:
-            # Atomic: upsert session + allocate seq (row lock serializes per-session)
-            update_set = {"next_seq": SessionRecord.next_seq + 1}
-            stmt = pg_insert(SessionRecord).values(id=session_id, next_seq=1)
-
-            if lock_token is not None:
-                # Fencing: only update if lock_token matches or is NULL.
-                # WHERE false → no update → RETURNING empty → fencing failed.
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["id"],
-                    set_=update_set,
-                    where=or_(
-                        SessionRecord.lock_token == lock_token,
-                        SessionRecord.lock_token.is_(None),
-                    ),
-                )
-            else:
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=["id"],
-                    set_=update_set,
-                )
-
-            stmt = stmt.returning(SessionRecord.next_seq - 1)
-            result = await db_session.execute(stmt)
-            seq = result.scalar_one_or_none()
+            stmt = self._build_session_upsert(session_id, lock_token)
+            seq = (await db_session.execute(stmt)).scalar_one_or_none()
 
             if seq is None:
                 raise SessionFencingError(
                     f"Lock token mismatch for session {session_id}: another worker has taken over"
                 )
 
-            db_session.add(
-                MessageRecord(
-                    session_id=session_id,
-                    seq=seq,
-                    role=msg.role,
-                    content=msg.content,
-                    tool_calls=msg.tool_calls,
-                    tool_call_id=msg.tool_call_id,
-                )
-            )
+            db_session.add(MessageRecord(
+                session_id=session_id, seq=seq, role=msg.role,
+                content=msg.content, tool_calls=msg.tool_calls,
+                tool_call_id=msg.tool_call_id,
+            ))
             await db_session.commit()
             return seq
+
+
+    @staticmethod
+    def _build_compaction_values(result: Any) -> dict:
+        """Build the values dict for compaction state UPDATE."""
+        return {
+            "compacted_context": result.compacted_context,
+            "compaction_metadata": result.compaction_metadata,
+            "last_compaction_seq": result.new_compaction_seq,
+            "memory_flush_candidates": [
+                c if isinstance(c, dict) else c.__dict__
+                for c in (result.memory_flush_candidates or [])
+            ],
+        }
+
+    @staticmethod
+    def _build_session_from_records(
+        session_id: str, record: SessionRecord, msg_records: list,
+    ) -> Session:
+        """Convert DB records to a Session object."""
+        messages = [
+            Message(
+                role=mr.role, content=mr.content,
+                timestamp=(
+                    mr.created_at.replace(tzinfo=UTC)
+                    if mr.created_at else datetime.now(UTC)
+                ),
+                tool_calls=mr.tool_calls, tool_call_id=mr.tool_call_id, seq=mr.seq,
+            )
+            for mr in msg_records
+        ]
+        return Session(
+            id=session_id, messages=messages,
+            created_at=(
+                record.created_at.replace(tzinfo=UTC)
+                if record.created_at else datetime.now(UTC)
+            ),
+            updated_at=(
+                record.updated_at.replace(tzinfo=UTC)
+                if record.updated_at else datetime.now(UTC)
+            ),
+        )
+
+    @staticmethod
+    def _build_session_upsert(session_id: str, lock_token: str | None):
+        """Build atomic session upsert statement for seq allocation."""
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        update_set = {"next_seq": SessionRecord.next_seq + 1}
+        stmt = pg_insert(SessionRecord).values(id=session_id, next_seq=1)
+
+        if lock_token is not None:
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["id"], set_=update_set,
+                where=or_(
+                    SessionRecord.lock_token == lock_token,
+                    SessionRecord.lock_token.is_(None),
+                ),
+            )
+        else:
+            stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=update_set)
+
+        return stmt.returning(SessionRecord.next_seq - 1)
 
 
 def _messages_to_openai_format(messages: list[Message]) -> list[dict[str, Any]]:

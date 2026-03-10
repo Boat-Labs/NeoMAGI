@@ -168,57 +168,35 @@ def _check_workspace_path_consistency(settings: Settings) -> CheckResult:
 def _check_workspace_dirs(settings: Settings) -> CheckResult:
     """C4: workspace and workspace/memory/ must exist and be writable."""
     ws = settings.workspace_dir.resolve()
-    memory_dir = ws / "memory"
+    for directory, label in [(ws, "Workspace dir"), (ws / "memory", "memory/ subdirectory")]:
+        fail = _check_dir_writable(directory, label)
+        if fail is not None:
+            return fail
+    return CheckResult(name="workspace_dirs", status=CheckStatus.OK,
+                       evidence="Workspace and memory/ exist and are writable",
+                       impact="", next_action="")
 
-    if not ws.is_dir():
+
+def _check_dir_writable(directory, label: str) -> CheckResult | None:
+    """Return a FAIL CheckResult if dir missing or not writable, else None."""
+    if not directory.is_dir():
         return CheckResult(
-            name="workspace_dirs",
-            status=CheckStatus.FAIL,
-            evidence=f"Workspace dir does not exist: {ws}",
-            impact="Cannot read/write workspace files",
-            next_action="Create the workspace directory or fix WORKSPACE_DIR",
+            name="workspace_dirs", status=CheckStatus.FAIL,
+            evidence=f"{label} does not exist: {directory}",
+            impact=f"Cannot read/write {label.lower()} files",
+            next_action=f"Create {directory} or fix configuration",
         )
-
     try:
-        with tempfile.NamedTemporaryFile(dir=ws, delete=True):
+        with tempfile.NamedTemporaryFile(dir=directory, delete=True):
             pass
     except OSError as e:
         return CheckResult(
-            name="workspace_dirs",
-            status=CheckStatus.FAIL,
-            evidence=f"Workspace dir not writable: {e}",
-            impact="Cannot write memory files or SOUL.md",
-            next_action="Fix filesystem permissions on workspace directory",
+            name="workspace_dirs", status=CheckStatus.FAIL,
+            evidence=f"{label} not writable: {e}",
+            impact=f"Cannot write to {label.lower()}",
+            next_action=f"Fix filesystem permissions on {directory}",
         )
-
-    if not memory_dir.is_dir():
-        return CheckResult(
-            name="workspace_dirs",
-            status=CheckStatus.FAIL,
-            evidence=f"memory/ subdirectory does not exist: {memory_dir}",
-            impact="Cannot store daily notes",
-            next_action="Create workspace/memory/ directory",
-        )
-
-    try:
-        with tempfile.NamedTemporaryFile(dir=memory_dir, delete=True):
-            pass
-    except OSError as e:
-        return CheckResult(
-            name="workspace_dirs",
-            status=CheckStatus.FAIL,
-            evidence=f"memory/ subdirectory not writable: {e}",
-            impact="Cannot write daily notes to memory directory",
-            next_action="Fix filesystem permissions on workspace/memory/ directory",
-        )
-
-    return CheckResult(
-        name="workspace_dirs",
-        status=CheckStatus.OK,
-        evidence="Workspace and memory/ exist and are writable",
-        impact="",
-        next_action="",
-    )
+    return None
 
 
 # ── C5: DB connection ──

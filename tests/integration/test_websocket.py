@@ -66,6 +66,30 @@ class FakeModelClient(ModelClient):
                 yield event
 
 
+def _bind_app_state(app, *, agent, model, sm, db_factory) -> None:
+    """Bind common app.state attributes for test apps."""
+    from tests.conftest import StubBudgetGate
+
+    registry = AgentLoopRegistry(default_provider="openai")
+    registry.register("openai", agent, "test-model")
+    app.state.agent_loop_registry = registry
+    app.state.agent_loop = agent
+    app.state.session_manager = sm
+    app.state.budget_gate = StubBudgetGate()
+    app.state.fake_model = model
+    app.state.db_session_factory = db_factory
+
+
+async def _init_test_schema(engine) -> None:
+    """Initialize schema and clean leftover data."""
+    async with engine.begin() as conn:
+        await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA}"))
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(
+            text(f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions CASCADE")
+        )
+
+
 def _make_app(
     pg_url: str,
     tmp_path,
@@ -81,44 +105,20 @@ def _make_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         engine = create_async_engine(pg_url, echo=False)
-        async with engine.begin() as conn:
-            await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA}"))
-            await conn.run_sync(Base.metadata.create_all)
-            # Clean leftover data from previous tests (startup cleanup is more
-            # reliable than teardown — connections may be cancelled on exit).
-            await conn.execute(
-                text(f"TRUNCATE {DB_SCHEMA}.messages, {DB_SCHEMA}.sessions CASCADE")
-            )
-        db_session_factory = async_sessionmaker(engine, expire_on_commit=False)
+        await _init_test_schema(engine)
+        db_factory = async_sessionmaker(engine, expire_on_commit=False)
 
-        session_manager = SessionManager(db_session_factory=db_session_factory)
-        agent_loop = AgentLoop(
-            model_client=model,
-            session_manager=session_manager,
-            workspace_dir=tmp_path,
-            model="test-model",
+        sm = SessionManager(db_session_factory=db_factory)
+        agent = AgentLoop(
+            model_client=model, session_manager=sm,
+            workspace_dir=tmp_path, model="test-model",
             compaction_settings=CompactionSettings(context_limit=100_000),
         )
-
-        # Pre-claim sessions for SESSION_BUSY testing
         for sid in pre_claim_sessions or []:
-            await session_manager.try_claim_session(sid, ttl_seconds=300)
+            await sm.try_claim_session(sid, ttl_seconds=300)
 
-        # Build registry (M6: _handle_chat_send uses registry)
-        registry = AgentLoopRegistry(default_provider="openai")
-        registry.register("openai", agent_loop, "test-model")
-
-        from tests.conftest import StubBudgetGate
-
-        app.state.agent_loop_registry = registry
-        app.state.agent_loop = agent_loop
-        app.state.session_manager = session_manager
-        app.state.budget_gate = StubBudgetGate()
-        app.state.fake_model = model
-        app.state.db_session_factory = db_session_factory
-
+        _bind_app_state(app, agent=agent, model=model, sm=sm, db_factory=db_factory)
         yield
-
         await engine.dispose()
 
     app = FastAPI(lifespan=lifespan)

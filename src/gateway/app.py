@@ -100,35 +100,20 @@ async def _shutdown_telegram(
             logger.exception("telegram_adapter_stop_failed")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Application lifespan: initialize shared state on startup."""
-    setup_logging(json_output=False)
-
-    # Settings validation — structured logging on config errors
-    try:
-        settings = get_settings()
-    except ValidationError as e:
-        for err in e.errors():
-            logger.error(
-                "settings_validation_error",
-                field=".".join(str(loc) for loc in err["loc"]),
-                error_type=err["type"],
-                message=err["msg"],
-            )
-        raise
-
-    # [Decision 0020] DB is mandatory; startup fails if DB/schema unavailable.
+async def _init_database(settings):
+    """Initialize database engine, schema, and session factory."""
     engine = await create_db_engine(settings.database)
     await ensure_schema(engine, settings.database.schema_)
     db_session_factory = make_session_factory(engine)
     logger.info("db_connected")
+    return engine, db_session_factory
 
-    # Preflight checks — unified startup validation (M5)
+
+async def _run_startup_preflight(app, settings, engine):
+    """Run preflight checks and fail-fast if any check fails."""
     preflight_report = await run_preflight(settings, engine)
     app.state.preflight_report = preflight_report
     logger.info("preflight_complete", passed=preflight_report.passed)
-
     if not preflight_report.passed:
         failed = [c for c in preflight_report.checks if c.status == CheckStatus.FAIL]
         raise RuntimeError(
@@ -136,13 +121,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             + "; ".join(f"{c.name}: {c.evidence}" for c in failed)
         )
 
-    # Provider-agnostic shared deps
-    session_manager = SessionManager(
-        db_session_factory=db_session_factory,
-        default_mode=ToolMode(settings.session.default_mode),
-    )
 
-    # Build Memory dependency chain
+def _build_memory_and_tools(settings, db_session_factory):
+    """Build memory stack + tool registry."""
     memory_indexer = MemoryIndexer(db_session_factory, settings.memory)
     memory_searcher = MemorySearcher(db_session_factory, settings.memory)
     memory_writer = MemoryWriter(settings.workspace_dir, settings.memory, indexer=memory_indexer)
@@ -153,113 +134,125 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     tool_registry = ToolRegistry()
     register_builtins(
-        tool_registry,
-        settings.workspace_dir,
-        memory_searcher=memory_searcher,
-        memory_writer=memory_writer,
+        tool_registry, settings.workspace_dir,
+        memory_searcher=memory_searcher, memory_writer=memory_writer,
         evolution_engine=evolution_engine,
     )
+    return memory_searcher, evolution_engine, tool_registry
 
-    # Helper: create AgentLoop for a given provider
+
+def _build_provider_registry(settings, session_manager, memory_searcher,
+                             evolution_engine, tool_registry, health_tracker):
+    """Register OpenAI + optional Gemini providers."""
     def _make_agent_loop(client: OpenAICompatModelClient, model: str) -> AgentLoop:
         return AgentLoop(
-            model_client=client,
-            session_manager=session_manager,
-            workspace_dir=settings.workspace_dir,
-            model=model,
-            tool_registry=tool_registry,
-            compaction_settings=settings.compaction,
-            session_settings=settings.session,
-            memory_settings=settings.memory,
-            memory_searcher=memory_searcher,
-            evolution_engine=evolution_engine,
+            model_client=client, session_manager=session_manager,
+            workspace_dir=settings.workspace_dir, model=model,
+            tool_registry=tool_registry, compaction_settings=settings.compaction,
+            session_settings=settings.session, memory_settings=settings.memory,
+            memory_searcher=memory_searcher, evolution_engine=evolution_engine,
         )
 
-    # In-process component health state (F1 three-layer readiness)
-    health_tracker = ComponentHealthTracker()
-
-    # Build registry
     registry = AgentLoopRegistry(default_provider=settings.provider.active)
-
-    # OpenAI (always registered, api_key is required)
     openai_client = OpenAICompatModelClient(
-        api_key=settings.openai.api_key,
-        base_url=settings.openai.base_url,
-        health_tracker=health_tracker,
-        provider_name="openai",
+        api_key=settings.openai.api_key, base_url=settings.openai.base_url,
+        health_tracker=health_tracker, provider_name="openai",
     )
-    registry.register(
-        "openai",
-        _make_agent_loop(openai_client, settings.openai.model),
-        settings.openai.model,
-    )
+    registry.register("openai", _make_agent_loop(openai_client, settings.openai.model),
+                       settings.openai.model)
 
-    # Gemini (only when api_key is non-empty)
     if settings.gemini.api_key:
         gemini_client = OpenAICompatModelClient(
-            api_key=settings.gemini.api_key,
-            base_url=settings.gemini.base_url,
-            health_tracker=health_tracker,
-            provider_name="gemini",
+            api_key=settings.gemini.api_key, base_url=settings.gemini.base_url,
+            health_tracker=health_tracker, provider_name="gemini",
         )
-        registry.register(
-            "gemini",
-            _make_agent_loop(gemini_client, settings.gemini.model),
-            settings.gemini.model,
-        )
+        registry.register("gemini", _make_agent_loop(gemini_client, settings.gemini.model),
+                           settings.gemini.model)
         logger.info("gemini_provider_registered", model=settings.gemini.model)
+    return registry
 
-    # Budget gate (ADR 0041)
-    budget_gate = BudgetGate(engine, schema=settings.database.schema_)
 
+async def _start_telegram(settings, registry, session_manager, budget_gate,
+                          health_tracker):
+    """Start optional Telegram adapter. Returns (adapter, polling_task)."""
+    if not settings.telegram.bot_token:
+        return None, None
+    from src.channels.telegram import TelegramAdapter
+
+    adapter = TelegramAdapter(
+        bot_token=settings.telegram.bot_token,
+        telegram_settings=settings.telegram, registry=registry,
+        session_manager=session_manager, budget_gate=budget_gate,
+        gateway_settings=settings.gateway,
+    )
+    await adapter.check_ready()
+    task = asyncio.create_task(adapter.start_polling(), name="telegram_polling")
+    task.add_done_callback(_make_polling_done_callback(health_tracker))
+    logger.info("telegram_adapter_started", username=adapter._bot_username)
+    return adapter, task
+
+
+def _load_settings():
+    """Load and validate settings."""
+    return get_settings()
+
+
+def _bind_app_state(app, *, registry, session_manager, budget_gate,
+                    engine, settings, health_tracker):
     app.state.agent_loop_registry = registry
-    # Backward compat: keep agent_loop for any code that references it directly
     app.state.agent_loop = registry.get().agent_loop
     app.state.session_manager = session_manager
     app.state.budget_gate = budget_gate
-    # Three-layer readiness state (F1)
     app.state.db_engine = engine
     app.state.settings = settings
     app.state.health_tracker = health_tracker
-    logger.info(
-        "gateway_started",
-        host=settings.gateway.host,
-        port=settings.gateway.port,
-        providers=registry.available_providers(),
-        default_provider=registry.default_name,
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Application lifespan: initialize shared state on startup."""
+    setup_logging(json_output=False)
+    try:
+        settings = _load_settings()
+    except ValidationError as e:
+        for err in e.errors():
+            logger.error(
+                "settings_validation_error",
+                field=".".join(str(loc) for loc in err["loc"]),
+                error_type=err["type"], message=err["msg"],
+            )
+        raise
+
+    engine, db_session_factory = await _init_database(settings)
+    await _run_startup_preflight(app, settings, engine)
+
+    session_manager = SessionManager(
+        db_session_factory=db_session_factory,
+        default_mode=ToolMode(settings.session.default_mode),
     )
-
-    # Telegram adapter (optional: only when bot_token is configured)
-    # Preflight C10 already verified the token; check_ready() here
-    # initializes adapter internal state (_bot_username).
-    telegram_adapter = None
-    polling_task = None
-    if settings.telegram.bot_token:
-        from src.channels.telegram import TelegramAdapter
-
-        telegram_adapter = TelegramAdapter(
-            bot_token=settings.telegram.bot_token,
-            telegram_settings=settings.telegram,
-            registry=registry,
-            session_manager=session_manager,
-            budget_gate=budget_gate,
-            gateway_settings=settings.gateway,
-        )
-        await telegram_adapter.check_ready()
-
-        polling_task = asyncio.create_task(
-            telegram_adapter.start_polling(),
-            name="telegram_polling",
-        )
-        polling_task.add_done_callback(_make_polling_done_callback(health_tracker))
-        logger.info("telegram_adapter_started", username=telegram_adapter._bot_username)
+    memory_searcher, evolution_engine, tool_registry = _build_memory_and_tools(
+        settings, db_session_factory,
+    )
+    health_tracker = ComponentHealthTracker()
+    registry = _build_provider_registry(
+        settings, session_manager, memory_searcher,
+        evolution_engine, tool_registry, health_tracker,
+    )
+    budget_gate = BudgetGate(engine, schema=settings.database.schema_)
+    _bind_app_state(app, registry=registry, session_manager=session_manager,
+                    budget_gate=budget_gate, engine=engine, settings=settings,
+                    health_tracker=health_tracker)
+    logger.info(
+        "gateway_started", host=settings.gateway.host, port=settings.gateway.port,
+        providers=registry.available_providers(), default_provider=registry.default_name,
+    )
+    telegram_adapter, polling_task = await _start_telegram(
+        settings, registry, session_manager, budget_gate, health_tracker,
+    )
 
     yield
 
-    # Cleanup: Telegram
     await _shutdown_telegram(telegram_adapter, polling_task)
-
-    # Cleanup: DB
     await engine.dispose()
     logger.info("db_engine_disposed")
 
@@ -284,66 +277,52 @@ async def health_live() -> dict[str, str]:
     return {"status": "alive"}
 
 
+def _checks_to_dict(checks: list[CheckResult]) -> dict:
+    return {c.name: {"status": c.status.value, "evidence": c.evidence} for c in checks}
+
+
+def _collect_component_checks(tracker: ComponentHealthTracker) -> list[CheckResult]:
+    """Layer 3: in-process component health checks."""
+    checks: list[CheckResult] = []
+    if not tracker.telegram_healthy:
+        checks.append(CheckResult(
+            name="telegram_runtime", status=CheckStatus.FAIL,
+            evidence=f"Polling fatal: {tracker.telegram_error}",
+            impact="Telegram channel down", next_action="Restart service",
+        ))
+    for prov_name, fail_count in tracker.unhealthy_providers().items():
+        checks.append(CheckResult(
+            name=f"provider_runtime_{prov_name}", status=CheckStatus.FAIL,
+            evidence=f"{fail_count} consecutive LLM failures ({prov_name})",
+            impact=f"LLM requests to {prov_name} failing",
+            next_action=f"Check {prov_name} provider status",
+        ))
+    return checks
+
+
 @app.get("/health/ready")
 async def health_ready(request: Request) -> dict:
     """Three-layer readiness: real-time checks + startup latched + in-process state."""
     startup_report: PreflightReport | None = getattr(
-        request.app.state, "preflight_report", None
+        request.app.state, "preflight_report", None,
     )
     if startup_report is None or not startup_report.passed:
-        checks = {}
-        if startup_report:
-            checks = {
-                c.name: {"status": c.status.value, "evidence": c.evidence}
-                for c in startup_report.checks
-            }
+        checks = _checks_to_dict(startup_report.checks) if startup_report else {}
         return {"status": "not_ready", "checks": checks}
 
     settings = request.app.state.settings
     engine = request.app.state.db_engine
     tracker: ComponentHealthTracker = request.app.state.health_tracker
 
-    # Layer 1: real-time local checks (C3-C9, no external probes)
     realtime = await run_readiness_checks(settings, engine)
-
-    # Layer 2: startup latched results (C2 + C11)
     startup_checks = [
         c for c in startup_report.checks if c.name in ("active_provider", "soul_reconcile")
     ]
-
-    # Layer 3: in-process component health
-    component_checks: list[CheckResult] = []
-    if not tracker.telegram_healthy:
-        component_checks.append(
-            CheckResult(
-                name="telegram_runtime",
-                status=CheckStatus.FAIL,
-                evidence=f"Polling fatal: {tracker.telegram_error}",
-                impact="Telegram channel down",
-                next_action="Restart service",
-            )
-        )
-    for prov_name, fail_count in tracker.unhealthy_providers().items():
-        component_checks.append(
-            CheckResult(
-                name=f"provider_runtime_{prov_name}",
-                status=CheckStatus.FAIL,
-                evidence=f"{fail_count} consecutive LLM failures ({prov_name})",
-                impact=f"LLM requests to {prov_name} failing",
-                next_action=f"Check {prov_name} provider status",
-            )
-        )
+    component_checks = _collect_component_checks(tracker)
 
     all_checks = realtime.checks + startup_checks + component_checks
     has_fail = any(c.status == CheckStatus.FAIL for c in all_checks)
-    status = "not_ready" if has_fail else "ready"
-
-    return {
-        "status": status,
-        "checks": {
-            c.name: {"status": c.status.value, "evidence": c.evidence} for c in all_checks
-        },
-    }
+    return {"status": "not_ready" if has_fail else "ready", "checks": _checks_to_dict(all_checks)}
 
 
 @app.websocket("/ws")
@@ -395,6 +374,32 @@ async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
         await websocket.send_text(error.model_dump_json())
 
 
+def _event_to_rpc(event: TextChunk | ToolDenied | ToolCallInfo, request_id: str):
+    """Map a dispatch event to an RPC message, or return None for unknown types."""
+    if isinstance(event, TextChunk):
+        return RPCStreamChunk(
+            id=request_id, data=StreamChunkData(content=event.content, done=False),
+        )
+    if isinstance(event, ToolDenied):
+        return RPCToolDenied(
+            id=request_id,
+            data=ToolDeniedData(
+                call_id=event.call_id, tool_name=event.tool_name,
+                mode=event.mode, error_code=event.error_code,
+                message=event.message, next_action=event.next_action,
+            ),
+        )
+    if isinstance(event, ToolCallInfo):
+        return RPCToolCall(
+            id=request_id,
+            data=ToolCallData(
+                tool_name=event.tool_name, arguments=event.arguments,
+                call_id=event.call_id,
+            ),
+        )
+    return None
+
+
 async def _handle_chat_send(websocket: WebSocket, request_id: str, params: dict) -> None:
     """Handle chat.send: delegate to dispatch_chat, stream events over WebSocket."""
     try:
@@ -408,48 +413,16 @@ async def _handle_chat_send(websocket: WebSocket, request_id: str, params: dict)
     settings = get_settings()
 
     async for event in dispatch_chat(
-        registry=registry,
-        session_manager=session_manager,
-        budget_gate=budget_gate,
-        session_id=parsed.session_id,
-        content=parsed.content,
-        provider=parsed.provider,
+        registry=registry, session_manager=session_manager,
+        budget_gate=budget_gate, session_id=parsed.session_id,
+        content=parsed.content, provider=parsed.provider,
         session_claim_ttl_seconds=settings.gateway.session_claim_ttl_seconds,
     ):
-        if isinstance(event, TextChunk):
-            chunk = RPCStreamChunk(
-                id=request_id,
-                data=StreamChunkData(content=event.content, done=False),
-            )
-            await websocket.send_text(chunk.model_dump_json())
-        elif isinstance(event, ToolDenied):
-            denied_msg = RPCToolDenied(
-                id=request_id,
-                data=ToolDeniedData(
-                    call_id=event.call_id,
-                    tool_name=event.tool_name,
-                    mode=event.mode,
-                    error_code=event.error_code,
-                    message=event.message,
-                    next_action=event.next_action,
-                ),
-            )
-            await websocket.send_text(denied_msg.model_dump_json())
-        elif isinstance(event, ToolCallInfo):
-            tool_msg = RPCToolCall(
-                id=request_id,
-                data=ToolCallData(
-                    tool_name=event.tool_name,
-                    arguments=event.arguments,
-                    call_id=event.call_id,
-                ),
-            )
-            await websocket.send_text(tool_msg.model_dump_json())
+        rpc_msg = _event_to_rpc(event, request_id)
+        if rpc_msg is not None:
+            await websocket.send_text(rpc_msg.model_dump_json())
 
-    done_chunk = RPCStreamChunk(
-        id=request_id,
-        data=StreamChunkData(content="", done=True),
-    )
+    done_chunk = RPCStreamChunk(id=request_id, data=StreamChunkData(content="", done=True))
     await websocket.send_text(done_chunk.model_dump_json())
 
 

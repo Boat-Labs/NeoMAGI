@@ -98,54 +98,54 @@ class TelegramAdapter:
 
     async def _handle_dm(self, message: Message) -> None:
         """Process incoming Telegram message. Only DM text from allowed users."""
-        # Ignore non-private (group) messages
-        if message.chat.type != ChatType.PRIVATE:
+        validated = self._validate_message(message)
+        if validated is None:
             return
 
+        user_id, content = validated
+        peer_id = str(user_id)
+        session_id, identity = self._resolve_identity(peer_id)
+
+        typing_task = asyncio.create_task(
+            self._typing_loop(message.chat.id), name="tg_typing",
+        )
+        try:
+            await self._dispatch_and_reply(message, session_id, identity, content, user_id)
+        finally:
+            typing_task.cancel()
+            try:
+                await typing_task
+            except asyncio.CancelledError:
+                pass
+
+    def _validate_message(self, message: Message) -> tuple[int, str] | None:
+        """Validate DM eligibility. Returns (user_id, text) or None."""
+        if message.chat.type != ChatType.PRIVATE:
+            return None
         user = message.from_user
         if user is None:
-            return
-
-        user_id = user.id
-
-        # Auth: fail-closed — empty whitelist rejects everyone
-        if user_id not in self._allowed_ids:
-            logger.warning(
-                "telegram_user_denied",
-                user_id=user_id,
-                username=user.username,
-            )
-            return
-
-        # Ignore non-text messages
+            return None
+        if user.id not in self._allowed_ids:
+            logger.warning("telegram_user_denied", user_id=user.id, username=user.username)
+            return None
         if not message.text:
-            return
+            return None
+        return user.id, message.text
 
-        content = message.text
-        peer_id = str(user_id)
-
-        # Build identity via resolver
-        identity = SessionIdentity(
-            session_id="",  # placeholder, resolved below
-            channel_type="telegram",
-            peer_id=peer_id,
-        )
+    def _resolve_identity(self, peer_id: str) -> tuple[str, SessionIdentity]:
+        """Build session identity via scope resolver."""
+        placeholder = SessionIdentity(session_id="", channel_type="telegram", peer_id=peer_id)
         dm_scope = self._settings.dm_scope
-        session_id = resolve_session_key(identity, dm_scope)
-        identity = SessionIdentity(
-            session_id=session_id,
-            channel_type="telegram",
-            peer_id=peer_id,
-        )
+        session_id = resolve_session_key(placeholder, dm_scope)
+        identity = SessionIdentity(session_id=session_id, channel_type="telegram", peer_id=peer_id)
+        return session_id, identity
 
-        # Start typing indicator
-        typing_task = asyncio.create_task(
-            self._typing_loop(message.chat.id),
-            name="tg_typing",
-        )
-
+    async def _dispatch_and_reply(
+        self, message: Message, session_id: str,
+        identity: SessionIdentity, content: str, user_id: int,
+    ) -> None:
+        """Run dispatch_chat and send response, with error handling."""
         try:
-            # Buffer all events from dispatch_chat
             chunks: list[str] = []
             async for event in dispatch_chat(
                 registry=self._registry,
@@ -154,37 +154,23 @@ class TelegramAdapter:
                 session_id=session_id,
                 content=content,
                 identity=identity,
-                dm_scope=dm_scope,
+                dm_scope=self._settings.dm_scope,
                 session_claim_ttl_seconds=self._gateway_settings.session_claim_ttl_seconds,
             ):
                 if isinstance(event, TextChunk):
                     chunks.append(event.content)
-
             response = "".join(chunks).strip()
             if response:
                 await self._send_response(message, response)
-
         except GatewayError as exc:
             logger.exception(
-                "telegram_dispatch_error",
-                user_id=user_id,
-                session_id=session_id,
-                error_code=exc.code,
+                "telegram_dispatch_error", user_id=user_id,
+                session_id=session_id, error_code=exc.code,
             )
             await message.answer(friendly_error_message(exc.code))
         except Exception:
-            logger.exception(
-                "telegram_dispatch_error",
-                user_id=user_id,
-                session_id=session_id,
-            )
+            logger.exception("telegram_dispatch_error", user_id=user_id, session_id=session_id)
             await message.answer(friendly_error_message(None))
-        finally:
-            typing_task.cancel()
-            try:
-                await typing_task
-            except asyncio.CancelledError:
-                pass
 
     async def _send_response(self, message: Message, text: str) -> None:
         """Send response with optional MarkdownV2 formatting and message splitting."""

@@ -6,6 +6,7 @@ with composite scenarios (all-OK, mixed-WARN, FAIL-blocks).
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -449,14 +450,17 @@ class TestValidationErrorWrapping:
         source = inspect.getsource(lifespan.__wrapped__)
         tree = ast.parse(source)
 
-        # Find try/except blocks that catch ValidationError
-        found_validation_catch = False
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ExceptHandler):
-                if node.type and isinstance(node.type, ast.Name):
-                    if node.type.id == "ValidationError":
-                        found_validation_catch = True
-
-        assert found_validation_catch, (
+        found = _has_except_handler(tree, "ValidationError")
+        assert found, (
             "lifespan should have try/except ValidationError wrapper for get_settings()"
         )
+
+
+def _has_except_handler(tree, exception_name: str) -> bool:
+    """Check if an AST tree contains an except handler for the given exception."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ExceptHandler):
+            continue
+        if node.type and isinstance(node.type, ast.Name) and node.type.id == exception_name:
+            return True
+    return False

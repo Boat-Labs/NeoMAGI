@@ -39,85 +39,59 @@ async def ensure_schema(engine: AsyncEngine, schema: str = DB_SCHEMA) -> None:
     async with engine.begin() as conn:
         await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
         await conn.run_sync(Base.metadata.create_all)
-
-        # Legacy compatibility: older DBs may have sessions table without
-        # M1.3/M1.5/M2 columns because create_all does not ALTER existing tables.
-        # Keep startup self-healing for additive columns.
-        await conn.execute(
-            text(
-                f"ALTER TABLE {schema}.sessions "
-                "ADD COLUMN IF NOT EXISTS next_seq INTEGER NOT NULL DEFAULT 0"
-            )
-        )
-        await conn.execute(
-            text(f"ALTER TABLE {schema}.sessions ADD COLUMN IF NOT EXISTS lock_token VARCHAR(36)")
-        )
-        await conn.execute(
-            text(
-                f"ALTER TABLE {schema}.sessions "
-                "ADD COLUMN IF NOT EXISTS processing_since TIMESTAMPTZ"
-            )
-        )
-        await conn.execute(
-            text(
-                f"ALTER TABLE {schema}.sessions "
-                "ADD COLUMN IF NOT EXISTS mode VARCHAR(16) NOT NULL DEFAULT 'chat_safe'"
-            )
-        )
-        await conn.execute(
-            text(f"ALTER TABLE {schema}.sessions ADD COLUMN IF NOT EXISTS compacted_context TEXT")
-        )
-        await conn.execute(
-            text(
-                f"ALTER TABLE {schema}.sessions ADD COLUMN IF NOT EXISTS compaction_metadata JSONB"
-            )
-        )
-        await conn.execute(
-            text(
-                f"ALTER TABLE {schema}.sessions "
-                "ADD COLUMN IF NOT EXISTS last_compaction_seq INTEGER"
-            )
-        )
-        await conn.execute(
-            text(
-                f"ALTER TABLE {schema}.sessions "
-                "ADD COLUMN IF NOT EXISTS memory_flush_candidates JSONB"
-            )
-        )
-
-        # Search vector trigger: auto-populate search_vector on INSERT/UPDATE.
-        # Three separate execute() calls to avoid asyncpg multi-statement issues.
-        await conn.execute(
-            text(f"""
-            CREATE OR REPLACE FUNCTION {schema}.memory_entries_search_vector_update()
-            RETURNS trigger AS $$
-            BEGIN
-                NEW.search_vector :=
-                    setweight(to_tsvector('simple', coalesce(NEW.title, '')), 'A') ||
-                    setweight(to_tsvector('simple', coalesce(NEW.content, '')), 'B');
-                RETURN NEW;
-            END;
-            $$ LANGUAGE plpgsql
-        """)
-        )
-
-        await conn.execute(
-            text(
-                f"DROP TRIGGER IF EXISTS trg_memory_entries_search_vector"
-                f" ON {schema}.memory_entries"
-            )
-        )
-
-        await conn.execute(
-            text(f"""
-            CREATE TRIGGER trg_memory_entries_search_vector
-            BEFORE INSERT OR UPDATE ON {schema}.memory_entries
-            FOR EACH ROW
-            EXECUTE FUNCTION {schema}.memory_entries_search_vector_update()
-        """)
-        )
+        await _add_legacy_columns(conn, schema)
+        await _create_search_trigger(conn, schema)
 
     logger.info("db_schema_ensured", schema=schema)
+
+
+async def _add_legacy_columns(conn, schema: str) -> None:
+    """Add columns for backwards compatibility with older DB schemas."""
+    columns = [
+        "next_seq INTEGER NOT NULL DEFAULT 0",
+        "lock_token VARCHAR(36)",
+        "processing_since TIMESTAMPTZ",
+        "mode VARCHAR(16) NOT NULL DEFAULT 'chat_safe'",
+        "compacted_context TEXT",
+        "compaction_metadata JSONB",
+        "last_compaction_seq INTEGER",
+        "memory_flush_candidates JSONB",
+    ]
+    for col_def in columns:
+        await conn.execute(
+            text(f"ALTER TABLE {schema}.sessions ADD COLUMN IF NOT EXISTS {col_def}")
+        )
+
+
+async def _create_search_trigger(conn, schema: str) -> None:
+    """Create or replace the search vector trigger for memory_entries."""
+    await conn.execute(
+        text(f"""
+        CREATE OR REPLACE FUNCTION {schema}.memory_entries_search_vector_update()
+        RETURNS trigger AS $$
+        BEGIN
+            NEW.search_vector :=
+                setweight(to_tsvector('simple', coalesce(NEW.title, '')), 'A') ||
+                setweight(to_tsvector('simple', coalesce(NEW.content, '')), 'B');
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
+    """)
+    )
+    await conn.execute(
+        text(
+            f"DROP TRIGGER IF EXISTS trg_memory_entries_search_vector"
+            f" ON {schema}.memory_entries"
+        )
+    )
+    await conn.execute(
+        text(f"""
+        CREATE TRIGGER trg_memory_entries_search_vector
+        BEFORE INSERT OR UPDATE ON {schema}.memory_entries
+        FOR EACH ROW
+        EXECUTE FUNCTION {schema}.memory_entries_search_vector_update()
+    """)
+    )
 
 
 def make_session_factory(engine: AsyncEngine) -> async_sessionmaker:

@@ -54,11 +54,16 @@ async def test_ensure_schema_backfills_legacy_sessions_columns(
     db_engine: AsyncEngine,
 ) -> None:
     """Legacy sessions table should be upgraded with missing additive columns."""
-    async with db_engine.begin() as conn:
+    await _create_legacy_tables(db_engine)
+    await ensure_schema(db_engine, DB_SCHEMA)
+    await _assert_legacy_columns_backfilled(db_engine)
+
+
+async def _create_legacy_tables(engine: AsyncEngine) -> None:
+    """Create pre-M1.3 legacy table shape."""
+    async with engine.begin() as conn:
         await conn.execute(text(f"DROP TABLE IF EXISTS {DB_SCHEMA}.messages CASCADE"))
         await conn.execute(text(f"DROP TABLE IF EXISTS {DB_SCHEMA}.sessions CASCADE"))
-
-        # Simulate pre-M1.3 legacy table shape.
         await conn.execute(text(f"""
             CREATE TABLE {DB_SCHEMA}.sessions (
                 id VARCHAR(128) PRIMARY KEY,
@@ -69,7 +74,6 @@ async def test_ensure_schema_backfills_legacy_sessions_columns(
         await conn.execute(text(
             f"INSERT INTO {DB_SCHEMA}.sessions (id) VALUES ('legacy-main')"
         ))
-
         await conn.execute(text(f"""
             CREATE TABLE {DB_SCHEMA}.messages (
                 id SERIAL PRIMARY KEY,
@@ -83,29 +87,22 @@ async def test_ensure_schema_backfills_legacy_sessions_columns(
             )
         """))
 
-    await ensure_schema(db_engine, DB_SCHEMA)
 
-    async with db_engine.begin() as conn:
+async def _assert_legacy_columns_backfilled(engine: AsyncEngine) -> None:
+    """Assert ensure_schema added all legacy columns."""
+    async with engine.begin() as conn:
         result = await conn.execute(text(f"""
-            SELECT column_name
-            FROM information_schema.columns
+            SELECT column_name FROM information_schema.columns
             WHERE table_schema = '{DB_SCHEMA}' AND table_name = 'sessions'
         """))
         columns = {row.column_name for row in result}
-
         expected = {
-            "mode",
-            "next_seq",
-            "lock_token",
-            "processing_since",
-            "compacted_context",
-            "compaction_metadata",
-            "last_compaction_seq",
-            "memory_flush_candidates",
+            "mode", "next_seq", "lock_token", "processing_since",
+            "compacted_context", "compaction_metadata",
+            "last_compaction_seq", "memory_flush_candidates",
         }
         assert expected.issubset(columns)
 
-        # Existing rows should be readable with mode defaulted.
         mode_result = await conn.execute(text(
             f"SELECT mode FROM {DB_SCHEMA}.sessions WHERE id = 'legacy-main'"
         ))

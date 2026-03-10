@@ -40,16 +40,7 @@ class MemoryIndexer:
         self._settings = settings
 
     async def index_daily_note(self, file_path: Path, *, scope_key: str = "main") -> int:
-        """Parse and index a daily note file.
-
-        Strategy: DELETE existing rows WHERE source_path = file_path,
-        then INSERT all entries. This is idempotent (delete-reinsert).
-
-        Old data compatibility: entries without scope metadata are indexed
-        as scope_key='main'.
-
-        Returns: number of entries indexed.
-        """
+        """Parse and index a daily note file (idempotent delete-reinsert)."""
         if not file_path.is_file():
             return 0
 
@@ -57,56 +48,14 @@ class MemoryIndexer:
         if not content:
             return 0
 
-        # Parse date from filename (YYYY-MM-DD.md)
         source_date = self._parse_date_from_filename(file_path.name)
         rel_path = self._relative_path(file_path)
-
-        # Split into entries by '---' separator
         entries = re.split(r"^---$", content, flags=re.MULTILINE)
-        rows: list[dict] = []
+        rows = self._parse_daily_entries(entries, scope_key, source_date, rel_path)
+        await self._persist_entries(rows, rel_path)
 
-        for entry in entries:
-            stripped = entry.strip()
-            if not stripped:
-                continue
-
-            # Parse scope from entry metadata if present
-            entry_scope = self._extract_scope(stripped, default=scope_key)
-            # Extract content text (skip the metadata line)
-            entry_text = self._extract_entry_text(stripped)
-            if not entry_text:
-                continue
-
-            rows.append(
-                {
-                    "scope_key": entry_scope,
-                    "source_type": "daily_note",
-                    "source_path": rel_path,
-                    "source_date": source_date,
-                    "title": "",
-                    "content": entry_text,
-                    "tags": [],
-                    "confidence": None,
-                }
-            )
-
-        async with self._db_factory() as db:
-            # Delete existing rows for this file (idempotent)
-            await db.execute(delete(MemoryEntry).where(MemoryEntry.source_path == rel_path))
-
-            # Insert new rows
-            for row in rows:
-                entry = MemoryEntry(**row)
-                db.add(entry)
-
-            await db.commit()
-
-        logger.info(
-            "daily_note_indexed",
-            path=rel_path,
-            entries=len(rows),
-            scope_key=scope_key,
-        )
+        logger.info("daily_note_indexed", path=rel_path, entries=len(rows),
+                     scope_key=scope_key)
         return len(rows)
 
     async def index_curated_memory(self, file_path: Path, *, scope_key: str = "main") -> int:
@@ -198,6 +147,35 @@ class MemoryIndexer:
             db.add(entry)
             await db.commit()
         return 1
+
+    def _parse_daily_entries(
+        self, entries: list[str], scope_key: str,
+        source_date: date | None, rel_path: str,
+    ) -> list[dict]:
+        """Parse daily note entries into row dicts for DB insertion."""
+        rows: list[dict] = []
+        for entry in entries:
+            stripped = entry.strip()
+            if not stripped:
+                continue
+            entry_scope = self._extract_scope(stripped, default=scope_key)
+            entry_text = self._extract_entry_text(stripped)
+            if not entry_text:
+                continue
+            rows.append({
+                "scope_key": entry_scope, "source_type": "daily_note",
+                "source_path": rel_path, "source_date": source_date,
+                "title": "", "content": entry_text, "tags": [], "confidence": None,
+            })
+        return rows
+
+    async def _persist_entries(self, rows: list[dict], rel_path: str) -> None:
+        """Delete-reinsert entries for a single source path."""
+        async with self._db_factory() as db:
+            await db.execute(delete(MemoryEntry).where(MemoryEntry.source_path == rel_path))
+            for row in rows:
+                db.add(MemoryEntry(**row))
+            await db.commit()
 
     @staticmethod
     def _parse_date_from_filename(filename: str) -> date | None:

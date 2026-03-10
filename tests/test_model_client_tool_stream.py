@@ -76,34 +76,17 @@ class TestToolCallAccumulation:
 
     @pytest.mark.asyncio()
     async def test_gemini_null_index_multi_calls_do_not_concat(self, client):
-        chunks = [
-            _chunk(tool_calls=[
-                _tc_delta(
-                    index=None,
-                    call_id="function-call-1",
-                    name="memory_search",
-                    args='{"query":"user name"}',
-                ),
-                _tc_delta(
-                    index=None,
-                    call_id="function-call-2",
-                    name="memory_search",
-                    args='{"query":"city"}',
-                ),
-                _tc_delta(
-                    index=None,
-                    call_id="function-call-3",
-                    name="memory_search",
-                    args='{"query":"cat"}',
-                ),
-                _tc_delta(
-                    index=None,
-                    call_id="function-call-4",
-                    name="memory_search",
-                    args='{"query":"book"}',
-                ),
-            ]),
+        # 4 tool calls with null index (Gemini behavior)
+        gemini_calls = [
+            ("function-call-1", '{"query":"user name"}'),
+            ("function-call-2", '{"query":"city"}'),
+            ("function-call-3", '{"query":"cat"}'),
+            ("function-call-4", '{"query":"book"}'),
         ]
+        chunks = [_chunk(tool_calls=[
+            _tc_delta(index=None, call_id=cid, name="memory_search", args=args)
+            for cid, args in gemini_calls
+        ])]
         client._client.chat.completions.create = AsyncMock(
             return_value=_stream_from(chunks)
         )
@@ -116,15 +99,5 @@ class TestToolCallAccumulation:
 
         tool_event = next(e for e in events if isinstance(e, ToolCallsComplete))
         assert len(tool_event.tool_calls) == 4
-        assert [tc["id"] for tc in tool_event.tool_calls] == [
-            "function-call-1",
-            "function-call-2",
-            "function-call-3",
-            "function-call-4",
-        ]
-        assert [tc["arguments"] for tc in tool_event.tool_calls] == [
-            '{"query":"user name"}',
-            '{"query":"city"}',
-            '{"query":"cat"}',
-            '{"query":"book"}',
-        ]
+        assert [tc["id"] for tc in tool_event.tool_calls] == [c[0] for c in gemini_calls]
+        assert [tc["arguments"] for tc in tool_event.tool_calls] == [c[1] for c in gemini_calls]

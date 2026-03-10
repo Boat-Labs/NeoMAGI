@@ -53,30 +53,12 @@ class MemorySearcher:
         self._db_factory = db_session_factory
         self._settings = settings
 
-    async def search(
-        self,
-        query: str,
-        *,
-        scope_key: str = "main",
-        limit: int = 10,
-        min_score: float = 0.0,
-        source_types: list[str] | None = None,
-    ) -> list[MemorySearchResult]:
-        """Execute tsvector search with scope-aware filtering.
-
-        Scope filtering: WHERE scope_key = :scope_key (mandatory, no bypass).
-
-        Scoring uses ts_rank with weights:
-        - title (weight A): highest priority
-        - content (weight B): standard priority
-
-        Returns results sorted by score DESC.
-        """
-        if not query or not query.strip():
-            return []
-
-        # Build tsquery from user input
-        # Use plainto_tsquery for natural language input
+    @staticmethod
+    def _build_search_sql(
+        query: str, *, scope_key: str, limit: int,
+        min_score: float, source_types: list[str] | None,
+    ) -> tuple[str, dict]:
+        """Build tsvector search SQL and parameter dict."""
         search_sql = f"""
             SELECT
                 id, scope_key, source_type, source_path, title, content,
@@ -87,46 +69,52 @@ class MemorySearcher:
             WHERE scope_key = :scope_key
               AND search_vector @@ query
         """
-
-        params: dict = {
-            "query": query.strip(),
-            "scope_key": scope_key,
-        }
-
+        params: dict = {"query": query.strip(), "scope_key": scope_key}
         if source_types:
             search_sql += " AND source_type = ANY(:source_types)"
             params["source_types"] = source_types
-
         if min_score > 0:
             search_sql += " AND ts_rank(search_vector, query) >= :min_score"
             params["min_score"] = min_score
-
         search_sql += " ORDER BY score DESC LIMIT :limit"
         params["limit"] = limit
+        return search_sql, params
 
+    async def _execute_search(
+        self, search_sql: str, params: dict,
+    ) -> list[MemorySearchResult]:
+        """Execute search SQL and map rows to result objects."""
         results: list[MemorySearchResult] = []
-
         async with self._db_factory() as db:
             rows = await db.execute(text(search_sql), params)
             for row in rows:
-                results.append(
-                    MemorySearchResult(
-                        entry_id=row.id,
-                        scope_key=row.scope_key,
-                        source_type=row.source_type,
-                        source_path=row.source_path,
-                        title=row.title,
-                        content=row.content,
-                        score=row.score,
-                        tags=row.tags or [],
-                        created_at=row.created_at,
-                    )
-                )
+                results.append(MemorySearchResult(
+                    entry_id=row.id, scope_key=row.scope_key,
+                    source_type=row.source_type, source_path=row.source_path,
+                    title=row.title, content=row.content, score=row.score,
+                    tags=row.tags or [], created_at=row.created_at,
+                ))
+        return results
 
-        logger.info(
-            "memory_search",
-            query=query[:50],
-            scope_key=scope_key,
-            results=len(results),
+    async def search(
+        self,
+        query: str,
+        *,
+        scope_key: str = "main",
+        limit: int = 10,
+        min_score: float = 0.0,
+        source_types: list[str] | None = None,
+    ) -> list[MemorySearchResult]:
+        """Execute tsvector search with scope-aware filtering (ADR 0034)."""
+        if not query or not query.strip():
+            return []
+
+        search_sql, params = self._build_search_sql(
+            query, scope_key=scope_key, limit=limit,
+            min_score=min_score, source_types=source_types,
         )
+        results = await self._execute_search(search_sql, params)
+
+        logger.info("memory_search", query=query[:50], scope_key=scope_key,
+                     results=len(results))
         return results
