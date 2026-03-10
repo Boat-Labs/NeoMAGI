@@ -416,3 +416,10 @@
 - Validation: `just lint` 通过；`just test` 1033 passed；`uv run python -m src.infra.complexity_guard report --json` 显示 `block_findings=[]`；`uv run python -m src.infra.complexity_guard check` 显示 `Regressions: 0`
 - Next: 将复杂度治理从 block 清债切换到 target 级持续收敛，按 ratchet 规则逐步压低 `scripts/`、`src/` 与 `tests/` 的 target findings
 - Risk: 当前全量测试仍有 3 条既存 `RuntimeWarning: coroutine ... was never awaited`，不阻塞本轮 closeout，但应单独治理
+
+## 2026-03-11 (local) | Phase 2 Mainline Pointer
+- Status: ready
+- Done: `P2-M1a` 显式成长治理内核已经完成并关闭；并行治理轨上的 devcoord SQLite cutover、beads Git-JSONL backup migration 与 complexity batch sweep 也都已完成收口，因此当前没有已知的横切治理 blocker 阻止主线继续推进
+- Evidence: `dev_docs/plans/phase2/p2-m1a_growth-governance-kernel_2026-03-06.md`；`design_docs/phase2/roadmap_milestones_v1.md`；`design_docs/phase2/p2_m1_architecture.md`；`dev_docs/progress/project_progress.md` 中 `P2-M1a closeout` / `Complexity Batch Sweep Closeout` 条目
+- Next: 主线下一步应进入 `P2-M1b`，而不是跳到 `P2-M2`；建议先产出 `dev_docs/plans/phase2/` 下的 `P2-M1b` draft，范围聚焦 `skill object runtime + builder runtime + beads work memory` 的最小可用闭环，明天从该 draft 开始继续
+- Risk: `P2-M1b` 仍是高复杂度阶段，若不先压成最小闭环，容易把 `skill object`、builder 产品化、work memory 与 promote 规则一次性耦合过深
