@@ -193,17 +193,8 @@ async def _start_telegram(settings, registry, session_manager, budget_gate,
 
 
 def _load_settings():
-    """Load and validate settings, logging structured errors on failure."""
-    try:
-        return get_settings()
-    except ValidationError as e:
-        for err in e.errors():
-            logger.error(
-                "settings_validation_error",
-                field=".".join(str(loc) for loc in err["loc"]),
-                error_type=err["type"], message=err["msg"],
-            )
-        raise
+    """Load and validate settings."""
+    return get_settings()
 
 
 def _bind_app_state(app, *, registry, session_manager, budget_gate,
@@ -221,7 +212,16 @@ def _bind_app_state(app, *, registry, session_manager, budget_gate,
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: initialize shared state on startup."""
     setup_logging(json_output=False)
-    settings = _load_settings()
+    try:
+        settings = _load_settings()
+    except ValidationError as e:
+        for err in e.errors():
+            logger.error(
+                "settings_validation_error",
+                field=".".join(str(loc) for loc in err["loc"]),
+                error_type=err["type"], message=err["msg"],
+            )
+        raise
 
     engine, db_session_factory = await _init_database(settings)
     await _run_startup_preflight(app, settings, engine)
