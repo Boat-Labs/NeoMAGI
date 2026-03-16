@@ -56,7 +56,7 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0050 | Devcoord: decouple from beads and use a SQLite control-plane store | accepted | 2026-03-06 | `decisions/0050-devcoord-decouple-from-beads-and-use-sqlite-control-plane-store.md` |
 | 0051 | Adopt code complexity budgets and ratchet governance | accepted | 2026-03-08 | `decisions/0051-adopt-code-complexity-budgets-and-ratchet-governance.md` |
 | 0052 | Project beads backup: Git-tracked JSONL exports over Dolt remote sync | accepted | 2026-03-08 | `decisions/0052-project-beads-backup-git-tracked-jsonl-exports.md` |
-| 0053 | Memory entry stable IDs with projection-only content hashes | proposed | 2026-03-16 | `decisions/0053-memory-entry-ids-and-projection-only-content-hashes.md` |
+| 0053 | Memory entry stable IDs with projection-only content hashes | accepted | 2026-03-16 | `decisions/0053-memory-entry-ids-and-projection-only-content-hashes.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。

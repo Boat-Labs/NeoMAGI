@@ -1,6 +1,6 @@
 # 0053-memory-entry-ids-and-projection-only-content-hashes
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-03-16
 - Note: 本 ADR 只定义 memory 文件稳定身份与数据库 projection 的边界，不在本轮引入 multi-hop retrieval 的运行时实现。
 
