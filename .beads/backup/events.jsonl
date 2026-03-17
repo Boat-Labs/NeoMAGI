@@ -1186,3 +1186,31 @@
 {"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:30:38Z","event_type":"created","id":1317,"issue_id":"NeoMAGI-584","new_value":"","old_value":""}
 {"actor":"Zhiliang Zhou","comment":"Added label: p2-m1b","created_at":"2026-03-17T23:30:38Z","event_type":"label_added","id":1318,"issue_id":"NeoMAGI-584","new_value":null,"old_value":null}
 {"actor":"Zhiliang Zhou","comment":"Added label: milestone","created_at":"2026-03-17T23:30:38Z","event_type":"label_added","id":1319,"issue_id":"NeoMAGI-584","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:30:46Z","event_type":"created","id":1320,"issue_id":"NeoMAGI-584.1","new_value":"","old_value":""}
+{"actor":"Zhiliang Zhou","comment":"Added label: p2-m1b","created_at":"2026-03-17T23:30:46Z","event_type":"label_added","id":1321,"issue_id":"NeoMAGI-584.1","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":"Added label: phase0","created_at":"2026-03-17T23:30:46Z","event_type":"label_added","id":1322,"issue_id":"NeoMAGI-584.1","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":"Added label: milestone","created_at":"2026-03-17T23:30:46Z","event_type":"label_added","id":1323,"issue_id":"NeoMAGI-584.1","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:30:47Z","event_type":"created","id":1324,"issue_id":"NeoMAGI-584.2","new_value":"","old_value":""}
+{"actor":"Zhiliang Zhou","comment":"Added label: p2-m1b","created_at":"2026-03-17T23:30:47Z","event_type":"label_added","id":1325,"issue_id":"NeoMAGI-584.2","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":"Added label: phase1","created_at":"2026-03-17T23:30:47Z","event_type":"label_added","id":1326,"issue_id":"NeoMAGI-584.2","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":"Added label: milestone","created_at":"2026-03-17T23:30:47Z","event_type":"label_added","id":1327,"issue_id":"NeoMAGI-584.2","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:30:49Z","event_type":"created","id":1328,"issue_id":"NeoMAGI-584.3","new_value":"","old_value":""}
+{"actor":"Zhiliang Zhou","comment":"Added label: p2-m1b","created_at":"2026-03-17T23:30:49Z","event_type":"label_added","id":1329,"issue_id":"NeoMAGI-584.3","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":"Added label: phase2","created_at":"2026-03-17T23:30:49Z","event_type":"label_added","id":1330,"issue_id":"NeoMAGI-584.3","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":"Added label: milestone","created_at":"2026-03-17T23:30:49Z","event_type":"label_added","id":1331,"issue_id":"NeoMAGI-584.3","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:30:51Z","event_type":"created","id":1332,"issue_id":"NeoMAGI-584.4","new_value":"","old_value":""}
+{"actor":"Zhiliang Zhou","comment":"Added label: p2-m1b","created_at":"2026-03-17T23:30:51Z","event_type":"label_added","id":1333,"issue_id":"NeoMAGI-584.4","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":"Added label: phase3","created_at":"2026-03-17T23:30:51Z","event_type":"label_added","id":1334,"issue_id":"NeoMAGI-584.4","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":"Added label: milestone","created_at":"2026-03-17T23:30:51Z","event_type":"label_added","id":1335,"issue_id":"NeoMAGI-584.4","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:30:53Z","event_type":"created","id":1336,"issue_id":"NeoMAGI-584.5","new_value":"","old_value":""}
+{"actor":"Zhiliang Zhou","comment":"Added label: p2-m1b","created_at":"2026-03-17T23:30:53Z","event_type":"label_added","id":1337,"issue_id":"NeoMAGI-584.5","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":"Added label: phase4","created_at":"2026-03-17T23:30:53Z","event_type":"label_added","id":1338,"issue_id":"NeoMAGI-584.5","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":"Added label: milestone","created_at":"2026-03-17T23:30:53Z","event_type":"label_added","id":1339,"issue_id":"NeoMAGI-584.5","new_value":null,"old_value":null}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:34:23Z","event_type":"claimed","id":1340,"issue_id":"NeoMAGI-584.1","new_value":"{\"assignee\":\"Zhiliang Zhou\",\"status\":\"in_progress\"}","old_value":"{\"id\":\"NeoMAGI-584.1\",\"title\":\"P2-M1B-P0: Domain Types + DB Migration\",\"description\":\"SkillSpec/SkillEvidence/ResolvedSkillView/TaskFrame types + Alembic migration for skill_specs/skill_evidence/skill_spec_versions\",\"status\":\"open\",\"priority\":2,\"issue_type\":\"task\",\"owner\":\"zhouzhiliang@gmail.com\",\"created_at\":\"2026-03-17T22:30:46Z\",\"created_by\":\"Zhiliang Zhou\",\"updated_at\":\"2026-03-17T22:30:46Z\"}"}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:49:36Z","event_type":"closed","id":1341,"issue_id":"NeoMAGI-584.1","new_value":"Reverted: session cleanup","old_value":""}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:49:38Z","event_type":"closed","id":1342,"issue_id":"NeoMAGI-584.2","new_value":"Reverted: session cleanup","old_value":""}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:49:39Z","event_type":"closed","id":1343,"issue_id":"NeoMAGI-584.3","new_value":"Reverted: session cleanup","old_value":""}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:49:39Z","event_type":"closed","id":1344,"issue_id":"NeoMAGI-584.4","new_value":"Reverted: session cleanup","old_value":""}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:49:39Z","event_type":"closed","id":1345,"issue_id":"NeoMAGI-584.5","new_value":"Reverted: session cleanup","old_value":""}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:49:39Z","event_type":"closed","id":1346,"issue_id":"NeoMAGI-584","new_value":"all steps complete","old_value":""}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-17T23:49:40Z","event_type":"closed","id":1347,"issue_id":"NeoMAGI-584","new_value":"Reverted: session cleanup","old_value":""}

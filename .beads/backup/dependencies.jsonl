@@ -4,6 +4,11 @@
 {"created_at":"2026-03-04T09:13:38Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-drh","issue_id":"NeoMAGI-4rp","type":"parent-child"}
 {"created_at":"2026-03-04T09:13:27Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-iui","issue_id":"NeoMAGI-4xt","type":"parent-child"}
 {"created_at":"2026-03-04T09:12:28Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-2o7","issue_id":"NeoMAGI-50v","type":"parent-child"}
+{"created_at":"2026-03-17T23:30:46Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-584","issue_id":"NeoMAGI-584.1","type":"parent-child"}
+{"created_at":"2026-03-17T23:30:47Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-584","issue_id":"NeoMAGI-584.2","type":"parent-child"}
+{"created_at":"2026-03-17T23:30:49Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-584","issue_id":"NeoMAGI-584.3","type":"parent-child"}
+{"created_at":"2026-03-17T23:30:51Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-584","issue_id":"NeoMAGI-584.4","type":"parent-child"}
+{"created_at":"2026-03-17T23:30:53Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-584","issue_id":"NeoMAGI-584.5","type":"parent-child"}
 {"created_at":"2026-03-04T09:13:39Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-iui","issue_id":"NeoMAGI-5jl","type":"parent-child"}
 {"created_at":"2026-03-04T09:13:27Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-iui","issue_id":"NeoMAGI-76q","type":"parent-child"}
 {"created_at":"2026-03-09T23:55:44Z","created_by":"Zhiliang Zhou","depends_on_id":"NeoMAGI-ih2","issue_id":"NeoMAGI-7ta","type":"discovered-from"}
