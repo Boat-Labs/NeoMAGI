@@ -129,6 +129,7 @@ ADR 0053 已经明确 daily note 真源的最小字段集应为：
 
 - 本轮不要求 writer 返回结构化 entry object
 - 若未来需要返回 `entry_id`，再单独做 API 升级
+- `append_daily_note()` 一旦新增 `source_session_id` 参数，所有调用点必须在同一实现切片内同步更新；不接受只改 writer 签名、暂时让 flush/tool 路径处于半坏状态
 
 ### Slice B: Tool and Flush Propagation
 
@@ -142,6 +143,10 @@ ADR 0053 已经明确 daily note 真源的最小字段集应为：
 - 在 [`src/memory/writer.py`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/src/memory/writer.py) 的 `process_flush_candidates()` 路径中：
   - 将 `ResolvedFlushCandidate.source_session_id` 透传给 `append_daily_note()`
 - 不修改 `ToolContext` 结构；[`src/tools/context.py`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/src/tools/context.py) 已具备 `session_id`
+
+约束：
+
+- Slice A 与 Slice B 在提交层面视为一个不可拆开的纵向切片：writer 签名变更、`memory_append` 透传和 flush 透传必须同一 commit 完成
 
 ### Slice C: Parser and Indexer Compatibility
 
@@ -180,6 +185,7 @@ ADR 0053 已经明确 daily note 真源的最小字段集应为：
 
 - 本轮不做复杂 migration 系统改造
 - 目标是确保新列在现有 `ensure_schema()` 路径上可幂等创建
+- 本轮选择 `ensure_schema()` additive backfill，是延续当前仓库既有模式；后续若项目统一 schema 管理，再单开 follow-up 补 Alembic migration，不在本 patch 混做
 
 ### Slice E: Test and Backward-Compatibility Guardrails
 
@@ -227,15 +233,22 @@ Claude 实现时，预期主要落在这些文件：
 
 建议 Claude 按 3 个小 commit 或 3 个 patch slice 实现，而不是一个大补丁：
 
-1. writer + tool propagation
-2. model + ensure_schema + indexer
+1. model + ensure_schema + indexer additive support
+2. writer + tool propagation + flush propagation
 3. tests +兼容性收口
 
 理由：
 
+- 先让数据库层“接得住”新增字段，再让 writer 发射新增字段，减少中间态不一致
 - 方便审阅 provenance 字段是“写进去但没解析”，还是“解析了但 schema 没跟上”
 - 方便 Codex 以 reviewer 身份逐层卡边界
 - 避免把“源格式升级”和“DB 模型升级”混成难以定位的回归
+
+中间态约束：
+
+- commit 1 完成后，数据库层已能解析/持久化 `entry_id` 与 `source_session_id`，但 writer 尚未开始发射这两个字段，这是可接受中间态
+- commit 2 完成后，新写入 daily note 与增量索引路径应同时带上新字段，不允许出现“真源已写入但 `index_entry_direct()` 仍未跟上”的半更新状态
+- 若 Claude 因实现细节临时保留“commit 1 之后、commit 2 之前的增量索引行缺少新字段”的窗口，必须在 handoff 中明确说明，并注明一次全量 reindex 可修复；但首选方案仍是按本计划顺序避免该窗口
 
 ## Review Protocol
 
