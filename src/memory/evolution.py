@@ -136,10 +136,21 @@ class EvolutionEngine:
         logger.info("soul_proposed", version=next_version, intent=proposal.intent[:50])
         return next_version
 
-    async def evaluate(self, version: int) -> EvalResult:
+    async def evaluate(
+        self,
+        version: int,
+        *,
+        contract_id: str = "",
+        contract_version: int = 0,
+    ) -> EvalResult:
         """Run eval checks against a proposed version.
 
         Checks: content coherence, size limit, diff sanity.
+
+        When called via ``SoulGovernedObjectAdapter``, *contract_id* and
+        *contract_version* pin the eval contract used for this run so that
+        the audit trail in ``soul_versions.eval_result`` records which
+        contract produced this judgment (ADR 0054).
         """
         async with self._db_factory() as db:
             record = await self._get_version(db, version)
@@ -156,7 +167,15 @@ class EvolutionEngine:
                 if passed
                 else "Failed: " + ", ".join(c.name for c in checks if not c.passed)
             )
-            await self._store_eval_result(db, version, passed, checks, summary)
+            await self._store_eval_result(
+                db,
+                version,
+                passed,
+                checks,
+                summary,
+                contract_id=contract_id,
+                contract_version=contract_version,
+            )
 
         logger.info("soul_evaluated", version=version, passed=passed)
         return EvalResult(passed=passed, checks=checks, summary=summary)
@@ -174,7 +193,10 @@ class EvolutionEngine:
                 await self._activate_version(db, version)
             except Exception:
                 self._compensate_file_write(
-                    soul_path, old_content, operation="apply", version=version,
+                    soul_path,
+                    old_content,
+                    operation="apply",
+                    version=version,
                 )
                 raise
 
@@ -195,8 +217,10 @@ class EvolutionEngine:
                 next_version = await self._create_rollback_version(db, target)
             except Exception:
                 self._compensate_file_write(
-                    soul_path, old_content,
-                    operation="rollback", target_version=target.version,
+                    soul_path,
+                    old_content,
+                    operation="rollback",
+                    target_version=target.version,
                 )
                 raise
 
@@ -299,7 +323,9 @@ class EvolutionEngine:
     # ── extracted helpers (evaluate / apply / rollback) ──
 
     async def _build_eval_checks(
-        self, db: AsyncSession, record: SoulVersionRecord,
+        self,
+        db: AsyncSession,
+        record: SoulVersionRecord,
     ) -> list[EvalCheck]:
         """Build the three evaluation checks for a proposed version."""
         content = record.content
@@ -307,12 +333,15 @@ class EvolutionEngine:
 
         # Check 1: Content coherence
         is_coherent = bool(content and content.strip())
-        checks.append(EvalCheck(
-            name="content_coherence",
-            passed=is_coherent,
-            detail="Content is non-empty and well-formed"
-            if is_coherent else "Content is empty or whitespace-only",
-        ))
+        checks.append(
+            EvalCheck(
+                name="content_coherence",
+                passed=is_coherent,
+                detail="Content is non-empty and well-formed"
+                if is_coherent
+                else "Content is empty or whitespace-only",
+            )
+        )
 
         # Check 2: Size limit
         max_tokens = 4000
@@ -320,37 +349,53 @@ class EvolutionEngine:
             max_tokens = self._settings.curated_max_tokens
         max_chars = max_tokens * 4
         within_limit = len(content) <= max_chars
-        checks.append(EvalCheck(
-            name="size_limit",
-            passed=within_limit,
-            detail=f"Content size {len(content)} chars"
-            + (f" (limit: {max_chars})" if not within_limit else ""),
-        ))
+        checks.append(
+            EvalCheck(
+                name="size_limit",
+                passed=within_limit,
+                detail=f"Content size {len(content)} chars"
+                + (f" (limit: {max_chars})" if not within_limit else ""),
+            )
+        )
 
         # Check 3: Diff sanity — not identical to current
         current = await self._get_active_version(db)
         is_different = current is None or current.content.strip() != content.strip()
-        checks.append(EvalCheck(
-            name="diff_sanity",
-            passed=is_different,
-            detail="Content differs from current active version"
-            if is_different else "Content identical to current active version",
-        ))
+        checks.append(
+            EvalCheck(
+                name="diff_sanity",
+                passed=is_different,
+                detail="Content differs from current active version"
+                if is_different
+                else "Content identical to current active version",
+            )
+        )
         return checks
 
     @staticmethod
     async def _store_eval_result(
-        db: AsyncSession, version: int,
-        passed: bool, checks: list[EvalCheck], summary: str,
+        db: AsyncSession,
+        version: int,
+        passed: bool,
+        checks: list[EvalCheck],
+        summary: str,
+        *,
+        contract_id: str = "",
+        contract_version: int = 0,
     ) -> None:
-        """Persist evaluation result to the version record."""
-        eval_dict = {
+        """Persist evaluation result to the version record.
+
+        ``contract_id`` and ``contract_version`` pin the eval contract
+        used for this run, enabling audit and non-retroactivity (ADR 0054).
+        """
+        eval_dict: dict[str, object] = {
             "passed": passed,
-            "checks": [
-                {"name": c.name, "passed": c.passed, "detail": c.detail} for c in checks
-            ],
+            "checks": [{"name": c.name, "passed": c.passed, "detail": c.detail} for c in checks],
             "summary": summary,
         }
+        if contract_id:
+            eval_dict["contract_id"] = contract_id
+            eval_dict["contract_version"] = contract_version
         await db.execute(
             update(SoulVersionRecord)
             .where(SoulVersionRecord.version == version)
@@ -380,8 +425,11 @@ class EvolutionEngine:
 
     @staticmethod
     def _compensate_file_write(
-        soul_path: Path, old_content: str | None,
-        *, operation: str, **log_kw: object,
+        soul_path: Path,
+        old_content: str | None,
+        *,
+        operation: str,
+        **log_kw: object,
     ) -> None:
         """ADR 0036: restore file content after DB failure."""
         try:
@@ -417,7 +465,9 @@ class EvolutionEngine:
         await db.commit()
 
     async def _find_rollback_target(
-        self, db: AsyncSession, to_version: int | None,
+        self,
+        db: AsyncSession,
+        to_version: int | None,
     ) -> SoulVersionRecord:
         """Find the version record to roll back to."""
         if to_version is not None:
@@ -437,7 +487,9 @@ class EvolutionEngine:
         return target
 
     async def _create_rollback_version(
-        self, db: AsyncSession, target: SoulVersionRecord,
+        self,
+        db: AsyncSession,
+        target: SoulVersionRecord,
     ) -> int:
         """Mark active as rolled_back and create new active version from target."""
         await db.execute(

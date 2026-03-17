@@ -88,11 +88,8 @@ class TestPropose:
         assert version == 1
         soul_adapter.propose.assert_awaited_once_with(proposal)
 
-
     @pytest.mark.asyncio
-    async def test_cross_kind_mismatch_raises(
-        self, engine: GrowthGovernanceEngine
-    ) -> None:
+    async def test_cross_kind_mismatch_raises(self, engine: GrowthGovernanceEngine) -> None:
         proposal = _make_proposal(GrowthObjectKind.wrapper_tool)
         with pytest.raises(UnsupportedGrowthObjectError, match="does not match"):
             await engine.propose(GrowthObjectKind.soul, proposal)

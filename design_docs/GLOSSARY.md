@@ -74,6 +74,21 @@
   - `contains` → [Scope Claim](#scope-claim)
   - `contains` → [Efficiency Metrics](#efficiency-metrics)
 
+### GrowthEvalResult
+- **Category**：Governance / Evaluation
+- **Aliases**：eval result
+- **Definition**：一次 pinned contract run 的结果投影。它记录 pass/fail 判定、逐项 check 结果、以及所 pin 的 `contract_id` 和 `contract_version`，支持审计和非回溯性。
+- **Relations**：
+  - `produced-by` → adapter `evaluate()` under [GrowthEvalContract](#growthevalcontract)
+  - `pins` → [Contract Pinning](#contract-pinning)
+
+### PassRuleKind
+- **Category**：Governance / Evaluation
+- **Aliases**：pass rule
+- **Definition**：eval contract 中定义 pass/fail 判定策略的有限枚举。V1 只允许 `all_required`（全部 required check 必须通过）和 `hard_pass_and_threshold`（hard check 必须全过，soft check 达阈值即可）。
+- **Relations**：
+  - `used-by` → [GrowthEvalContract](#growthevalcontract)
+
 ### Boundary Gates
 - **Category**：Evaluation
 - **Aliases**：hard gates
@@ -193,6 +208,76 @@
 - **Definition**：建立在稳定 memory kernel 之上的声明式 memory application 规格。当前在 `P2-M1` 中仍是 tentative reserved kind，正式定义推迟到 `P2-M3`。
 - **Relations**：
   - `is-a` → [Growth Object](#growth-object)
+
+### Mutable Surface
+- **Category**：Governance / Evaluation
+- **Aliases**：mutable face
+- **Definition**：一个 growth object 中，被提案允许改变的面。例如 `soul` 的 mutable surface 是 `SOUL.md` 内容和 `soul_versions` payload；`skill_spec` 的 mutable surface 是 `SkillSpec` / `SkillEvidence` 字段。与 immutable harness 分离是 eval contract 的核心不变量。
+- **Relations**：
+  - `defined-by` → [GrowthEvalContract](#growthevalcontract)
+  - `mutated-by` → [Growth Proposal](#growth-proposal)
+
+### Immutable Harness
+- **Category**：Governance / Evaluation
+- **Aliases**：eval harness, judge assets
+- **Definition**：评测所依赖的脚本、case corpus、judge 规则、golden cases、deny-list 等资产集合。proposal 可以改对象，不能改裁判；改裁判必须走单独、版本化、可审计的治理路径。
+- **Relations**：
+  - `defined-by` → [GrowthEvalContract](#growthevalcontract)
+  - `consumed-by` → adapter `evaluate()` implementation
+
+### Hard Checks
+- **Category**：Evaluation
+- **Aliases**：deterministic checks, boundary checks
+- **Definition**：必须通过才能进入后续评测层的 deterministic 验证项。通常落在 Boundary gates 层，例如 schema 校验、非空检查、diff 合理性检查。与 scenario checks 的区别在于：hard checks 是纯 deterministic 的，不依赖外部 case corpus 或运行时环境。
+- **Relations**：
+  - `subset-of` → [Boundary Gates](#boundary-gates)
+  - `required-by` → [GrowthEvalContract](#growthevalcontract)
+
+### Scenario Checks
+- **Category**：Evaluation
+- **Aliases**：scenario tests, regression checks
+- **Definition**：使用固定 case corpus 或回归测试套件验证对象行为的检查项。通常落在 Effect evidence 或 Boundary gates 层。与 hard checks 的区别在于：scenario checks 可能依赖外部 test suite 或 before/after case 对比。
+- **Relations**：
+  - `layer-of` → [Effect Evidence](#effect-evidence) or [Boundary Gates](#boundary-gates)
+  - `defined-by` → [GrowthEvalContract](#growthevalcontract)
+
+### Veto Condition
+- **Category**：Governance / Evaluation
+- **Aliases**：veto rule, one-ticket-reject
+- **Definition**：一票否决条件。当 eval 结果中出现 veto condition 匹配时，无论其他 check 结果如何，整体判定为 FAIL。veto conditions 必须在 eval 前固定（ADR 0054 不变量 5），不能看结果后改口径。
+- **Relations**：
+  - `defined-by` → [GrowthEvalContract](#growthevalcontract)
+
+### Supporting Evidence
+- **Category**：Governance
+- **Aliases**：evidence ref
+- **Definition**：附着在 proposal 上的辅助证据引用，如对话 ID、测试结果摘要、外部来源引用等。它本身不是 growth object，不接受独立治理生命周期，只作为 proposal 的可审计附件。
+- **Relations**：
+  - `attached-to` → [Growth Proposal](#growth-proposal)
+
+### Implementation Artifact
+- **Category**：Implementation
+- **Aliases**：code artifact
+- **Definition**：实现某个 proposal 或 eval 所需的非一等产物，例如代码 diff、实验分支产物、build 输出等。在 P2-M1 中，implementation artifact 不是 growth object。
+- **Relations**：
+  - `produced-by` → [Growth Proposal](#growth-proposal) or eval process
+  - `is-not-a` → [Growth Object](#growth-object)
+
+### Contract Pinning
+- **Category**：Governance / Evaluation
+- **Aliases**：eval pinning
+- **Definition**：每次评测必须绑定固定的 `contract_id`、`contract_version`、judge assets、pass rule、budget limits。这是 ADR 0054 不变量 2 的工程表达。pinning 保证同一 proposal 不会因为 contract 变更而改变判定结果。
+- **Relations**：
+  - `enforces` → [GrowthEvalContract](#growthevalcontract)
+  - `recorded-in` → [GrowthEvalResult](#growthevalresult)
+
+### Judge Isolation
+- **Category**：Governance / Evaluation
+- **Aliases**：judge separation
+- **Definition**：proposal 可以改对象，不能改它依赖的 judge / harness。这是 ADR 0054 不变量 1 的核心原则，防止"通过修改裁判来赢"。
+- **Relations**：
+  - `protects` → [Immutable Harness](#immutable-harness)
+  - `constrains` → [Growth Proposal](#growth-proposal)
 
 ### Raw Code Patch
 - **Category**：Implementation Artifact

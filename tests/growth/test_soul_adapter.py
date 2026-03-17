@@ -80,9 +80,7 @@ class TestKind:
 
 
 class TestProtocolConformance:
-    def test_isinstance_governed_object_adapter(
-        self, adapter: SoulGovernedObjectAdapter
-    ) -> None:
+    def test_isinstance_governed_object_adapter(self, adapter: SoulGovernedObjectAdapter) -> None:
         assert isinstance(adapter, GovernedObjectAdapter)
 
 
@@ -104,17 +102,13 @@ class TestPropose:
         assert soul_proposal.diff_summary == "Changed identity text"
 
     @pytest.mark.asyncio
-    async def test_missing_new_content_raises(
-        self, adapter: SoulGovernedObjectAdapter
-    ) -> None:
+    async def test_missing_new_content_raises(self, adapter: SoulGovernedObjectAdapter) -> None:
         proposal = _make_growth_proposal(include_payload=False)
         with pytest.raises(ValueError, match="new_content"):
             await adapter.propose(proposal)
 
     @pytest.mark.asyncio
-    async def test_non_string_new_content_raises(
-        self, adapter: SoulGovernedObjectAdapter
-    ) -> None:
+    async def test_non_string_new_content_raises(self, adapter: SoulGovernedObjectAdapter) -> None:
         proposal = GrowthProposal(
             object_kind=GrowthObjectKind.soul,
             object_id="soul-1",
@@ -182,7 +176,16 @@ class TestEvaluate:
         assert len(result.checks) == 1
         assert result.checks[0]["name"] == "content_coherence"
         assert result.checks[0]["passed"] is True
-        mock_engine.evaluate.assert_awaited_once_with(1)
+        mock_engine.evaluate.assert_awaited_once_with(1, contract_id="soul_v1", contract_version=1)
+
+    @pytest.mark.asyncio
+    async def test_pins_contract_id_and_version(
+        self, adapter: SoulGovernedObjectAdapter, mock_engine: AsyncMock
+    ) -> None:
+        """ADR 0054 §1a: eval result must carry pinned contract_id + version."""
+        result = await adapter.evaluate(1)
+        assert result.contract_id == "soul_v1"
+        assert result.contract_version == 1
 
 
 class TestApply:
@@ -224,9 +227,7 @@ class TestGetActive:
         mock_engine.get_current_version.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_no_active(
-        self, mock_engine: AsyncMock
-    ) -> None:
+    async def test_returns_none_when_no_active(self, mock_engine: AsyncMock) -> None:
         mock_engine.get_current_version = AsyncMock(return_value=None)
         adapter = SoulGovernedObjectAdapter(mock_engine)
         result = await adapter.get_active()

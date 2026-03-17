@@ -106,8 +106,6 @@ class GrowthGovernanceEngine:
 
         adapter = self._adapters.get(kind)
         if adapter is None:
-            raise UnsupportedGrowthObjectError(
-                f"No adapter registered for onboarded kind '{kind}'"
-            )
+            raise UnsupportedGrowthObjectError(f"No adapter registered for onboarded kind '{kind}'")
 
         return adapter

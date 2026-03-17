@@ -3,6 +3,8 @@
 Delegates all governance operations to :class:`EvolutionEngine`.
 Does NOT replace EvolutionEngine, does NOT do file I/O or compensation.
 ``soul_versions`` remains SSOT (ADR 0036).
+
+Pins ``SOUL_EVAL_CONTRACT_V1`` before every evaluation (ADR 0054 §1a).
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
+from src.growth.contracts import SOUL_EVAL_CONTRACT_V1
 from src.growth.types import GrowthEvalResult, GrowthObjectKind, GrowthProposal
 from src.memory.evolution import SoulProposal
 
@@ -29,6 +32,7 @@ class SoulGovernedObjectAdapter:
 
     def __init__(self, engine: EvolutionEngine) -> None:
         self._engine = engine
+        self._contract = SOUL_EVAL_CONTRACT_V1
 
     @property
     def kind(self) -> GrowthObjectKind:
@@ -63,15 +67,21 @@ class SoulGovernedObjectAdapter:
         return version
 
     async def evaluate(self, version: int) -> GrowthEvalResult:
-        """Delegate to EvolutionEngine and convert EvalResult to GrowthEvalResult."""
-        result = await self._engine.evaluate(version)
+        """Delegate to EvolutionEngine; pin contract_id + version (ADR 0054 §1a)."""
+        contract = self._contract
+        result = await self._engine.evaluate(
+            version,
+            contract_id=contract.contract_id,
+            contract_version=contract.version,
+        )
         return GrowthEvalResult(
             passed=result.passed,
             checks=[
-                {"name": c.name, "passed": c.passed, "detail": c.detail}
-                for c in result.checks
+                {"name": c.name, "passed": c.passed, "detail": c.detail} for c in result.checks
             ],
             summary=result.summary,
+            contract_id=contract.contract_id,
+            contract_version=contract.version,
         )
 
     async def apply(self, version: int) -> None:
