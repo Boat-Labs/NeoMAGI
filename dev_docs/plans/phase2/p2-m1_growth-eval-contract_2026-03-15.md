@@ -1,7 +1,7 @@
 # P2-M1 实施计划：Growth Eval Contract 与对象边界
 
 - Date: 2026-03-15
-- Status: draft
+- Status: approved
 - Scope: `P2-M1` only; define immutable growth eval contracts and object boundaries for explicit growth, without building a full autonomous code-search system
 - Basis:
   - [`design_docs/phase2/roadmap_milestones_v1.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/phase2/roadmap_milestones_v1.md)
@@ -10,6 +10,7 @@
   - [`design_docs/system_prompt.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/system_prompt.md)
   - [`decisions/0048-skill-objects-as-runtime-experience-layer.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0048-skill-objects-as-runtime-experience-layer.md)
   - [`decisions/0049-growth-governance-kernel-adapter-first.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0049-growth-governance-kernel-adapter-first.md)
+  - [`decisions/0054-growth-eval-contracts-immutable-and-object-scoped.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0054-growth-eval-contracts-immutable-and-object-scoped.md)
   - [`dev_docs/plans/phase2/p2-m1b_skill-objects-runtime_2026-03-14_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1b_skill-objects-runtime_2026-03-14_draft.md)
   - Discussion input: [`tmp/autoresearch_claude_report.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/tmp/autoresearch_claude_report.md)
 
@@ -27,6 +28,16 @@
 - `SOUL` 已有 deterministic eval，但这还不是 `P2-M1` 的跨对象增长评测口径
 - `P2-M1b` draft 已提出 `skill_spec` onboarding，但其 V1 eval 目前只写到 `schema 校验 + preconditions 检查`
 
+在 milestone 时序上，这份计划是 `P2-M1b` 实施前的前置设计收敛：先冻结 eval contract 语义，再把最小结论回填到 `P2-M1b`，其余 growth case 约束延续到 `P2-M1c`。
+
+现在又有一层新的上位约束已经固定：ADR 0054 已接受 `GrowthEvalContract` 的核心语义，包括：
+
+- `GrowthEvalContract` 是一等治理对象
+- contract 必须 `object-scoped`、`versioned`、`immutable`
+- proposal 不能与 judge / harness 一起修改
+- `raw code patch` 不是 `P2-M1` 的一等 growth object
+- canonical eval 结构固定为四层：`Boundary gates / Effect evidence / Scope claim / Efficiency metrics`
+
 Karpathy `autoresearch` 的启示不是单个指标 `val_bpb` 本身，而是：
 
 - 可变搜索面与不可变评测契约分离
@@ -41,6 +52,8 @@ NeoMAGI 不适合照搬“单文件 + 单标量指标”模式，因为它面对
 ## Core Decision
 
 本计划只做设计收敛，不做完整自治代码搜索系统。
+
+它在时序上服务于 `P2-M1b`，并为 `P2-M1c` 提供统一评测口径；不是与 `P2-M1b` 平行竞争的另一条实现线。
 
 本轮要先固定三件事：
 
@@ -62,7 +75,7 @@ NeoMAGI 不适合照搬“单文件 + 单标量指标”模式，因为它面对
 对每个已 onboard 或准备 onboard 的 growth object kind，定义一个独立的 `GrowthEvalContract`。  
 它不是被 agent 自由修改的 proposal payload，而是治理层拥有的约束对象。
 
-建议最小字段：
+V1 建议最小字段：
 
 ```python
 class GrowthEvalContract:
@@ -73,7 +86,8 @@ class GrowthEvalContract:
     immutable_harness: tuple[str, ...]
     required_checks: tuple[str, ...]
     required_artifacts: tuple[str, ...]
-    pass_rule: str
+    pass_rule_kind: str  # "all_required" | "hard_pass_and_threshold"
+    pass_rule_params: tuple[str, ...]
     veto_conditions: tuple[str, ...]
     rollback_preconditions: tuple[str, ...]
     budget_limits: tuple[str, ...]
@@ -89,16 +103,38 @@ class GrowthEvalContract:
   - 必过的 deterministic / scenario / regression / safety checks
 - `required_artifacts`
   - 提案必须附带的 diff summary、evidence refs、测试摘要、回滚目标
-- `pass_rule`
-  - 通过条件如何组合，例如“全部必过”或“hard checks 全过 + scenario 命中阈值”
+- `pass_rule_kind`
+  - V1 只允许有限枚举，例如 `all_required` 或 `hard_pass_and_threshold`
+- `pass_rule_params`
+  - pass rule 的参数，例如目标 check group 与阈值
 - `veto_conditions`
   - 哪些失败一票否决
+- `rollback_preconditions`
+  - rollback 可执行的前提，例如存在可恢复的前一版本、apply 产物可逆、回滚目标已知
 - `budget_limits`
   - 成本、时延、上下文预算、风险级别等硬约束
 
+### 1a. `GrowthEvalContract` 到 `GrowthEvalResult` 的语义桥接
+
+`GrowthEvalContract` 负责定义“该检查什么”；现有 `adapter.evaluate()` 继续负责“实际执行检查并产出结果”。
+
+V1 约定：
+
+- `adapter.evaluate()` 在运行前先 pin `contract_id` 与 `contract_version`
+- adapter 按 `required_checks` 和 `immutable_harness` 执行对应检查
+- `GrowthEvalResult.checks` 中的每个 check 都应能回溯到 contract 中的 check 名称或 check group
+- `GrowthEvalResult.passed` 由 `pass_rule_kind`、`pass_rule_params` 与 `veto_conditions` 共同判定
+- `GrowthEvalResult.summary` 至少应带上 `contract_id`、`contract_version` 与主要 veto / rollback 结论
+
+换句话说：
+
+- contract 定义评测契约
+- adapter 执行契约
+- `GrowthEvalResult` 是一次 pinned contract run 的结果投影
+
 ### 2. Four-Layer Contract Structure
 
-`P2-M1` 的 eval contract 不把所有维度混成单一 pass/fail。  
+按 ADR 0054，`P2-M1` 的 eval contract 不把所有维度混成单一 pass/fail。  
 V1 先拆成 4 层：
 
 - `Boundary gates`
@@ -126,7 +162,7 @@ V1 先拆成 4 层：
 
 ### 3. Immutability Invariants
 
-不可变评估契约在 `P2-M1` 中至少体现为以下 5 条硬约束：
+按 ADR 0054，不可变评估契约在 `P2-M1` 中至少体现为以下 5 条硬约束：
 
 1. `Judge isolation`
    - proposal 可以改对象，不能改它依赖的 judge / harness
@@ -143,9 +179,14 @@ V1 先拆成 4 层：
 
 **proposal 可以改对象，不能改裁判；改裁判必须走单独、版本化、可审计的治理路径。**
 
+字段映射：
+
+- keep semantics 由 `pass_rule_kind`、`pass_rule_params` 与 `veto_conditions` 固定
+- revert semantics 由 `rollback_preconditions` 固定
+
 ### 4. Code Patch 不是一等 growth kind
 
-`P2-M1` 中的 raw code patch 不作为独立 growth object kind。  
+按 ADR 0054，`P2-M1` 中的 raw code patch 不作为独立 growth object kind。  
 它只可能是以下三种角色之一：
 
 - 某个 growth object proposal 的实现产物
@@ -168,6 +209,14 @@ V1 先拆成 4 层：
 
 这部分是本计划最想借鉴 `autoresearch` 的地方。
 
+### 6. `GrowthEvalContract` 的落地形态
+
+`P2-M1` 先采用 `doc + code declaration` 双重声明，不引入 DB / registry object。
+
+- 文档层：用本计划和相关 design docs 固定 contract profile 与对象边界
+- 代码层：由 adapter 侧类型、常量或声明式配置 pin `contract_id`、`version`、check names、pass rule
+- `P2-M2+` 再视需要评估是否引入 registry / DB object；`P2-M1` 不承担这一步
+
 ## Object Boundary Matrix
 
 | Object kind | P2 status | Mutable surface | Immutable eval contract | This round |
@@ -184,6 +233,17 @@ V1 先拆成 4 层：
 ### A. `soul`
 
 沿用现有最小 contract，不改生命周期：
+
+四层映射：
+
+- `Boundary gates`
+  - 现有 `soul` checks 与 apply guards 全部落在这一层
+- `Effect evidence`
+  - `soul` V1 不适用
+- `Scope claim`
+  - `soul` V1 不适用
+- `Efficiency metrics`
+  - `soul` V1 不适用
 
 - hard checks:
   - non-empty / coherence
@@ -204,18 +264,31 @@ V1 先拆成 4 层：
 
 `P2-M1b` 需要的最小 contract 应明确分成四层：
 
-- schema validity
+四层映射：
+
+- `Boundary gates`
+  - schema validity
+  - activation correctness
+  - projection safety
+- `Effect evidence`
+  - learning discipline
+- `Scope claim`
+  - scope claim
+- `Efficiency metrics`
+  - efficiency metrics
+
+具体展开：
+
+- `Boundary gates`
   - `SkillSpec` / `SkillEvidence` 字段完整、类型正确、版本语义合法
-- activation correctness
   - `activation_tags`、`preconditions`、`escalation_rules` 不自相矛盾
-- projection safety
   - delta 预算、prompt 注入层位、与 active procedure / memory 事实冲突时的降级语义
-- learning discipline
+- `Effect evidence`
   - 负经验只接受 deterministic signal
   - 正经验不能因为“用户没反对”自动成立
-- scope claim
+- `Scope claim`
   - 该 skill 只是 `local`，还是已经声称 `reusable` / `promotable`
-- efficiency metrics
+- `Efficiency metrics`
   - 只在质量达标后比较 token / latency / cost 改善
 
 换句话说，`skill_spec.evaluate()` 不能只看 schema，也要至少覆盖：
@@ -251,6 +324,11 @@ V1 先拆成 4 层：
 
 输出：一页术语表 + object matrix。
 
+产出文件：
+
+- [`design_docs/GLOSSARY.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/GLOSSARY.md)
+- [`dev_docs/plans/phase2/p2-m1_growth-eval-contract_2026-03-15.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1_growth-eval-contract_2026-03-15.md)
+
 ### WP2. `soul` Contract Profile
 
 把现有 `SOUL` 演化链正式提升为第一份 contract profile。
@@ -260,6 +338,11 @@ V1 先拆成 4 层：
 - `soul` 的 mutable surface 定义
 - `soul` 的 required artifacts
 - `soul` 的 hard pass / veto / rollback 规则
+
+产出文件：
+
+- [`dev_docs/plans/phase2/p2-m1_growth-eval-contract_2026-03-15.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1_growth-eval-contract_2026-03-15.md)
+- 下游消费：[`src/memory/evolution.py`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/src/memory/evolution.py)
 
 ### WP3. `skill_spec` Contract Profile
 
@@ -274,6 +357,11 @@ V1 先拆成 4 层：
 - `skill_spec` 的 scope claim 分级
 - `skill_spec` 的 efficiency metrics 使用边界
 
+产出文件：
+
+- [`dev_docs/plans/phase2/p2-m1_growth-eval-contract_2026-03-15.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1_growth-eval-contract_2026-03-15.md)
+- [`dev_docs/plans/phase2/p2-m1b_skill-objects-runtime_2026-03-14_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1b_skill-objects-runtime_2026-03-14_draft.md)
+
 ### WP4. Reserved Kind Templates
 
 先给 `wrapper_tool`、`procedure_spec`、`memory_application_spec` 写出 contract skeleton。
@@ -283,6 +371,12 @@ V1 先拆成 4 层：
 - 每类对象未来至少要接受什么检查
 - 哪些检查推迟到后续 milestone
 
+产出文件：
+
+- [`dev_docs/plans/phase2/p2-m1_growth-eval-contract_2026-03-15.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1_growth-eval-contract_2026-03-15.md)
+- 下游消费：[`design_docs/procedure_runtime.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/procedure_runtime.md)
+- 下游消费：[`design_docs/phase2/p2_m2_architecture.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/phase2/p2_m2_architecture.md)
+
 ### WP5. Plan Integration
 
 将本计划的结论回填到：
@@ -290,6 +384,12 @@ V1 先拆成 4 层：
 - `P2-M1b` draft 中的 `SkillGovernedObjectAdapter.evaluate()`
 - `P2-M1c` 的 growth case 设计
 - future promote / demote policy 解释
+
+产出文件：
+
+- [`dev_docs/plans/phase2/p2-m1b_skill-objects-runtime_2026-03-14_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1b_skill-objects-runtime_2026-03-14_draft.md)
+- future `dev_docs/plans/phase2/p2-m1c_*.md`
+- future [`src/growth/policies.py`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/src/growth/policies.py) or successor policy doc
 
 ## Non-Goals
 
@@ -315,27 +415,26 @@ V1 先拆成 4 层：
 
 ## Acceptance
 
+- 已接受 ADR 0054 与本计划无冲突，且本计划只向下细化，不回退其原则边界
 - 明确列出 `P2-M1` 内的一等 growth object 边界，以及非对象清单
 - 明确列出 growth eval contract 的四层结构及各自职责
 - 明确列出 `Immutability Invariants`
+- 明确 `GrowthEvalContract` 与 `GrowthEvalResult` 的语义桥接
 - 明确 `soul` 的正式 eval contract profile
 - 明确 `skill_spec` 的正式 eval contract profile，足够支撑 `P2-M1b`
 - 明确 reserved kinds 的 contract skeleton，足够指导 `P2-M1c` / `P2-M2`
 - 明确 proposal、code patch、eval harness 三者的 ownership separation
+- 明确本计划在 `P2-M1a` / `P2-M1b` / `P2-M1c` 时序中的位置
 - 明确哪些内容现在定义，哪些明确推迟
 
 ## Open Questions
 
-1. `GrowthEvalContract` 最终应作为代码声明、design doc、还是 DB/registry 对象存在？
-   - 倾向：`P2-M1` 先做 code + doc 双重声明，暂不落 DB
-2. `skill_spec` 的 scenario checks 应该放在治理层还是 runtime test suite？
+1. `skill_spec` 的 scenario checks 应该放在治理层还是 runtime test suite？
    - 倾向：治理层只定义 contract；实际执行可由 runtime test suite 完成
-3. promote 到 `wrapper_tool` 时，代码实现 diff 应算 proposal payload 还是 artifact ref？
+2. promote 到 `wrapper_tool` 时，代码实现 diff 应算 proposal payload 还是 artifact ref？
    - 倾向：artifact ref，避免 payload 膨胀成“全代码镜像”
-4. contract version 升级是否必须走单独 proposal？
-   - 倾向：是，避免 judge 与 object 同步漂移
 
 ## Recommended Next Step
 
-先用本 draft 收敛设计，然后只把与 `skill_spec` onboarding 直接相关的结论回填到 `P2-M1b`。  
+先以本计划作为已批准的设计基线，然后只把与 `skill_spec` onboarding 直接相关的结论回填到 `P2-M1b`。  
 完整的 growth case、Git ratchet、keep/revert loop 设计推迟到 `P2-M1c` 讨论。
