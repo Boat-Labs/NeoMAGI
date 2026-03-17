@@ -26,6 +26,7 @@ from tests.devcoord_helpers import (
     make_sqlite_service,
     open_default_gate,
     phase_complete_default,
+    run_cli,
 )
 
 
@@ -387,6 +388,13 @@ class TestSQLitePathResolution:
 
 
 class TestSQLitePathResolutionFromCLI:
+    """Path resolution and bootstrap tests.
+
+    _resolve_paths() is pure path derivation — no legacy marker probing.
+    Fail-closed for missing control.db is handled by SQLiteCoordStore /
+    CoordService when they actually need the DB.
+    """
+
     def test_resolve_paths_returns_devcoord_control_root(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -400,9 +408,10 @@ class TestSQLitePathResolutionFromCLI:
         assert paths.control_root == workspace_root / ".devcoord"
         assert paths.control_db == workspace_root / ".devcoord" / "control.db"
 
-    def test_legacy_beads_without_control_db_raises_split_brain_guard(
+    def test_repo_root_beads_does_not_affect_path_resolution(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """.beads/ is issue-tracker data — invisible to devcoord."""
         workspace_root = tmp_path / "workspace"
         (workspace_root / ".git").mkdir(parents=True, exist_ok=True)
         beads_marker = workspace_root / ".beads" / "metadata.json"
@@ -412,12 +421,13 @@ class TestSQLitePathResolutionFromCLI:
         monkeypatch.setattr(
             coord_module, "_resolve_git_common_dir", lambda cwd: workspace_root / ".git"
         )
-        with pytest.raises(CoordError, match="Legacy beads control plane detected"):
-            _resolve_paths()
+        paths = _resolve_paths()
+        assert paths.control_root == workspace_root / ".devcoord"
 
-    def test_legacy_coord_beads_without_control_db_raises_split_brain_guard(
+    def test_legacy_coord_beads_does_not_affect_path_resolution(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """.coord/beads/ is historical — invisible to devcoord."""
         workspace_root = tmp_path / "workspace"
         (workspace_root / ".git").mkdir(parents=True, exist_ok=True)
         legacy_marker = workspace_root / ".coord" / "beads" / ".beads" / "metadata.json"
@@ -427,26 +437,59 @@ class TestSQLitePathResolutionFromCLI:
         monkeypatch.setattr(
             coord_module, "_resolve_git_common_dir", lambda cwd: workspace_root / ".git"
         )
-        with pytest.raises(CoordError, match="Legacy beads control plane detected"):
-            _resolve_paths()
+        paths = _resolve_paths()
+        assert paths.control_root == workspace_root / ".devcoord"
 
-    def test_legacy_beads_with_control_db_passes(
+    def test_init_via_cli_bootstraps_without_control_db(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """grouped init creates control.db from scratch."""
         workspace_root = tmp_path / "workspace"
         (workspace_root / ".git").mkdir(parents=True, exist_ok=True)
-        beads_marker = workspace_root / ".beads" / "metadata.json"
-        beads_marker.parent.mkdir(parents=True, exist_ok=True)
-        beads_marker.write_text("{}", "utf-8")
-        control_root = workspace_root / ".devcoord"
-        control_root.mkdir(parents=True, exist_ok=True)
-        (control_root / "control.db").write_text("", "utf-8")
+        (workspace_root / ".beads" / "metadata.json").parent.mkdir(parents=True)
+        (workspace_root / ".beads" / "metadata.json").write_text("{}", "utf-8")
         monkeypatch.setattr(coord_module, "_shared_workspace_root", lambda cwd: workspace_root)
         monkeypatch.setattr(
             coord_module, "_resolve_git_common_dir", lambda cwd: workspace_root / ".git"
         )
-        paths = _resolve_paths()
-        assert paths.control_root == control_root
+        assert run_cli(["init", "--milestone", "t", "--roles", "pm"]) == 0
+        assert (workspace_root / ".devcoord" / "control.db").exists()
+
+    def test_apply_init_via_cli_bootstraps_without_control_db(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """apply init path is semantically identical to grouped init."""
+        workspace_root = tmp_path / "workspace"
+        (workspace_root / ".git").mkdir(parents=True, exist_ok=True)
+        (workspace_root / ".beads" / "metadata.json").parent.mkdir(parents=True)
+        (workspace_root / ".beads" / "metadata.json").write_text("{}", "utf-8")
+        monkeypatch.setattr(coord_module, "_shared_workspace_root", lambda cwd: workspace_root)
+        monkeypatch.setattr(
+            coord_module, "_resolve_git_common_dir", lambda cwd: workspace_root / ".git"
+        )
+        payload_path = tmp_path / "init.json"
+        payload_path.write_text(
+            '{"milestone": "t", "run_date": "2026-03-18", "roles": ["pm"]}',
+            "utf-8",
+        )
+        assert run_cli(["apply", "init", "--payload-file", str(payload_path)]) == 0
+        assert (workspace_root / ".devcoord" / "control.db").exists()
+
+    def test_non_init_cmd_fails_when_control_db_missing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """Without control.db, non-init commands exit 1 with a clear message."""
+        workspace_root = tmp_path / "workspace"
+        (workspace_root / ".git").mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(coord_module, "_shared_workspace_root", lambda cwd: workspace_root)
+        monkeypatch.setattr(
+            coord_module, "_resolve_git_common_dir", lambda cwd: workspace_root / ".git"
+        )
+        exit_code = run_cli(["projection", "render", "--milestone", "test-m"])
+        assert exit_code == 1
+        assert "not initialized" in capsys.readouterr().err
+        # Must not leave behind an empty DB file (P2 fix)
+        assert not (workspace_root / ".devcoord" / "control.db").exists()
 
 
 class TestSQLiteStaleDetectedAndLogPending:

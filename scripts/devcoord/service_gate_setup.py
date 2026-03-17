@@ -31,8 +31,9 @@ def init_control_plane(
 ) -> None:
     normalized_milestone = _normalize_milestone(milestone)
     normalized_roles = tuple(_normalize_role(role) for role in roles)
+    # Bootstrap DB before _locked(), which needs an existing DB to connect.
+    service.store.init_store()
     with service._locked():
-        service.store.init_store()
         milestone_rec = _upsert_milestone(service, normalized_milestone, run_date)
         _sync_agents(service, normalized_milestone, milestone_rec, normalized_roles)
 
@@ -52,7 +53,6 @@ def open_gate(
     canonical_target_commit = canonicalize_commit_ref(service, target_commit)
     now = service.now_fn()
     with service._locked():
-        service.store.init_store()
         records = coord_records(service, normalized_milestone)
         milestone_rec = require_single(records, "milestone")
         phase_rec = ensure_phase(service, records, milestone_rec, normalized_milestone, phase)

@@ -121,9 +121,24 @@ class SQLiteCoordStore:
         self._in_transaction: bool = False
 
     def _connect(self) -> sqlite3.Connection:
+        """Return (or create) a connection to an *existing* control.db.
+
+        Raises ``CoordError`` if the DB file does not exist — only
+        ``init_store()`` is allowed to bootstrap from scratch.
+        """
         if self._conn is not None:
             return self._conn
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.db_path.exists():
+            raise CoordError(
+                "control plane not initialized; run "
+                "'coord.py init --milestone <name> --roles <roles>' first"
+            )
+        return self._open()
+
+    def _open(self) -> sqlite3.Connection:
+        """Return existing connection, or open a new one (no existence check)."""
+        if self._conn is not None:
+            return self._conn
         conn = sqlite3.connect(str(self.db_path), timeout=BUSY_TIMEOUT_MS / 1000)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
@@ -158,7 +173,8 @@ class SQLiteCoordStore:
             self._conn.commit()
 
     def init_store(self) -> None:
-        conn = self._connect()
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = self._open()
         current_version = conn.execute("PRAGMA user_version").fetchone()[0]
         if current_version == 0:
             for stmt in _SCHEMA_SQL.split(";"):

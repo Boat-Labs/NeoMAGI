@@ -238,6 +238,18 @@ _PAYLOAD_BUILDERS: dict[str, Callable[[argparse.Namespace], dict[str, Any]]] = {
 # ---------------------------------------------------------------------------
 
 
+def _effective_action(args: argparse.Namespace) -> str:
+    """Derive the canonical action name from parsed args.
+
+    Both grouped CLI (``coord.py init``) and structured payload
+    (``coord.py apply init``) resolve to the same ``"init"`` string,
+    so downstream logic has a single decision point.
+    """
+    if args.command == "apply":
+        return args.action
+    return args._action
+
+
 def run_cli(
     argv: Sequence[str] | None = None,
     *,
@@ -250,10 +262,8 @@ def run_cli(
         normalized = _normalize_argv(raw_argv)
         parser = build_parser()
         args = parser.parse_args(normalized)
-        is_init = getattr(args, "_action", None) == "init" or args.command == "init"
-        resolved_paths = paths or _resolve_paths(
-            skip_split_brain_guard=is_init,
-        )
+        action = _effective_action(args)
+        resolved_paths = paths or _resolve_paths()
         resolved_store = store or SQLiteCoordStore(resolved_paths.control_db)
         service = CoordService(
             paths=resolved_paths,
@@ -261,9 +271,8 @@ def run_cli(
             now_fn=now_fn or _utc_now,
         )
         if args.command == "apply":
-            execute_action(service, args.action, _load_payload(args))
+            execute_action(service, action, _load_payload(args))
         else:
-            action = args._action
             payload = _PAYLOAD_BUILDERS[action](args)
             execute_action(service, action, payload)
     except CoordError as exc:
@@ -281,33 +290,10 @@ def main() -> int:
 # ---------------------------------------------------------------------------
 
 
-def _resolve_paths(*, skip_split_brain_guard: bool = False) -> CoordPaths:
+def _resolve_paths() -> CoordPaths:
     git_common_dir = _resolve_git_common_dir(Path.cwd())
     workspace_root = _shared_workspace_root(Path.cwd())
     control_root = workspace_root / ".devcoord"
-    control_db = control_root / "control.db"
-
-    # Guard: detect legacy beads control plane that could cause split-brain.
-    # If a beads control plane exists (repo-root .beads/ or legacy
-    # .coord/beads/) but no SQLite control.db has been bootstrapped yet,
-    # refuse to proceed — the operator must complete the cutover first.
-    # Skipped for `init` since that command creates the control.db.
-    if not skip_split_brain_guard and not control_db.exists():
-        legacy_markers = (
-            workspace_root / ".beads" / "metadata.json",
-            workspace_root / ".coord" / "beads" / ".beads" / "metadata.json",
-        )
-        for marker in legacy_markers:
-            if marker.exists():
-                marker_path = marker.parent.relative_to(workspace_root)
-                raise CoordError(
-                    f"Legacy beads control plane detected at {marker_path}/ "
-                    "but no .devcoord/control.db exists yet. To avoid split-brain, "
-                    "complete the Stage D cutover checklist "
-                    "(see dev_docs/devcoord/sqlite_control_plane_runtime.md §7) "
-                    "before running devcoord commands. "
-                    "If the legacy beads data is no longer active, remove it first."
-                )
 
     return CoordPaths(
         workspace_root=workspace_root,
