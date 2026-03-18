@@ -355,7 +355,7 @@ class TestTeachingIntentProposal:
         self, learner: SkillLearner, mock_engine: AsyncMock
     ) -> None:
         """When teaching_intent=True, propose_new_skill should be called."""
-        from src.agent.message_flow import _propose_taught_skill, RequestState
+        from src.agent.message_flow import RequestState, _propose_taught_skill
 
         # Build a minimal RequestState with teaching_intent=True
         state = RequestState(
@@ -389,9 +389,9 @@ class TestTeachingIntentProposal:
     async def test_teaching_intent_with_target_outcome(
         self, learner: SkillLearner, mock_engine: AsyncMock
     ) -> None:
-        """Target outcome from task_frame should be used as skill summary."""
-        from src.agent.message_flow import _propose_taught_skill, RequestState
-        from src.skills.types import TaskFrame
+        """Target outcome from task_frame should populate tags, delta, and summary."""
+        from src.agent.message_flow import RequestState, _propose_taught_skill
+        from src.skills.types import TaskFrame, TaskType
 
         state = RequestState(
             session_id="test-sess-5678",
@@ -408,7 +408,10 @@ class TestTeachingIntentProposal:
             recall_results=[],
             system_prompt="",
             teaching_intent=True,
-            task_frame=TaskFrame(target_outcome="Format code with Black"),
+            task_frame=TaskFrame(
+                task_type=TaskType.edit,
+                target_outcome="Format code with Black before committing",
+            ),
         )
 
         class FakeLoop:
@@ -417,3 +420,54 @@ class TestTeachingIntentProposal:
         await _propose_taught_skill(FakeLoop(), state)  # type: ignore[arg-type]
         proposal = mock_engine.propose.call_args[0][1]
         assert "Format code with Black" in proposal.diff_summary
+        # Verify the spec has meaningful delta (not empty)
+        spec_payload = proposal.payload["skill_spec"]
+        assert spec_payload["delta"], "Proposed skill should have non-empty delta"
+        # Verify tags include task_type
+        assert "edit" in spec_payload["activation_tags"]
+        # Verify capability derived from task_type
+        assert spec_payload["capability"] == "edit"
+
+
+class TestTeachingIntentDoesNotConfirmExistingSkills:
+    """Verify teaching_intent does NOT pollute existing skill evidence."""
+
+    @pytest.mark.asyncio
+    async def test_teaching_intent_does_not_set_user_confirmed(
+        self, learner: SkillLearner
+    ) -> None:
+        """record_outcome should receive user_confirmed=False even with teaching_intent."""
+        from unittest.mock import patch
+
+        spec = SkillSpec(
+            id="existing-1", capability="deploy", version=1,
+            summary="Deploy helper", activation="deploy tasks",
+        )
+        outcome = TaskOutcome(
+            success=True, terminal_state="assistant_response",
+            user_confirmed=False,  # This is what _finalize_task_terminal now sends
+        )
+        with patch.object(learner._store, "update_evidence") as mock_update:
+            mock_update.return_value = None
+            await learner.record_outcome([spec], outcome)
+            # success=True but user_confirmed=False → should NOT increment success_count
+            if mock_update.called:
+                evidence_arg = mock_update.call_args[0][1]
+                assert evidence_arg.success_count == 0, (
+                    "Should not write positive evidence without user_confirmed=True"
+                )
+
+
+class TestGuardDeniedSignalClassification:
+    """Verify guard deny vs tool failure signal separation."""
+
+    def test_guard_deny_codes_classify_correctly(self) -> None:
+        """Error codes from guardrail.py should be in _GUARD_DENY_CODES."""
+        from src.agent.message_flow import _GUARD_DENY_CODES
+
+        assert "GUARD_CONTRACT_UNAVAILABLE" in _GUARD_DENY_CODES
+        assert "GUARD_ANCHOR_MISSING" in _GUARD_DENY_CODES
+        assert "MODE_DENIED" in _GUARD_DENY_CODES
+        # Tool-level errors should NOT be in guard codes
+        assert "EXECUTION_ERROR" not in _GUARD_DENY_CODES
+        assert "UNKNOWN_TOOL" not in _GUARD_DENY_CODES

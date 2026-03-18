@@ -17,6 +17,13 @@ from src.session.scope_resolver import SessionIdentity
 if TYPE_CHECKING:
     from src.agent.agent import AgentLoop
 
+# Error codes from guardrail.py that indicate a guard denial (not a tool failure).
+_GUARD_DENY_CODES = frozenset({
+    "GUARD_CONTRACT_UNAVAILABLE",
+    "GUARD_ANCHOR_MISSING",
+    "MODE_DENIED",
+})
+
 
 @dataclass
 class RequestState:
@@ -447,7 +454,15 @@ async def _execute_single_tool(
             guard_state=guard_state,
         )
         if isinstance(result, dict) and not result.get("ok", True):
-            state.accumulated_failure_signals.append(f"tool_failure:{tool_call['name']}")
+            error_code = result.get("error_code", "")
+            if error_code in _GUARD_DENY_CODES:
+                state.accumulated_failure_signals.append(
+                    f"guard_denied:{tool_call['name']}"
+                )
+            else:
+                state.accumulated_failure_signals.append(
+                    f"tool_failure:{tool_call['name']}"
+                )
     await loop._session_manager.append_message(
         state.session_id,
         "tool",
@@ -661,14 +676,14 @@ async def _finalize_task_terminal(
         return
     from src.skills.types import TaskOutcome
 
-    # Teaching intent = explicit user confirmation (user is teaching the agent)
-    user_confirmed = state.teaching_intent
-
+    # Teaching intent means the user is teaching a NEW skill, not confirming
+    # existing resolved skills.  Do NOT set user_confirmed for existing skills
+    # based on teaching_intent — that would pollute evidence for unrelated skills.
     if state.resolved_skills:
         outcome = TaskOutcome(
             success=success,
             terminal_state=terminal_state,
-            user_confirmed=user_confirmed,
+            user_confirmed=False,
             failure_signals=failure_signals,
         )
         try:
@@ -682,7 +697,12 @@ async def _finalize_task_terminal(
 
 
 async def _propose_taught_skill(loop: AgentLoop, state: RequestState) -> None:
-    """Propose a new skill from teaching intent (V1 minimal)."""
+    """Propose a new skill from teaching intent (V1).
+
+    Extracts meaningful capability, activation_tags, and delta from the
+    user message + task frame so the proposed skill can actually be resolved
+    and projected in future turns.
+    """
     from src.skills.types import SkillEvidence, SkillSpec
 
     _agent_logger().info(
@@ -693,16 +713,15 @@ async def _propose_taught_skill(loop: AgentLoop, state: RequestState) -> None:
     if loop._skill_learner is None:
         return
     try:
-        summary = "User-taught skill"
-        if state.task_frame and state.task_frame.target_outcome:
-            summary = state.task_frame.target_outcome[:100]
+        summary, capability, tags, delta = _extract_skill_draft_from_context(state)
         spec_draft = SkillSpec(
             id=f"user-taught-{state.session_id[:8]}",
-            capability="user_taught",
+            capability=capability,
             version=1,
             summary=summary,
-            activation="Activated when similar task is detected",
-            activation_tags=("user-taught",),
+            activation=f"Activate for {capability} tasks",
+            activation_tags=tags,
+            delta=delta,
         )
         evidence_draft = SkillEvidence(source="human-taught")
         await loop._skill_learner.propose_new_skill(
@@ -712,6 +731,39 @@ async def _propose_taught_skill(loop: AgentLoop, state: RequestState) -> None:
         _agent_logger().exception(
             "teaching_skill_proposal_failed", session_id=state.session_id,
         )
+
+
+def _extract_skill_draft_from_context(
+    state: RequestState,
+) -> tuple[str, str, tuple[str, ...], tuple[str, ...]]:
+    """Extract (summary, capability, activation_tags, delta) from request state.
+
+    V1 heuristic: derive capability from task_type, tags from task_type +
+    content keywords, delta from the user's instruction text (stripped of
+    the teaching signal prefix).
+    """
+    frame = state.task_frame
+    task_type = frame.task_type.value if frame else "unknown"
+    outcome = (frame.target_outcome or "") if frame else ""
+
+    # Capability: use task_type as base, fall back to "general"
+    capability = task_type if task_type != "unknown" else "general"
+
+    # Summary: first 100 chars of target_outcome, or generic
+    summary = outcome[:100].strip() if outcome else f"User-taught {capability} skill"
+
+    # Tags: task_type + significant content words (top 5 by length, > 3 chars)
+    tags_set: set[str] = {task_type}
+    words = [w.lower() for w in outcome.split() if len(w) > 3]
+    for word in sorted(set(words), key=len, reverse=True)[:5]:
+        tags_set.add(word)
+    tags = tuple(sorted(tags_set))
+
+    # Delta: the user's instruction as a single reusable experience line
+    delta_text = outcome.strip()
+    delta = (delta_text,) if delta_text else ()
+
+    return summary, capability, tags, delta
 
 
 def _agent_logger():
