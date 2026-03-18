@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 from src.agent.events import TextChunk, ToolCallInfo, ToolDenied
 from src.agent.guardrail import GuardCheckResult, check_pre_llm_guard, maybe_refresh_contract
@@ -715,7 +716,7 @@ async def _propose_taught_skill(loop: AgentLoop, state: RequestState) -> None:
     try:
         summary, capability, tags, delta = _extract_skill_draft_from_context(state)
         spec_draft = SkillSpec(
-            id=f"user-taught-{state.session_id[:8]}",
+            id=f"user-taught-{uuid4().hex[:12]}",
             capability=capability,
             version=1,
             summary=summary,
