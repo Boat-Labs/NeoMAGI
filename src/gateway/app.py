@@ -138,11 +138,22 @@ def _build_memory_and_tools(settings, db_session_factory):
         memory_searcher=memory_searcher, memory_writer=memory_writer,
         evolution_engine=evolution_engine,
     )
-    return memory_searcher, evolution_engine, tool_registry
+
+    # ── skill runtime (P2-M1b-P3) ──
+    from src.skills.projector import SkillProjector
+    from src.skills.resolver import SkillResolver
+    from src.skills.store import SkillStore
+
+    skill_store = SkillStore(db_session_factory)
+    skill_resolver = SkillResolver(registry=skill_store)
+    skill_projector = SkillProjector()
+
+    return memory_searcher, evolution_engine, tool_registry, skill_resolver, skill_projector
 
 
 def _build_provider_registry(settings, session_manager, memory_searcher,
-                             evolution_engine, tool_registry, health_tracker):
+                             evolution_engine, tool_registry, health_tracker,
+                             skill_resolver=None, skill_projector=None):
     """Register OpenAI + optional Gemini providers."""
     def _make_agent_loop(client: OpenAICompatModelClient, model: str) -> AgentLoop:
         return AgentLoop(
@@ -151,6 +162,7 @@ def _build_provider_registry(settings, session_manager, memory_searcher,
             tool_registry=tool_registry, compaction_settings=settings.compaction,
             session_settings=settings.session, memory_settings=settings.memory,
             memory_searcher=memory_searcher, evolution_engine=evolution_engine,
+            skill_resolver=skill_resolver, skill_projector=skill_projector,
         )
 
     registry = AgentLoopRegistry(default_provider=settings.provider.active)
@@ -230,13 +242,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         db_session_factory=db_session_factory,
         default_mode=ToolMode(settings.session.default_mode),
     )
-    memory_searcher, evolution_engine, tool_registry = _build_memory_and_tools(
-        settings, db_session_factory,
-    )
+    (
+        memory_searcher, evolution_engine, tool_registry,
+        skill_resolver, skill_projector,
+    ) = _build_memory_and_tools(settings, db_session_factory)
     health_tracker = ComponentHealthTracker()
     registry = _build_provider_registry(
         settings, session_manager, memory_searcher,
         evolution_engine, tool_registry, health_tracker,
+        skill_resolver=skill_resolver, skill_projector=skill_projector,
     )
     budget_gate = BudgetGate(engine, schema=settings.database.schema_)
     _bind_app_state(app, registry=registry, session_manager=session_manager,
