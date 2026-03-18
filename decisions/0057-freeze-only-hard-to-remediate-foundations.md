@@ -1,6 +1,6 @@
 # 0057-freeze-only-hard-to-remediate-foundations
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-03-18
 - Note: 本 ADR 是路线指导原则；用于约束后续 ADR 与 milestone plan 应冻结什么、不应冻结什么，不直接定义新的运行时对象或实现机制。
 

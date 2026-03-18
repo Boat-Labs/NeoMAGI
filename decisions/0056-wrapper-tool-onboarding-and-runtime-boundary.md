@@ -1,6 +1,6 @@
 # 0056-wrapper-tool-onboarding-and-runtime-boundary
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-03-18
 - Note: 本 ADR 只定义 `wrapper_tool` 在 `P2-M1c` 的 onboarding 决策与治理边界；不在本轮冻结具体接线方式、存储形状或 runtime API。
 

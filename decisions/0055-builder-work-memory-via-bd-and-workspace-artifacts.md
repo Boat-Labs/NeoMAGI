@@ -1,6 +1,6 @@
 # 0055-builder-work-memory-via-bd-and-workspace-artifacts
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-03-18
 - Note: 本 ADR 只定义 `P2-M1c` builder work memory 的边界与真源分层；不在本轮引入新的 control-plane、产品数据库表或通用 builder runtime。
 
