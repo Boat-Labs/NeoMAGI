@@ -90,14 +90,14 @@
 
 ## Goals
 
-- 交付 `P2-M1c` 的 curated growth case catalog 与最小 case runner / orchestration 语义
-- 把 `bd / beads` 明确扩展成 coding / builder task 的工作记忆层，满足 roadmap 用例 B
-- 将 `wrapper_tool` 从 reserved 升格为 onboarded，成为 `P2-M1` 的第三类正式 growth object
-- 跑通至少一条 `skill_spec -> wrapper_tool` 的 promote 闭环，满足 roadmap 用例 C
-- 跑通至少一条“用户教授 / 外部经验导入 -> skill proposal -> skill reuse”的 case，并在相似任务中优先复用，满足 roadmap 用例 D
-- 让至少一条 growth case 完成 `propose -> evaluate -> apply`，满足 roadmap 用例 E
-- 让失败 case 明确落到 `veto` / `rollback` / `candidate only`，满足 roadmap 用例 F
-- 让 agent 可以回答一次成长“改了什么、为什么改、怎么验证、如何回滚”，满足 roadmap 用例 A
+- `G1.` 交付 `P2-M1c` 的 curated growth case catalog 与最小 case runner / orchestration 语义
+- `G2.` 把 `bd / beads` 明确扩展成 coding / builder task 的工作记忆层，满足 roadmap 用例 B
+- `G3.` 将 `wrapper_tool` 从 reserved 升格为 onboarded，成为 `P2-M1` 的第三类正式 growth object
+- `G4.` 跑通至少一条 `skill_spec -> wrapper_tool` 的 promote 闭环，满足 roadmap 用例 C
+- `G5.` 跑通至少一条“用户教授 / 外部经验导入 -> skill proposal -> skill reuse”的 case，并在相似任务中优先复用，满足 roadmap 用例 D
+- `G6.` 让至少一条 growth case 完成 `propose -> evaluate -> apply`，满足 roadmap 用例 E
+- `G7.` 让失败 case 明确落到 `veto` / `rollback` / `candidate only`，满足 roadmap 用例 F
+- `G8.` 让 agent 可以回答一次成长“改了什么、为什么改、怎么验证、如何回滚”，满足 roadmap 用例 A
 
 ## Non-Goals
 
@@ -134,7 +134,7 @@
 - `GrowthCaseRun`
   - `run_id`
   - `case_id`
-  - `linked_bead_id`
+  - `linked_bead_ids`
   - `status`
   - `proposal_refs`
   - `eval_refs`
@@ -157,6 +157,12 @@
   - 在下一次相似任务中优先复用
   - 满足 promote 条件时进入更稳定的 capability 单元
 
+持久化策略在 `P2-M1c` 中保持极简：
+
+- `GrowthCaseSpec` 作为 hardcoded curated catalog，放在 `src/growth/cases.py`
+- `GrowthCaseRun` 不进入 PostgreSQL；使用 workspace artifact（如 `dev_docs/cases/<case_id>/<run_id>.md`）保存，并通过 bead comments / artifact refs 建索引
+- 原因：`P2-M1c` 只有 2~3 条 curated case，不值得为 case catalog / run records 新增 DB schema 与 migration
+
 建议 `P2-M1c` 先只跑 2~3 条 case：
 
 1. `GC-1 human_taught_skill_reuse`
@@ -167,8 +173,9 @@
    - 输入：已有 active skill + 多次成功 evidence + 明确 typed I/O 边界
    - 产物：`wrapper_tool` proposal -> evaluate -> apply -> registry 可见
    - 目标：验证 C/E/F 用例
-3. `GC-3 external_readonly_experience_import`（可选但推荐）
+3. `GC-3 external_readonly_experience_import`（可选）
    - 输入：外部经验源，如 Actionbook 或用户提供 SOP
+   - 前提：先冻结 import 协议；若协议未冻结，则本 case 推迟，不纳入 `P2-M1c` 硬验收
    - 产物：先 skill，再在第二轮任务中复用；若边界稳定，再留下 promote candidate
    - 目标：验证“不要总从 0 开始”的外部经验闭环
 
@@ -206,12 +213,34 @@ V1 建议把 builder work memory 固定为“两层表达”：
 - `promote_candidates`
 - `next_recommended_action`
 
+这里的 `BuilderTaskRecord` 是逻辑对象，不要求 1:1 映射到 `bd` 的 metadata。  
+V1 的 canonical record 应保存在 workspace artifact；`bd` 只承担最小索引层：
+
+- issue title / description
+- labels / state
+- 关键 artifact refs
+- progress / blocker / validation comments
+- related proposal ids 或 promote candidate 摘要
+
 关键边界：
 
 - `bd / beads` 是 work memory / evidence index，不是 PostgreSQL product memory
 - `bd / beads` 也是 builder/coding 的 task memory，不是 devcoord gate/ACK 语义
 - 长文本和详细证据不强塞进 bead metadata；优先写 workspace artifact，再在 bead 中索引
 - 任何 promote / apply / rollback 相关证据都必须能从 bead 跳到 workspace artifact 或 test output
+
+`WP-B` 开始前必须先做一个 feasibility spike，确认当前 `bd` 至少满足：
+
+- issue create / update
+- comments append
+- labels / state 表达
+- artifact path 的可接受引用方式
+
+若 spike 发现 `bd` 的 comment / label / state 面不足以承担最小索引层，则 fallback 固定为：
+
+- `artifact-first`
+- bead 只保留任务 envelope 和 artifact pointer
+- 不在 `P2-M1c` 里为了 work memory 再造一层复杂 `bd` adapter
 
 这样 `P2-M1c` 就能满足 roadmap 中“任务中间状态沉淀到 beads work memory”的要求，同时不重演 ADR 0050 已经关闭的语义混淆。
 
@@ -256,6 +285,19 @@ V1 明确不支持：
 - graph / branching / checkpoint recoverability
 - 模糊的“帮我跑完一串流程”
 - 在 apply 时偷偷生成新的 judge / harness
+
+`implementation_ref` 的语义必须在 `WP-A` 冻结，避免 `WP-C` 再次漂移。  
+`P2-M1c` 中建议固定为：
+
+- Python entrypoint string：`<module_path>:<factory_name>`
+- `factory_name` 返回 `BaseTool` 实例，或返回可立即实例化 / 注册的 `BaseTool` 子类
+- `apply()` 时由 wrapper runtime resolver 解析该 entrypoint，再显式注入 `ToolRegistry`
+
+V1 不接受：
+
+- code blob
+- 动态生成代码
+- 仅有 checked-in file path 但无可执行工厂入口的模糊引用
 
 ### 4. Wrapper Tool Governance
 
@@ -314,7 +356,7 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 - 该能力已不再强依赖长段自然语言 delta
 - failure modes 与 deny semantics 已可结构化表达
 
-建议直接对齐当前 `PolicyRegistry` 中已有的 promote schema：
+建议直接对齐当前 `PolicyRegistry` 中已有的 `skill_spec -> wrapper_tool` promotion schema：
 
 - `usage_count >= 3`
 - `success_rate >= 0.8`
@@ -363,16 +405,28 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 - `wrapper_tool` 必须真正成为 onboarded object，而不是只新增几张表
 - growth case 必须产出 before/after 证据，而不是再退回人工口述“这次好像学会了”
 
-建议拆成 5 个顺序 work packages：
+建议拆成 5 个顺序 work packages。依赖链需要显式写清：
+
+- `WP-A` 先冻结边界、存储和 runtime entrypoint 语义
+- `WP-B` 在 `WP-A` 之后执行，并先完成 `bd` feasibility spike
+- `WP-C` 在 `WP-A` 之后执行，完成 `wrapper_tool` onboarding
+- `WP-D` 的 case 依赖分层：
+  - `GC-1` 可在 `WP-B` 后独立验证
+  - `GC-2` 必须等 `WP-C` 完成后才能验证 `propose -> evaluate -> apply`
+  - `GC-3` 只有在 `WP-A` 先冻结 import 协议时才进入 `P2-M1c`
+- `WP-E` 只在前面至少完成 `GC-1 + GC-2` 后再进入 closeout
 
 ## Implementation Shape
 
 ### Work Package A: ADR + Vocabulary Freeze
 
-先把 `P2-M1c` 的两个新边界冻结：
+先把 `P2-M1c` 的几个关键边界冻结：
 
 - `bd / beads` 作为 builder work memory index 的语义
 - `wrapper_tool` 的 V1 对象边界与 contract
+- `GrowthCaseSpec / GrowthCaseRun` 的持久化策略
+- `implementation_ref` 的 runtime entrypoint 语义
+- `GC-3` 是否进入本 milestone 的 import 协议门槛
 
 建议文件：
 
@@ -385,7 +439,10 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 
 - work memory 与 control-plane 语义分离
 - `wrapper_tool` contract skeleton 升级为 V1 concrete contract
+- `GrowthCaseSpec = hardcoded catalog`，`GrowthCaseRun = workspace artifact`
+- `implementation_ref = Python entrypoint string <module>:<factory>`
 - `scope_claim`、`implementation_ref`、`deny_semantics` 等术语定型
+- `bd` feasibility checklist 与 fallback 固化
 
 验证：
 
@@ -409,12 +466,14 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 - bead state / comment / artifact link 约定
 - builder run artifact 模板
 - growth case 与 bead 的双向索引
+- `bd` feasibility spike 结果与 fallback 决策
 
 验证：
 
 - 新建 builder task 时能生成 bead 和 artifact
 - progress snapshot / blocker / validation summary 能 append 到 bead comments 并回链 artifact
 - 不触碰 `.devcoord/control.db` 语义
+- 若 `bd` 能力不足，能退化到 `artifact-first + bead-pointer-only`
 
 ### Work Package C: Wrapper Tool Store + Adapter + Runtime Wiring
 
@@ -425,6 +484,7 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 - `src/wrappers/types.py`
 - `src/wrappers/store.py`
 - `src/growth/adapters/wrapper_tool.py`
+- `alembic/versions/xxxx_create_wrapper_tool_tables.py`
 - 修改 `src/growth/policies.py`（`wrapper_tool` -> onboarded）
 - 修改 `src/tools/registry.py`
 - 修改 composition root / gateway wiring
@@ -434,6 +494,7 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 - `wrapper_tools` current-state store
 - `wrapper_tool_versions` governance ledger
 - `WrapperToolGovernedObjectAdapter`
+- Alembic migration：`wrapper_tools` + `wrapper_tool_versions`
 - runtime registration / deregistration path
 - `wrapper_tool` V1 eval
 
@@ -458,7 +519,7 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 产出：
 
 - `GrowthCaseSpec` catalog
-- `GrowthCaseRun` record
+- `GrowthCaseRun` artifact record
 - `GC-1`、`GC-2`、`GC-3` 至少两条可运行 case
 - case runner 与 bead / artifact / proposal handle 的串接
 
@@ -467,6 +528,8 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 - case run 能生成 bead + artifact + proposal refs
 - case 失败时能产出 `candidate_only` / `veto` / `rollback` 结论
 - case 成功时能产出 apply 后 replay 证据
+- `GC-2` 只有在 `wrapper_tool` 已 onboard 且已接入 `ToolRegistry` 后才进入 apply 测试
+- `GC-3` 若 import 协议未冻结，则不纳入本轮 acceptance
 
 ### Work Package E: Acceptance Closeout
 
@@ -546,14 +609,15 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 
 ## Acceptance
 
-- roadmap 用例 A：至少一条 growth case 能回答“改了什么、为什么改、怎么验证、如何回滚”，且证据可从 bead 跳转到 artifact / proposal / test summary
-- roadmap 用例 B：至少一条较长 builder task 在 `bd / beads` 中留下 `brief + decisions + blockers + validation + artifact refs + promote candidate` 的完整 work memory
-- roadmap 用例 C：至少一类能力能从 active skill promote 成 active `wrapper_tool`，并注册到 runtime `ToolRegistry`
-- roadmap 用例 D：至少一条 skill 在 promote 前先被第二次相似任务成功复用，而不是跳过 reuse 直接升格
-- roadmap 用例 E：至少一条 curated growth case 完成 `propose -> evaluate -> apply`
-- roadmap 用例 F：至少一条失败 case 完成 `veto` 或 `rollback`，系统恢复到上一个稳定 capability 状态
-- `wrapper_tool` 在 `PolicyRegistry` 中由 reserved 变为 onboarded；`procedure_spec` 继续 reserved
-- `just lint` clean、`just test` 全量 green；相关 integration / smoke 通过
+- `A1 (G1/G8).` 至少一条 growth case 能回答“改了什么、为什么改、怎么验证、如何回滚”，且证据可从 bead 跳转到 artifact / proposal / test summary
+- `A2 (G2).` 至少一条较长 builder task 在 `bd / beads` 中留下 `brief + decisions + blockers + validation + artifact refs + promote candidate` 的 work memory；若 `bd` 能力不足，则至少达到 `artifact-first + bead-pointer-only` 的 fallback 形态
+- `A3 (G3).` `wrapper_tool` 在 `PolicyRegistry` 中由 reserved 变为 onboarded；`procedure_spec` 继续 reserved，并明确推迟到 `P2-M2`
+- `A4 (G4).` 至少一类能力能从 active skill promote 成 active `wrapper_tool`，并注册到 runtime `ToolRegistry`
+- `A5 (G5).` 至少一条 skill 在 promote 前先被第二次相似任务成功复用，而不是跳过 reuse 直接升格
+- `A6 (G6).` 至少一条 curated growth case 完成 `propose -> evaluate -> apply`
+- `A7 (G7).` 至少一条失败 case 完成 `veto` 或 `rollback`，系统恢复到上一个稳定 capability 状态
+- `A8 (G1/G6/G7).` `GC-1 + GC-2` 均有 replay 级证据；`GC-3` 只有在 import 协议已冻结时才计入本 milestone
+- `A9.` `just lint` clean、`just test` 全量 green；相关 integration / smoke 通过
 
 ## Resolved Draft Positions
 
