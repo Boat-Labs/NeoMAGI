@@ -154,17 +154,19 @@ class TestListSupportedKinds:
 
 
 class TestUnsupportedKindReserved:
-    """Reserved kinds (no adapter, not onboarded) must raise UnsupportedGrowthObjectError."""
+    """Reserved kinds (no adapter, not onboarded) must raise UnsupportedGrowthObjectError.
 
-    @pytest.mark.parametrize(
-        "kind",
-        [
-            GrowthObjectKind.skill_spec,
-            GrowthObjectKind.wrapper_tool,
-            GrowthObjectKind.procedure_spec,
-            GrowthObjectKind.memory_application_spec,
-        ],
-    )
+    Note: skill_spec is onboarded as of P2-M1b; it is tested under
+    TestOnboardedButNoAdapter instead.
+    """
+
+    _RESERVED_KINDS = [
+        GrowthObjectKind.wrapper_tool,
+        GrowthObjectKind.procedure_spec,
+        GrowthObjectKind.memory_application_spec,
+    ]
+
+    @pytest.mark.parametrize("kind", _RESERVED_KINDS)
     @pytest.mark.asyncio
     async def test_propose_raises(
         self, engine: GrowthGovernanceEngine, kind: GrowthObjectKind
@@ -173,15 +175,7 @@ class TestUnsupportedKindReserved:
         with pytest.raises(UnsupportedGrowthObjectError, match="not onboarded"):
             await engine.propose(kind, proposal)
 
-    @pytest.mark.parametrize(
-        "kind",
-        [
-            GrowthObjectKind.skill_spec,
-            GrowthObjectKind.wrapper_tool,
-            GrowthObjectKind.procedure_spec,
-            GrowthObjectKind.memory_application_spec,
-        ],
-    )
+    @pytest.mark.parametrize("kind", _RESERVED_KINDS)
     @pytest.mark.asyncio
     async def test_evaluate_raises(
         self, engine: GrowthGovernanceEngine, kind: GrowthObjectKind
@@ -189,15 +183,7 @@ class TestUnsupportedKindReserved:
         with pytest.raises(UnsupportedGrowthObjectError, match="not onboarded"):
             await engine.evaluate(kind, 1)
 
-    @pytest.mark.parametrize(
-        "kind",
-        [
-            GrowthObjectKind.skill_spec,
-            GrowthObjectKind.wrapper_tool,
-            GrowthObjectKind.procedure_spec,
-            GrowthObjectKind.memory_application_spec,
-        ],
-    )
+    @pytest.mark.parametrize("kind", _RESERVED_KINDS)
     @pytest.mark.asyncio
     async def test_apply_raises(
         self, engine: GrowthGovernanceEngine, kind: GrowthObjectKind
@@ -205,15 +191,7 @@ class TestUnsupportedKindReserved:
         with pytest.raises(UnsupportedGrowthObjectError, match="not onboarded"):
             await engine.apply(kind, 1)
 
-    @pytest.mark.parametrize(
-        "kind",
-        [
-            GrowthObjectKind.skill_spec,
-            GrowthObjectKind.wrapper_tool,
-            GrowthObjectKind.procedure_spec,
-            GrowthObjectKind.memory_application_spec,
-        ],
-    )
+    @pytest.mark.parametrize("kind", _RESERVED_KINDS)
     @pytest.mark.asyncio
     async def test_rollback_raises(
         self, engine: GrowthGovernanceEngine, kind: GrowthObjectKind
@@ -221,15 +199,7 @@ class TestUnsupportedKindReserved:
         with pytest.raises(UnsupportedGrowthObjectError, match="not onboarded"):
             await engine.rollback(kind)
 
-    @pytest.mark.parametrize(
-        "kind",
-        [
-            GrowthObjectKind.skill_spec,
-            GrowthObjectKind.wrapper_tool,
-            GrowthObjectKind.procedure_spec,
-            GrowthObjectKind.memory_application_spec,
-        ],
-    )
+    @pytest.mark.parametrize("kind", _RESERVED_KINDS)
     @pytest.mark.asyncio
     async def test_veto_raises(
         self, engine: GrowthGovernanceEngine, kind: GrowthObjectKind
@@ -237,15 +207,7 @@ class TestUnsupportedKindReserved:
         with pytest.raises(UnsupportedGrowthObjectError, match="not onboarded"):
             await engine.veto(kind, 1)
 
-    @pytest.mark.parametrize(
-        "kind",
-        [
-            GrowthObjectKind.skill_spec,
-            GrowthObjectKind.wrapper_tool,
-            GrowthObjectKind.procedure_spec,
-            GrowthObjectKind.memory_application_spec,
-        ],
-    )
+    @pytest.mark.parametrize("kind", _RESERVED_KINDS)
     @pytest.mark.asyncio
     async def test_get_active_raises(
         self, engine: GrowthGovernanceEngine, kind: GrowthObjectKind
@@ -258,8 +220,16 @@ class TestOnboardedButNoAdapter:
     """Onboarded kind with missing adapter must raise UnsupportedGrowthObjectError."""
 
     @pytest.mark.asyncio
-    async def test_raises_when_adapter_missing(self, registry: PolicyRegistry) -> None:
+    async def test_soul_raises_when_adapter_missing(self, registry: PolicyRegistry) -> None:
         """Engine with empty adapter dict but soul is onboarded."""
         eng = GrowthGovernanceEngine(adapters={}, policy_registry=registry)
         with pytest.raises(UnsupportedGrowthObjectError, match="No adapter registered"):
             await eng.propose(GrowthObjectKind.soul, _make_proposal())
+
+    @pytest.mark.asyncio
+    async def test_skill_spec_raises_when_adapter_missing(
+        self, engine: GrowthGovernanceEngine
+    ) -> None:
+        """skill_spec is onboarded (P2-M1b) but engine only has soul adapter."""
+        with pytest.raises(UnsupportedGrowthObjectError, match="No adapter registered"):
+            await engine.evaluate(GrowthObjectKind.skill_spec, 1)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -27,6 +27,10 @@ from src.memory.writer import MemoryWriter
 from src.session.manager import SessionManager
 from src.session.scope_resolver import SessionIdentity, resolve_scope_key
 from src.tools.registry import ToolRegistry
+
+if TYPE_CHECKING:
+    from src.skills.projector import SkillProjector
+    from src.skills.resolver import SkillResolver
 
 logger = structlog.get_logger()
 
@@ -57,6 +61,9 @@ class AgentLoop:
         memory_settings: MemorySettings | None = None,
         memory_searcher: MemorySearcher | None = None,
         evolution_engine: EvolutionEngine | None = None,
+        skill_resolver: SkillResolver | None = None,
+        skill_projector: SkillProjector | None = None,
+        skill_learner: object | None = None,
     ) -> None:
         self._model_client = model_client
         self._session_manager = session_manager
@@ -78,6 +85,10 @@ class AgentLoop:
         self._evolution_engine = evolution_engine
         self._bootstrap_done = False
         self._contract = load_contract(workspace_dir)
+        # ── skill runtime (P2-M1b-P3) ──
+        self._skill_resolver = skill_resolver
+        self._skill_projector = skill_projector
+        self._skill_learner = skill_learner  # P4 will implement SkillLearner
         if memory_settings is not None:
             self._memory_writer = MemoryWriter(workspace_dir, memory_settings)
         if compaction_settings is not None:
