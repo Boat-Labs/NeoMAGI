@@ -7,12 +7,12 @@ Validates:
 - Precondition filtering (channel, mode, tool)
 - Top-K truncation
 - Empty registry → empty result
-- Evidence fetched for top-K only
+- Evidence-based sorting (known_breakages, last_validated_at)
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -292,3 +292,58 @@ class TestAllFilteredOut:
 
         result = await resolver.resolve(TaskFrame(channel="web"))
         assert result == []
+
+
+class TestEvidenceSorting:
+    """Evidence signals (breakages, recency) should affect ranking."""
+
+    @pytest.mark.asyncio
+    async def test_fewer_breakages_ranked_higher(self) -> None:
+        """Skill with fewer known_breakages should rank higher."""
+        broken = _spec(id="broken", activation_tags=("research",))
+        clean = _spec(id="clean", activation_tags=("research",))
+        registry = StubRegistry(
+            specs=[broken, clean],
+            evidence={
+                "broken": _evidence(known_breakages=("bug1", "bug2", "bug3")),
+                "clean": _evidence(known_breakages=()),
+            },
+        )
+        resolver = SkillResolver(registry)
+        result = await resolver.resolve(TaskFrame(task_type=TaskType.research))
+        assert result[0][0].id == "clean"
+
+    @pytest.mark.asyncio
+    async def test_recently_validated_ranked_higher(self) -> None:
+        """Skill validated recently should rank above one validated long ago."""
+        now = datetime.now(UTC)
+        old = _spec(id="old", activation_tags=("research",))
+        recent = _spec(id="recent", activation_tags=("research",))
+        registry = StubRegistry(
+            specs=[old, recent],
+            evidence={
+                "old": _evidence(last_validated_at=now - timedelta(days=30)),
+                "recent": _evidence(last_validated_at=now - timedelta(hours=1)),
+            },
+        )
+        resolver = SkillResolver(registry)
+        result = await resolver.resolve(TaskFrame(task_type=TaskType.research))
+        assert result[0][0].id == "recent"
+
+    @pytest.mark.asyncio
+    async def test_evidence_fetched_before_scoring(self) -> None:
+        """Evidence should be fetched for ALL eligible skills, not just top-K."""
+        specs = [_spec(id=f"sk-{i}", activation_tags=("research",)) for i in range(5)]
+        evidence = {
+            f"sk-{i}": _evidence(
+                known_breakages=("bug",) * i,  # sk-0 cleanest, sk-4 most broken
+            )
+            for i in range(5)
+        }
+        registry = StubRegistry(specs=specs, evidence=evidence)
+        resolver = SkillResolver(registry, max_candidates=2)
+        result = await resolver.resolve(TaskFrame(task_type=TaskType.research))
+        # sk-0 and sk-1 should be top-2 (fewest breakages)
+        ids = {r[0].id for r in result}
+        assert "sk-0" in ids
+        assert "sk-1" in ids

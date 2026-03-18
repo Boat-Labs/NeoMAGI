@@ -128,6 +128,80 @@ def _row_to_proposal_record(row: object) -> SkillProposalRecord:
 # ---------------------------------------------------------------------------
 
 
+def _build_spec_upsert(spec: SkillSpec) -> tuple:
+    """Build the SQL + params for a spec upsert."""
+    sql = text(f"""
+        INSERT INTO {DB_SCHEMA}.skill_specs
+            (id, capability, version, summary, activation,
+             activation_tags, preconditions, delta, tool_preferences,
+             escalation_rules, exchange_policy, disabled, updated_at)
+        VALUES
+            (:id, :capability, :version, :summary, :activation,
+             :activation_tags, :preconditions, :delta, :tool_preferences,
+             :escalation_rules, :exchange_policy, :disabled, now())
+        ON CONFLICT (id) DO UPDATE SET
+            capability = EXCLUDED.capability,
+            version = EXCLUDED.version,
+            summary = EXCLUDED.summary,
+            activation = EXCLUDED.activation,
+            activation_tags = EXCLUDED.activation_tags,
+            preconditions = EXCLUDED.preconditions,
+            delta = EXCLUDED.delta,
+            tool_preferences = EXCLUDED.tool_preferences,
+            escalation_rules = EXCLUDED.escalation_rules,
+            exchange_policy = EXCLUDED.exchange_policy,
+            disabled = EXCLUDED.disabled,
+            updated_at = now()
+    """)
+    params = {
+        "id": spec.id,
+        "capability": spec.capability,
+        "version": spec.version,
+        "summary": spec.summary,
+        "activation": spec.activation,
+        "activation_tags": list(spec.activation_tags),
+        "preconditions": list(spec.preconditions),
+        "delta": list(spec.delta),
+        "tool_preferences": list(spec.tool_preferences),
+        "escalation_rules": list(spec.escalation_rules),
+        "exchange_policy": spec.exchange_policy,
+        "disabled": spec.disabled,
+    }
+    return sql, params
+
+
+def _build_evidence_upsert(skill_id: str, evidence: SkillEvidence) -> tuple:
+    """Build the SQL + params for an evidence upsert."""
+    sql = text(f"""
+        INSERT INTO {DB_SCHEMA}.skill_evidence
+            (skill_id, source, success_count, failure_count, last_validated_at,
+             positive_patterns, negative_patterns, known_breakages, updated_at)
+        VALUES
+            (:skill_id, :source, :success_count, :failure_count, :last_validated_at,
+             :positive_patterns, :negative_patterns, :known_breakages, now())
+        ON CONFLICT (skill_id) DO UPDATE SET
+            source = EXCLUDED.source,
+            success_count = EXCLUDED.success_count,
+            failure_count = EXCLUDED.failure_count,
+            last_validated_at = EXCLUDED.last_validated_at,
+            positive_patterns = EXCLUDED.positive_patterns,
+            negative_patterns = EXCLUDED.negative_patterns,
+            known_breakages = EXCLUDED.known_breakages,
+            updated_at = now()
+    """)
+    params = {
+        "skill_id": skill_id,
+        "source": evidence.source,
+        "success_count": evidence.success_count,
+        "failure_count": evidence.failure_count,
+        "last_validated_at": evidence.last_validated_at,
+        "positive_patterns": list(evidence.positive_patterns),
+        "negative_patterns": list(evidence.negative_patterns),
+        "known_breakages": list(evidence.known_breakages),
+    }
+    return sql, params
+
+
 class SkillStore:
     """PostgreSQL-backed skill registry and store.
 
@@ -191,70 +265,8 @@ class SkillStore:
         When *session* is provided the caller owns the transaction; otherwise
         a standalone session + commit is used (backwards-compatible).
         """
-        spec_sql = text(f"""
-            INSERT INTO {DB_SCHEMA}.skill_specs
-                (id, capability, version, summary, activation,
-                 activation_tags, preconditions, delta, tool_preferences,
-                 escalation_rules, exchange_policy, disabled, updated_at)
-            VALUES
-                (:id, :capability, :version, :summary, :activation,
-                 :activation_tags, :preconditions, :delta, :tool_preferences,
-                 :escalation_rules, :exchange_policy, :disabled, now())
-            ON CONFLICT (id) DO UPDATE SET
-                capability = EXCLUDED.capability,
-                version = EXCLUDED.version,
-                summary = EXCLUDED.summary,
-                activation = EXCLUDED.activation,
-                activation_tags = EXCLUDED.activation_tags,
-                preconditions = EXCLUDED.preconditions,
-                delta = EXCLUDED.delta,
-                tool_preferences = EXCLUDED.tool_preferences,
-                escalation_rules = EXCLUDED.escalation_rules,
-                exchange_policy = EXCLUDED.exchange_policy,
-                disabled = EXCLUDED.disabled,
-                updated_at = now()
-        """)
-        ev_sql = text(f"""
-            INSERT INTO {DB_SCHEMA}.skill_evidence
-                (skill_id, source, success_count, failure_count, last_validated_at,
-                 positive_patterns, negative_patterns, known_breakages, updated_at)
-            VALUES
-                (:skill_id, :source, :success_count, :failure_count, :last_validated_at,
-                 :positive_patterns, :negative_patterns, :known_breakages, now())
-            ON CONFLICT (skill_id) DO UPDATE SET
-                source = EXCLUDED.source,
-                success_count = EXCLUDED.success_count,
-                failure_count = EXCLUDED.failure_count,
-                last_validated_at = EXCLUDED.last_validated_at,
-                positive_patterns = EXCLUDED.positive_patterns,
-                negative_patterns = EXCLUDED.negative_patterns,
-                known_breakages = EXCLUDED.known_breakages,
-                updated_at = now()
-        """)
-        spec_params = {
-            "id": spec.id,
-            "capability": spec.capability,
-            "version": spec.version,
-            "summary": spec.summary,
-            "activation": spec.activation,
-            "activation_tags": list(spec.activation_tags),
-            "preconditions": list(spec.preconditions),
-            "delta": list(spec.delta),
-            "tool_preferences": list(spec.tool_preferences),
-            "escalation_rules": list(spec.escalation_rules),
-            "exchange_policy": spec.exchange_policy,
-            "disabled": spec.disabled,
-        }
-        ev_params = {
-            "skill_id": spec.id,
-            "source": evidence.source,
-            "success_count": evidence.success_count,
-            "failure_count": evidence.failure_count,
-            "last_validated_at": evidence.last_validated_at,
-            "positive_patterns": list(evidence.positive_patterns),
-            "negative_patterns": list(evidence.negative_patterns),
-            "known_breakages": list(evidence.known_breakages),
-        }
+        spec_sql, spec_params = _build_spec_upsert(spec)
+        ev_sql, ev_params = _build_evidence_upsert(spec.id, evidence)
         if session is not None:
             await session.execute(spec_sql, spec_params)
             await session.execute(ev_sql, ev_params)

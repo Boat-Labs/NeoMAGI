@@ -6,6 +6,8 @@ Depends only on the ``SkillRegistry`` protocol — not on ``SkillStore`` directl
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from src.skills.types import SkillEvidence, SkillRegistry, SkillSpec, TaskFrame
 
 
@@ -24,40 +26,35 @@ class SkillResolver:
         Algorithm (V1):
         1. list_active() — already filters disabled
         2. Filter out skills whose preconditions are not satisfied
-        3. Score each skill by keyword overlap + contextual signals
-        4. Sort by composite priority
-        5. Fetch evidence for the top-K
+        3. Fetch evidence for ALL eligible skills (before scoring)
+        4. Score each skill using spec + evidence signals
+        5. Sort by composite score, truncate to top-K
         """
         active = await self._registry.list_active()
         if not active:
             return []
 
-        # Step 2: filter preconditions
         eligible = [s for s in active if _preconditions_met(s, frame)]
         if not eligible:
             return []
 
-        # Step 3+4: score and sort
+        # Fetch evidence BEFORE scoring so evidence signals affect ranking
+        skill_ids = tuple(s.id for s in eligible)
+        evidence_map = await self._registry.get_evidence(skill_ids)
+
         scored = sorted(
             eligible,
-            key=lambda s: _score(s, frame),
+            key=lambda s: _score(s, frame, evidence_map.get(s.id)),
             reverse=True,
         )
 
-        # Step 5: top-K + evidence lookup
         top_k = scored[: self._max_candidates]
-        skill_ids = tuple(s.id for s in top_k)
-        evidence_map = await self._registry.get_evidence(skill_ids)
-
         return [(s, evidence_map.get(s.id)) for s in top_k]
 
 
 # ---------------------------------------------------------------------------
 # Scoring helpers (deterministic, no LLM)
 # ---------------------------------------------------------------------------
-
-# Words extracted from frame for matching
-_FRAME_KEYWORDS_FIELDS = ("task_type", "target_outcome")
 
 
 def _frame_keywords(frame: TaskFrame) -> set[str]:
@@ -81,30 +78,45 @@ def _capability_overlap(spec: SkillSpec, frame_kw: set[str]) -> int:
     return len(cap_tokens & frame_kw)
 
 
-def _score(spec: SkillSpec, frame: TaskFrame) -> tuple[int, int, int, int]:
-    """Composite scoring tuple (higher = better).
+def _score_escalation(spec: SkillSpec, frame: TaskFrame) -> float:
+    """Priority 1: escalation bonus for high-risk tasks."""
+    return 10.0 if spec.escalation_rules and frame.risk == "high" else 0.0
+
+
+def _score_evidence(evidence: SkillEvidence | None) -> float:
+    """Priority 2: evidence quality (fewer breakages, more recent validation)."""
+    if evidence is None:
+        return 0.0
+    score = -len(evidence.known_breakages) * 2.0
+    if evidence.last_validated_at is not None:
+        age_hours = (datetime.now(UTC) - evidence.last_validated_at).total_seconds() / 3600
+        if age_hours < 24:
+            score += 1.0
+        elif age_hours < 168:  # 1 week
+            score += 0.5
+    return score
+
+
+def _score(
+    spec: SkillSpec, frame: TaskFrame, evidence: SkillEvidence | None = None,
+) -> float:
+    """Composite scoring (higher = better).
 
     Priority order:
-    1. escalation_rules present AND risk=high  → +1
-    2. fewer known_breakages is better (inverted: use negative placeholder, 0 here)
+    1. escalation_rules present AND risk=high  → +10.0
+    2. evidence quality (fewer breakages, more recent validation)
     3. tag + capability overlap with frame
-    4. shorter delta preferred (inverted: -len)
-
-    We return a tuple so Python's tuple comparison gives lexicographic priority.
-    Evidence-based sorting (known_breakages, last_validated_at) is done
-    post-evidence-fetch in ``_rescore_with_evidence``, but V1 keeps it simple:
-    the evidence fetch happens *after* top-K selection, so the initial sort
-    uses only spec-level signals. This is intentional for V1 simplicity.
+    4. shorter delta preferred (inverted: -len * 0.1)
     """
     frame_kw = _frame_keywords(frame)
+    overlap = float(_tag_overlap(spec, frame_kw) + _capability_overlap(spec, frame_kw))
 
-    escalation_bonus = (
-        1 if spec.escalation_rules and frame.risk == "high" else 0
+    return (
+        _score_escalation(spec, frame)
+        + _score_evidence(evidence)
+        + overlap
+        - len(spec.delta) * 0.1
     )
-    overlap = _tag_overlap(spec, frame_kw) + _capability_overlap(spec, frame_kw)
-    delta_penalty = -len(spec.delta)  # shorter delta → higher (less negative)
-
-    return (escalation_bonus, 0, overlap, delta_penalty)
 
 
 # ---------------------------------------------------------------------------
@@ -112,30 +124,43 @@ def _score(spec: SkillSpec, frame: TaskFrame) -> tuple[int, int, int, int]:
 # ---------------------------------------------------------------------------
 
 
+def _check_channel(normalised: str, frame: TaskFrame) -> bool:
+    required = normalised[len("channel:"):].strip()
+    return (frame.channel or "").lower() == required
+
+
+def _check_mode(normalised: str, frame: TaskFrame) -> bool:
+    required = normalised[len("mode:"):].strip()
+    return frame.current_mode.lower() == required
+
+
+def _check_tool(normalised: str, frame: TaskFrame) -> bool:
+    required = normalised[len("tool:"):].strip()
+    return required in {t.lower() for t in frame.available_tools}
+
+
+_PRECONDITION_CHECKERS: dict[str, callable] = {
+    "channel:": _check_channel,
+    "mode:": _check_mode,
+    "tool:": _check_tool,
+}
+
+
+def _single_precondition_met(normalised: str, frame: TaskFrame) -> bool:
+    """Check a single normalised precondition against frame. True = pass."""
+    for prefix, checker in _PRECONDITION_CHECKERS.items():
+        if normalised.startswith(prefix):
+            return checker(normalised, frame)
+    return True  # "not:" and unrecognised → pass through
+
+
 def _preconditions_met(spec: SkillSpec, frame: TaskFrame) -> bool:
     """V1 precondition check: static keyword matching.
 
-    Supported precondition formats:
-    - ``"channel:<name>"`` — requires frame.channel == <name>
-    - ``"mode:<name>"`` — requires frame.current_mode == <name>
-    - ``"tool:<name>"`` — requires <name> in frame.available_tools
-    - ``"not:<tag>"`` — always passes at runtime (checked at eval time)
-    - unrecognised → passes (open-world assumption for V1)
+    Supported: ``channel:<name>``, ``mode:<name>``, ``tool:<name>``,
+    ``not:<tag>`` (pass-through), unrecognised (pass-through).
     """
-    for pre in spec.preconditions:
-        normalised = pre.strip().lower()
-        if normalised.startswith("channel:"):
-            required = normalised[len("channel:") :].strip()
-            if (frame.channel or "").lower() != required:
-                return False
-        elif normalised.startswith("mode:"):
-            required = normalised[len("mode:") :].strip()
-            if frame.current_mode.lower() != required:
-                return False
-        elif normalised.startswith("tool:"):
-            required = normalised[len("tool:") :].strip()
-            tool_names = {t.lower() for t in frame.available_tools}
-            if required not in tool_names:
-                return False
-        # "not:" and unrecognised → pass through
-    return True
+    return all(
+        _single_precondition_met(pre.strip().lower(), frame)
+        for pre in spec.preconditions
+    )

@@ -38,6 +38,11 @@ class RequestState:
     resolved_skills: tuple = ()  # tuple[SkillSpec, ...]
     skill_view: Any = None  # ResolvedSkillView | None
     teaching_intent: bool = False
+    accumulated_failure_signals: list = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.accumulated_failure_signals is None:
+            self.accumulated_failure_signals = []
 
 
 @dataclass
@@ -98,41 +103,34 @@ async def _initialize_request_state(
     recall_results = await loop._fetch_memory_recall(session_id, scope_key=scope_key)
     loop._contract = maybe_refresh_contract(loop._contract, loop._workspace_dir)
 
-    # ── pre-plan: skill resolution (P2-M1b-P3) ──
-    task_frame = None
-    resolved_skills: tuple = ()
-    skill_view = None
-    teaching_intent = False
+    skill_result = await _resolve_skills_for_request(loop, content, mode, identity)
 
-    if loop._skill_resolver is not None:
-        from src.skills.task_frame import extract_task_frame
+    return _assemble_request_state(
+        loop, session_id, lock_token, mode, scope_key, user_msg.seq,
+        tools_schema, tools_schema_list,
+        last_compaction_seq, compacted_context, recall_results,
+        skill_result,
+    )
 
-        tool_names = (
-            tuple(t.name for t in loop._tool_registry.list_tools(mode))
-            if loop._tool_registry
-            else ()
-        )
-        channel = identity.channel_type if identity else None
-        task_frame = extract_task_frame(
-            content,
-            mode=mode.value if hasattr(mode, "value") else str(mode),
-            channel=channel,
-            available_tools=tool_names,
-        )
-        candidates = await loop._skill_resolver.resolve(task_frame)
-        if candidates and loop._skill_projector is not None:
-            skill_view = loop._skill_projector.project(candidates, task_frame)
-        resolved_skills = tuple(spec for spec, _ in candidates) if candidates else ()
-        teaching_intent = _detect_teaching_intent(content)
 
+def _assemble_request_state(
+    loop: AgentLoop,
+    session_id: str,
+    lock_token: str | None,
+    mode: Any,
+    scope_key: str,
+    current_user_seq: int | None,
+    tools_schema: list[dict[str, Any]] | None,
+    tools_schema_list: list[dict[str, Any]],
+    last_compaction_seq: int | None,
+    compacted_context: str | None,
+    recall_results: list[Any],
+    skill_result: tuple[Any, tuple, Any, bool],
+) -> RequestState:
+    """Build the final RequestState from pre-resolved components."""
+    task_frame, resolved_skills, skill_view, teaching_intent = skill_result
     system_prompt = _build_system_prompt(
-        loop,
-        session_id,
-        mode,
-        compacted_context,
-        scope_key,
-        recall_results,
-        skill_view,
+        loop, session_id, mode, compacted_context, scope_key, recall_results, skill_view,
     )
     max_compactions = loop._settings.max_compactions_per_request if loop._settings else 2
     return RequestState(
@@ -140,7 +138,7 @@ async def _initialize_request_state(
         lock_token=lock_token,
         mode=mode,
         scope_key=scope_key,
-        current_user_seq=user_msg.seq,
+        current_user_seq=current_user_seq,
         tools_schema=tools_schema,
         tools_schema_list=tools_schema_list,
         compaction_count=0,
@@ -154,6 +152,39 @@ async def _initialize_request_state(
         skill_view=skill_view,
         teaching_intent=teaching_intent,
     )
+
+
+async def _resolve_skills_for_request(
+    loop: AgentLoop,
+    content: str,
+    mode: Any,
+    identity: SessionIdentity | None,
+) -> tuple[Any, tuple, Any, bool]:
+    """Extract task frame and resolve skills for the current request."""
+    if loop._skill_resolver is None:
+        return None, (), None, False
+
+    from src.skills.task_frame import extract_task_frame
+
+    tool_names = (
+        tuple(t.name for t in loop._tool_registry.list_tools(mode))
+        if loop._tool_registry
+        else ()
+    )
+    channel = identity.channel_type if identity else None
+    task_frame = extract_task_frame(
+        content,
+        mode=mode.value if hasattr(mode, "value") else str(mode),
+        channel=channel,
+        available_tools=tool_names,
+    )
+    candidates = await loop._skill_resolver.resolve(task_frame)
+    skill_view = None
+    if candidates and loop._skill_projector is not None:
+        skill_view = loop._skill_projector.project(candidates, task_frame)
+    resolved_skills = tuple(spec for spec, _ in candidates) if candidates else ()
+    teaching_intent = _detect_teaching_intent(content)
+    return task_frame, resolved_skills, skill_view, teaching_intent
 
 
 async def _run_iteration_loop(
@@ -200,7 +231,11 @@ async def _run_iteration_loop(
         max=max_tool_iterations,
         session_id=state.session_id,
     )
-    await _finalize_task_terminal(loop, state, "max_iterations", success=False)
+    await _finalize_task_terminal(
+        loop, state, "max_iterations",
+        success=False,
+        failure_signals=tuple(state.accumulated_failure_signals),
+    )
     yield TextChunk(content="I've reached the maximum number of tool calls. Please try again.")
 
 
@@ -375,36 +410,50 @@ async def _handle_tool_calls(
         lock_token=state.lock_token,
     )
     for tool_call in tool_calls_result:
-        parsed_args = _log_parse_result(tool_call)
-        yield ToolCallInfo(
-            tool_name=tool_call["name"],
-            arguments=parsed_args,
-            call_id=tool_call["id"],
-        )
-        denial = _mode_denial(loop, state, tool_call)
-        if denial is not None:
-            denied_event, result = denial
-            yield denied_event
-        else:
-            result = await loop._execute_tool(
-                tool_call["name"],
-                tool_call["arguments"],
-                scope_key=state.scope_key,
-                session_id=state.session_id,
-                guard_state=guard_state,
-            )
-        await loop._session_manager.append_message(
-            state.session_id,
-            "tool",
-            json.dumps(result),
-            tool_call_id=tool_call["id"],
-            lock_token=state.lock_token,
-        )
+        async for event in _execute_single_tool(loop, state, tool_call, guard_state):
+            yield event
     _agent_logger().info(
         "tool_call_iteration",
         iteration=iteration + 1,
         tools_called=len(tool_calls_result),
         session_id=state.session_id,
+    )
+
+
+async def _execute_single_tool(
+    loop: AgentLoop,
+    state: RequestState,
+    tool_call: dict[str, str],
+    guard_state: GuardCheckResult,
+) -> Any:
+    """Execute a single tool call, yielding events and recording signals."""
+    parsed_args = _log_parse_result(tool_call)
+    yield ToolCallInfo(
+        tool_name=tool_call["name"],
+        arguments=parsed_args,
+        call_id=tool_call["id"],
+    )
+    denial = _mode_denial(loop, state, tool_call)
+    if denial is not None:
+        denied_event, result = denial
+        state.accumulated_failure_signals.append(f"guard_denied:{tool_call['name']}")
+        yield denied_event
+    else:
+        result = await loop._execute_tool(
+            tool_call["name"],
+            tool_call["arguments"],
+            scope_key=state.scope_key,
+            session_id=state.session_id,
+            guard_state=guard_state,
+        )
+        if isinstance(result, dict) and not result.get("ok", True):
+            state.accumulated_failure_signals.append(f"tool_failure:{tool_call['name']}")
+    await loop._session_manager.append_message(
+        state.session_id,
+        "tool",
+        json.dumps(result),
+        tool_call_id=tool_call["id"],
+        lock_token=state.lock_token,
     )
 
 
@@ -487,7 +536,17 @@ async def _complete_assistant_response(
         session_id=state.session_id,
         chars=len(collected_text),
     )
-    await _finalize_task_terminal(loop, state, "assistant_response")
+    terminal = "assistant_response"
+    failure_signals = tuple(state.accumulated_failure_signals)
+    # If all iterations had denials/failures, reflect that in terminal state
+    if failure_signals and any(s.startswith("guard_denied:") for s in failure_signals):
+        terminal = "guard_denied"
+    elif failure_signals and any(s.startswith("tool_failure:") for s in failure_signals):
+        terminal = "tool_failure"
+    success = not failure_signals
+    await _finalize_task_terminal(
+        loop, state, terminal, success=success, failure_signals=failure_signals,
+    )
 
 
 def _over_budget_text() -> str:
@@ -598,27 +657,60 @@ async def _finalize_task_terminal(
     Records outcome evidence for resolved skills, and logs teaching intent
     when detected (V1: log only, no automatic skill creation).
     """
-    if loop._skill_learner is None or not state.resolved_skills:
+    if loop._skill_learner is None:
         return
     from src.skills.types import TaskOutcome
 
-    outcome = TaskOutcome(
-        success=success,
-        terminal_state=terminal_state,
-        user_confirmed=False,
-        failure_signals=failure_signals,
-    )
-    try:
-        await loop._skill_learner.record_outcome(list(state.resolved_skills), outcome)
-    except Exception:
-        _agent_logger().exception("post_run_learning_failed", session_id=state.session_id)
+    # Teaching intent = explicit user confirmation (user is teaching the agent)
+    user_confirmed = state.teaching_intent
 
-    # V1: teaching intent detection — log only, no automatic skill creation.
+    if state.resolved_skills:
+        outcome = TaskOutcome(
+            success=success,
+            terminal_state=terminal_state,
+            user_confirmed=user_confirmed,
+            failure_signals=failure_signals,
+        )
+        try:
+            await loop._skill_learner.record_outcome(list(state.resolved_skills), outcome)
+        except Exception:
+            _agent_logger().exception("post_run_learning_failed", session_id=state.session_id)
+
+    # Teaching intent → propose new skill via governance
     if state.teaching_intent:
-        _agent_logger().info(
-            "teaching_intent_detected",
-            session_id=state.session_id,
-            has_resolved_skills=bool(state.resolved_skills),
+        await _propose_taught_skill(loop, state)
+
+
+async def _propose_taught_skill(loop: AgentLoop, state: RequestState) -> None:
+    """Propose a new skill from teaching intent (V1 minimal)."""
+    from src.skills.types import SkillEvidence, SkillSpec
+
+    _agent_logger().info(
+        "teaching_intent_detected",
+        session_id=state.session_id,
+        has_resolved_skills=bool(state.resolved_skills),
+    )
+    if loop._skill_learner is None:
+        return
+    try:
+        summary = "User-taught skill"
+        if state.task_frame and state.task_frame.target_outcome:
+            summary = state.task_frame.target_outcome[:100]
+        spec_draft = SkillSpec(
+            id=f"user-taught-{state.session_id[:8]}",
+            capability="user_taught",
+            version=1,
+            summary=summary,
+            activation="Activated when similar task is detected",
+            activation_tags=("user-taught",),
+        )
+        evidence_draft = SkillEvidence(source="human-taught")
+        await loop._skill_learner.propose_new_skill(
+            spec_draft, evidence_draft, proposed_by="user",
+        )
+    except Exception:
+        _agent_logger().exception(
+            "teaching_skill_proposal_failed", session_id=state.session_id,
         )
 
 

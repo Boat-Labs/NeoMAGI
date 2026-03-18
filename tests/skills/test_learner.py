@@ -340,3 +340,80 @@ class TestComputeUpdatedEvidence:
         assert result is not None
         assert "old_signal" in result.negative_patterns
         assert "new_signal" in result.negative_patterns
+
+
+# ---------------------------------------------------------------------------
+# Teaching intent → propose_new_skill integration
+# ---------------------------------------------------------------------------
+
+
+class TestTeachingIntentProposal:
+    """Verify the teaching intent → propose_new_skill path in _finalize_task_terminal."""
+
+    @pytest.mark.asyncio
+    async def test_teaching_intent_triggers_proposal(
+        self, learner: SkillLearner, mock_engine: AsyncMock
+    ) -> None:
+        """When teaching_intent=True, propose_new_skill should be called."""
+        from src.agent.message_flow import _propose_taught_skill, RequestState
+
+        # Build a minimal RequestState with teaching_intent=True
+        state = RequestState(
+            session_id="test-sess-1234",
+            lock_token=None,
+            mode=None,
+            scope_key="main",
+            current_user_seq=1,
+            tools_schema=None,
+            tools_schema_list=[],
+            compaction_count=0,
+            max_compactions=2,
+            last_compaction_seq=None,
+            compacted_context=None,
+            recall_results=[],
+            system_prompt="",
+            teaching_intent=True,
+        )
+
+        # Create a minimal loop-like object
+        class FakeLoop:
+            _skill_learner = learner
+
+        await _propose_taught_skill(FakeLoop(), state)  # type: ignore[arg-type]
+        mock_engine.propose.assert_awaited_once()
+        call_args = mock_engine.propose.call_args
+        proposal = call_args[0][1]
+        assert proposal.proposed_by == "user"
+
+    @pytest.mark.asyncio
+    async def test_teaching_intent_with_target_outcome(
+        self, learner: SkillLearner, mock_engine: AsyncMock
+    ) -> None:
+        """Target outcome from task_frame should be used as skill summary."""
+        from src.agent.message_flow import _propose_taught_skill, RequestState
+        from src.skills.types import TaskFrame
+
+        state = RequestState(
+            session_id="test-sess-5678",
+            lock_token=None,
+            mode=None,
+            scope_key="main",
+            current_user_seq=1,
+            tools_schema=None,
+            tools_schema_list=[],
+            compaction_count=0,
+            max_compactions=2,
+            last_compaction_seq=None,
+            compacted_context=None,
+            recall_results=[],
+            system_prompt="",
+            teaching_intent=True,
+            task_frame=TaskFrame(target_outcome="Format code with Black"),
+        )
+
+        class FakeLoop:
+            _skill_learner = learner
+
+        await _propose_taught_skill(FakeLoop(), state)  # type: ignore[arg-type]
+        proposal = mock_engine.propose.call_args[0][1]
+        assert "Format code with Black" in proposal.diff_summary

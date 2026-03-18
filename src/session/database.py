@@ -42,6 +42,7 @@ async def ensure_schema(engine: AsyncEngine, schema: str = DB_SCHEMA) -> None:
         await _add_legacy_columns(conn, schema)
         await _add_memory_entry_columns(conn, schema)
         await _create_search_trigger(conn, schema)
+        await _create_skill_tables(conn, schema)
 
     logger.info("db_schema_ensured", schema=schema)
 
@@ -105,6 +106,66 @@ async def _create_search_trigger(conn, schema: str) -> None:
         EXECUTE FUNCTION {schema}.memory_entries_search_vector_update()
     """)
     )
+
+
+async def _create_skill_tables(conn, schema: str) -> None:
+    """Create skill runtime tables (IF NOT EXISTS) for fresh-DB startup path.
+
+    These tables are normally created by Alembic migration a8b9c0d1e2f3,
+    but ensure_schema() must also cover fresh DBs that skip migrations.
+    """
+    for ddl in _skill_table_ddl(schema):
+        await conn.execute(text(ddl))
+
+
+def _skill_table_ddl(schema: str) -> list[str]:
+    """Return idempotent DDL statements for the skill runtime tables."""
+    return [
+        f"""CREATE TABLE IF NOT EXISTS {schema}.skill_specs (
+            id TEXT PRIMARY KEY,
+            capability TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            summary TEXT NOT NULL,
+            activation TEXT NOT NULL,
+            activation_tags JSONB NOT NULL DEFAULT '[]',
+            preconditions JSONB NOT NULL DEFAULT '[]',
+            delta JSONB NOT NULL DEFAULT '[]',
+            tool_preferences JSONB NOT NULL DEFAULT '[]',
+            escalation_rules JSONB NOT NULL DEFAULT '[]',
+            exchange_policy TEXT NOT NULL DEFAULT 'local_only',
+            disabled BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        f"""CREATE TABLE IF NOT EXISTS {schema}.skill_evidence (
+            skill_id TEXT PRIMARY KEY REFERENCES {schema}.skill_specs(id),
+            source TEXT NOT NULL,
+            success_count INTEGER NOT NULL DEFAULT 0,
+            failure_count INTEGER NOT NULL DEFAULT 0,
+            last_validated_at TIMESTAMPTZ,
+            positive_patterns JSONB NOT NULL DEFAULT '[]',
+            negative_patterns JSONB NOT NULL DEFAULT '[]',
+            known_breakages JSONB NOT NULL DEFAULT '[]',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        f"""CREATE TABLE IF NOT EXISTS {schema}.skill_spec_versions (
+            governance_version BIGSERIAL PRIMARY KEY,
+            skill_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'proposed',
+            proposal JSONB NOT NULL,
+            eval_result JSONB,
+            created_by TEXT NOT NULL DEFAULT 'agent',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            applied_at TIMESTAMPTZ,
+            rolled_back_from BIGINT
+                REFERENCES {schema}.skill_spec_versions(governance_version)
+        )""",
+        f"""CREATE INDEX IF NOT EXISTS idx_skill_spec_versions_skill_id
+            ON {schema}.skill_spec_versions (skill_id)""",
+        f"""CREATE INDEX IF NOT EXISTS idx_skill_spec_versions_status
+            ON {schema}.skill_spec_versions (status)""",
+    ]
 
 
 def make_session_factory(engine: AsyncEngine) -> async_sessionmaker:

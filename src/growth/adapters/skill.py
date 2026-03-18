@@ -102,27 +102,23 @@ def _check_activation_correctness(spec: SkillSpec) -> dict:
     }
 
 
+def _scan_blocklist(text: str, label: str) -> list[str]:
+    """Scan text against the projection blocklist, returning any errors."""
+    for pattern in _PROJECTION_BLOCKLIST_PATTERNS:
+        if pattern.search(text):
+            return [f"{label} blocked by pattern: {pattern.pattern!r}"]
+    return []
+
+
 def _check_projection_safety(spec: SkillSpec) -> dict:
     """Check 3: delta budget + V1 static blocklist (no semantic analysis)."""
     errors: list[str] = []
     if len(spec.delta) > _MAX_DELTA_PER_SKILL:
-        errors.append(
-            f"delta has {len(spec.delta)} entries, max {_MAX_DELTA_PER_SKILL}"
-        )
-    # Scan delta for prompt injection patterns
+        errors.append(f"delta has {len(spec.delta)} entries, max {_MAX_DELTA_PER_SKILL}")
     for entry in spec.delta:
-        for pattern in _PROJECTION_BLOCKLIST_PATTERNS:
-            if pattern.search(entry):
-                errors.append(f"delta entry blocked by pattern: {pattern.pattern!r}")
-                break
-    # Also scan activation and summary
-    for field_name, field_val in [("activation", spec.activation), ("summary", spec.summary)]:
-        for pattern in _PROJECTION_BLOCKLIST_PATTERNS:
-            if pattern.search(field_val):
-                errors.append(
-                    f"{field_name} blocked by pattern: {pattern.pattern!r}"
-                )
-                break
+        errors.extend(_scan_blocklist(entry, "delta entry"))
+    errors.extend(_scan_blocklist(spec.activation, "activation"))
+    errors.extend(_scan_blocklist(spec.summary, "summary"))
     passed = len(errors) == 0
     return {
         "name": "projection_safety",
@@ -183,6 +179,72 @@ def _check_scope_claim_consistency(spec: SkillSpec, evidence: SkillEvidence) -> 
 # ---------------------------------------------------------------------------
 
 
+def _eval_early_return(record, version: int, contract) -> GrowthEvalResult | None:
+    """Return early-exit eval result if record is missing or not proposed."""
+    if record is None:
+        return GrowthEvalResult(
+            passed=False,
+            summary=f"Governance version {version} not found",
+            contract_id=contract.contract_id,
+            contract_version=contract.version,
+        )
+    if record.status != GrowthLifecycleStatus.proposed:
+        return GrowthEvalResult(
+            passed=False,
+            summary=f"Version {version} is '{record.status}', not 'proposed'",
+            contract_id=contract.contract_id,
+            contract_version=contract.version,
+        )
+    return None
+
+
+def _parse_proposal_payload(
+    record, contract,
+) -> tuple[SkillSpec, SkillEvidence] | GrowthEvalResult:
+    """Parse spec + evidence from proposal payload; return EvalResult on failure."""
+    payload = record.proposal.get("payload", {})
+    try:
+        spec = SkillSpec(**payload.get("skill_spec", {}))
+        evidence = SkillEvidence(**payload.get("skill_evidence", {}))
+    except Exception as exc:
+        return GrowthEvalResult(
+            passed=False,
+            checks=[{
+                "name": "schema_validity",
+                "passed": False,
+                "detail": f"Payload parse error: {exc}",
+            }],
+            summary=f"Payload parse error: {exc}",
+            contract_id=contract.contract_id,
+            contract_version=contract.version,
+        )
+    return spec, evidence
+
+
+def _run_eval_checks(spec: SkillSpec, evidence: SkillEvidence, contract) -> GrowthEvalResult:
+    """Run 5 deterministic eval checks and return the composite result."""
+    checks = [
+        _check_schema_validity(spec, evidence),
+        _check_activation_correctness(spec),
+        _check_projection_safety(spec),
+        _check_learning_discipline(evidence),
+        _check_scope_claim_consistency(spec, evidence),
+    ]
+    passed = all(c["passed"] for c in checks)
+    summary = (
+        "All checks passed"
+        if passed
+        else "Failed: " + ", ".join(c["name"] for c in checks if not c["passed"])
+    )
+    return GrowthEvalResult(
+        passed=passed,
+        checks=checks,
+        summary=summary,
+        contract_id=contract.contract_id,
+        contract_version=contract.version,
+    )
+
+
 class SkillGovernedObjectAdapter:
     """Adapter connecting skill_spec to the growth governance kernel.
 
@@ -233,64 +295,20 @@ class SkillGovernedObjectAdapter:
         """
         contract = self._contract
         record = await self._store.get_proposal(version)
-        if record is None:
-            return GrowthEvalResult(
-                passed=False,
-                summary=f"Governance version {version} not found",
-                contract_id=contract.contract_id,
-                contract_version=contract.version,
-            )
-        if record.status != GrowthLifecycleStatus.proposed:
-            return GrowthEvalResult(
-                passed=False,
-                summary=f"Version {version} is '{record.status}', not 'proposed'",
-                contract_id=contract.contract_id,
-                contract_version=contract.version,
-            )
 
-        # Extract spec + evidence from proposal payload
-        payload = record.proposal.get("payload", {})
-        raw_spec = payload.get("skill_spec", {})
-        raw_evidence = payload.get("skill_evidence", {})
-        try:
-            spec = SkillSpec(**raw_spec)
-            evidence = SkillEvidence(**raw_evidence)
-        except Exception as exc:
-            return GrowthEvalResult(
-                passed=False,
-                checks=[{
-                    "name": "schema_validity",
-                    "passed": False,
-                    "detail": f"Payload parse error: {exc}",
-                }],
-                summary=f"Payload parse error: {exc}",
-                contract_id=contract.contract_id,
-                contract_version=contract.version,
-            )
+        early = _eval_early_return(record, version, contract)
+        if early is not None:
+            return early
 
-        # Run 5 deterministic checks
-        checks = [
-            _check_schema_validity(spec, evidence),
-            _check_activation_correctness(spec),
-            _check_projection_safety(spec),
-            _check_learning_discipline(evidence),
-            _check_scope_claim_consistency(spec, evidence),
-        ]
-        passed = all(c["passed"] for c in checks)
-        summary = (
-            "All checks passed"
-            if passed
-            else "Failed: " + ", ".join(c["name"] for c in checks if not c["passed"])
-        )
-        result = GrowthEvalResult(
-            passed=passed,
-            checks=checks,
-            summary=summary,
-            contract_id=contract.contract_id,
-            contract_version=contract.version,
-        )
+        assert record is not None  # guaranteed by _eval_early_return
+        parsed = _parse_proposal_payload(record, contract)
+        if isinstance(parsed, GrowthEvalResult):
+            return parsed
+        spec, evidence = parsed
+
+        result = _run_eval_checks(spec, evidence, contract)
         await self._store.store_eval_result(version, result)
-        logger.info("skill_adapter_evaluated", governance_version=version, passed=passed)
+        logger.info("skill_adapter_evaluated", governance_version=version, passed=result.passed)
         return result
 
     async def apply(self, version: int) -> None:
@@ -334,56 +352,54 @@ class SkillGovernedObjectAdapter:
     async def rollback(self, **kwargs: object) -> int:
         """Rollback to previous applied snapshot or disable.
 
-        If a previous applied snapshot exists -> materialize as new active + rollback entry.
-        If no recoverable snapshot -> disable current skill + rollback entry.
         Returns the governance_version of the rollback entry.
-
         All writes execute within a single DB transaction (atomic).
         """
         skill_id = kwargs.get("skill_id")
         if not isinstance(skill_id, str):
             raise ValueError("rollback() requires skill_id as keyword argument")
 
-        # Find last applied version (read, outside the write transaction)
         last_applied = await self._store.find_last_applied(skill_id)
 
         async with self._store.transaction() as session:
-            if last_applied is not None:
-                # Re-materialize previous snapshot
-                payload = last_applied.proposal.get("payload", {})
-                spec = SkillSpec(**payload["skill_spec"])
-                evidence = SkillEvidence(**payload["skill_evidence"])
-                await self._store.upsert_active(spec, evidence, session=session)
-                # Mark current active as rolled_back
-                await self._store.update_proposal_status(
-                    last_applied.governance_version,
-                    GrowthLifecycleStatus.rolled_back,
-                    session=session,
-                )
-            else:
-                # No recoverable snapshot -> disable
-                await self._store.disable(skill_id, session=session)
-
-            # Create a rollback ledger entry
-            rollback_proposal = GrowthProposal(
-                object_kind=GrowthObjectKind.skill_spec,
-                object_id=skill_id,
-                intent="rollback",
-                risk_notes="System rollback",
-                diff_summary="Rollback to previous version or disable",
-                proposed_by="system",
-            )
-            gv = await self._store.create_proposal(rollback_proposal, session=session)
-            await self._store.update_proposal_status(
-                gv,
-                GrowthLifecycleStatus.rolled_back,
-                rolled_back_from=(
-                    last_applied.governance_version if last_applied else None
-                ),
-                session=session,
-            )
+            await self._restore_or_disable(last_applied, skill_id, session)
+            gv = await self._create_rollback_entry(last_applied, skill_id, session)
 
         logger.info("skill_adapter_rolled_back", governance_version=gv, skill_id=skill_id)
+        return gv
+
+    async def _restore_or_disable(self, last_applied, skill_id: str, session) -> None:
+        """Re-materialize previous snapshot or disable if none exists."""
+        if last_applied is not None:
+            payload = last_applied.proposal.get("payload", {})
+            spec = SkillSpec(**payload["skill_spec"])
+            evidence = SkillEvidence(**payload["skill_evidence"])
+            await self._store.upsert_active(spec, evidence, session=session)
+            await self._store.update_proposal_status(
+                last_applied.governance_version,
+                GrowthLifecycleStatus.rolled_back,
+                session=session,
+            )
+        else:
+            await self._store.disable(skill_id, session=session)
+
+    async def _create_rollback_entry(self, last_applied, skill_id: str, session) -> int:
+        """Create a rollback ledger entry and return its governance_version."""
+        rollback_proposal = GrowthProposal(
+            object_kind=GrowthObjectKind.skill_spec,
+            object_id=skill_id,
+            intent="rollback",
+            risk_notes="System rollback",
+            diff_summary="Rollback to previous version or disable",
+            proposed_by="system",
+        )
+        gv = await self._store.create_proposal(rollback_proposal, session=session)
+        await self._store.update_proposal_status(
+            gv,
+            GrowthLifecycleStatus.rolled_back,
+            rolled_back_from=(last_applied.governance_version if last_applied else None),
+            session=session,
+        )
         return gv
 
     async def veto(self, version: int) -> None:
