@@ -33,6 +33,11 @@ class RequestState:
     compacted_context: str | None
     recall_results: list[Any]
     system_prompt: str
+    # ── skill runtime fields (P2-M1b-P3) ──
+    task_frame: Any = None  # TaskFrame | None
+    resolved_skills: tuple = ()  # tuple[SkillSpec, ...]
+    skill_view: Any = None  # ResolvedSkillView | None
+    teaching_intent: bool = False
 
 
 @dataclass
@@ -92,6 +97,34 @@ async def _initialize_request_state(
     last_compaction_seq, compacted_context = await _load_compaction_state(loop, session_id)
     recall_results = await loop._fetch_memory_recall(session_id, scope_key=scope_key)
     loop._contract = maybe_refresh_contract(loop._contract, loop._workspace_dir)
+
+    # ── pre-plan: skill resolution (P2-M1b-P3) ──
+    task_frame = None
+    resolved_skills: tuple = ()
+    skill_view = None
+    teaching_intent = False
+
+    if loop._skill_resolver is not None:
+        from src.skills.task_frame import extract_task_frame
+
+        tool_names = (
+            tuple(t.name for t in loop._tool_registry.list_tools(mode))
+            if loop._tool_registry
+            else ()
+        )
+        channel = identity.channel_type if identity else None
+        task_frame = extract_task_frame(
+            content,
+            mode=mode.value if hasattr(mode, "value") else str(mode),
+            channel=channel,
+            available_tools=tool_names,
+        )
+        candidates = await loop._skill_resolver.resolve(task_frame)
+        if candidates and loop._skill_projector is not None:
+            skill_view = loop._skill_projector.project(candidates, task_frame)
+        resolved_skills = tuple(spec for spec, _ in candidates) if candidates else ()
+        teaching_intent = _detect_teaching_intent(content)
+
     system_prompt = _build_system_prompt(
         loop,
         session_id,
@@ -99,6 +132,7 @@ async def _initialize_request_state(
         compacted_context,
         scope_key,
         recall_results,
+        skill_view,
     )
     max_compactions = loop._settings.max_compactions_per_request if loop._settings else 2
     return RequestState(
@@ -115,6 +149,10 @@ async def _initialize_request_state(
         compacted_context=compacted_context,
         recall_results=recall_results,
         system_prompt=system_prompt,
+        task_frame=task_frame,
+        resolved_skills=resolved_skills,
+        skill_view=skill_view,
+        teaching_intent=teaching_intent,
     )
 
 
@@ -162,6 +200,7 @@ async def _run_iteration_loop(
         max=max_tool_iterations,
         session_id=state.session_id,
     )
+    await _finalize_task_terminal(loop, state, "max_iterations", success=False)
     yield TextChunk(content="I've reached the maximum number of tool calls. Please try again.")
 
 
@@ -260,6 +299,7 @@ def _apply_compaction_result(loop: AgentLoop, state: RequestState, result: Any) 
         state.compacted_context,
         state.scope_key,
         state.recall_results,
+        state.skill_view,
     )
 
 
@@ -415,6 +455,7 @@ def _build_system_prompt(
     compacted_context: str | None,
     scope_key: str,
     recall_results: list[Any],
+    skill_view: Any = None,
 ) -> str:
     return loop._prompt_builder.build(
         session_id,
@@ -422,6 +463,7 @@ def _build_system_prompt(
         compacted_context=compacted_context,
         scope_key=scope_key,
         recall_results=recall_results,
+        skill_view=skill_view,
     )
 
 
@@ -445,6 +487,7 @@ async def _complete_assistant_response(
         session_id=state.session_id,
         chars=len(collected_text),
     )
+    await _finalize_task_terminal(loop, state, "assistant_response")
 
 
 def _over_budget_text() -> str:
@@ -525,6 +568,49 @@ def _mode_denial(
         "next_action": next_action,
     }
     return denied, result
+
+
+def _detect_teaching_intent(content: str) -> bool:
+    """Lightweight rule: detect explicit user teaching intent."""
+    teaching_signals = [
+        "记住这个方法",
+        "以后这类任务",
+        "按这个做",
+        "remember this",
+        "from now on",
+        "always do",
+    ]
+    lower = content.lower()
+    return any(signal in lower for signal in teaching_signals)
+
+
+async def _finalize_task_terminal(
+    loop: AgentLoop,
+    state: RequestState,
+    terminal_state: str,
+    *,
+    success: bool = True,
+    failure_signals: tuple[str, ...] = (),
+) -> None:
+    """Unified post-run-learning entry point.
+
+    Called at task terminal states (assistant_response, max_iterations).
+    tool_failure and guard_denied paths will be integrated in P4.
+    """
+    if loop._skill_learner is None or not state.resolved_skills:
+        return
+    from src.skills.types import TaskOutcome
+
+    outcome = TaskOutcome(
+        success=success,
+        terminal_state=terminal_state,
+        user_confirmed=False,
+        failure_signals=failure_signals,
+    )
+    try:
+        await loop._skill_learner.record_outcome(list(state.resolved_skills), outcome)
+    except Exception:
+        _agent_logger().exception("post_run_learning_failed", session_id=state.session_id)
 
 
 def _agent_logger():
