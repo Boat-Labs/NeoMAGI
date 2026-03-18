@@ -1248,3 +1248,5 @@
 {"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-18T22:43:54Z","event_type":"closed","id":1379,"issue_id":"NeoMAGI-ps2","new_value":"Generated P2-M1c startup prompt based on the approved plan and PRD_P2_M1b template","old_value":""}
 {"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-18T22:44:48Z","event_type":"created","id":1380,"issue_id":"NeoMAGI-qgc","new_value":"","old_value":""}
 {"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-18T22:45:09Z","event_type":"closed","id":1381,"issue_id":"NeoMAGI-qgc","new_value":"Removed PRD_P2_M1c.md from Git tracking and kept the local ignored file","old_value":""}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-18T22:55:15Z","event_type":"created","id":1382,"issue_id":"NeoMAGI-1qg","new_value":"","old_value":""}
+{"actor":"Zhiliang Zhou","comment":null,"created_at":"2026-03-18T22:57:03Z","event_type":"closed","id":1383,"issue_id":"NeoMAGI-1qg","new_value":"Drafted proposed ADR 0055/0056 and updated decisions index for review","old_value":""}
