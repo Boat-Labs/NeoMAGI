@@ -145,7 +145,12 @@ class TestParseDailyEntries:
                 " source_session_id: telegram:peer:42)\nContent here"
             ),
         ]
-        rows = indexer._parse_daily_entries(entries, "main", date(2026, 3, 17), "memory/2026-03-17.md")
+        rows = indexer._parse_daily_entries(
+            entries,
+            "main",
+            date(2026, 3, 17),
+            "memory/2026-03-17.md",
+        )
         assert len(rows) == 1
         assert rows[0]["entry_id"] == "abc-123"
         assert rows[0]["source_session_id"] == "telegram:peer:42"
@@ -158,7 +163,12 @@ class TestParseDailyEntries:
         indexer = MemoryIndexer(db_factory, settings)
 
         entries = ["", "[10:00] (source: user, scope: main)\nOld content"]
-        rows = indexer._parse_daily_entries(entries, "main", date(2026, 2, 22), "memory/2026-02-22.md")
+        rows = indexer._parse_daily_entries(
+            entries,
+            "main",
+            date(2026, 2, 22),
+            "memory/2026-02-22.md",
+        )
         assert len(rows) == 1
         assert rows[0]["entry_id"] is None
         assert rows[0]["source_session_id"] is None
