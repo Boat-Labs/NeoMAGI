@@ -49,42 +49,40 @@ class TestGetKindPolicySoul:
         assert policy.requires_explicit_approval is False
 
 
+class TestGetKindPolicySkillSpec:
+    """skill_spec is onboarded as of P2-M1b."""
+
+    def test_skill_spec_is_onboarded(self, registry: PolicyRegistry) -> None:
+        policy = registry.get_kind_policy(GrowthObjectKind.skill_spec)
+        assert policy.onboarding_state == GrowthOnboardingState.onboarded
+
+    def test_skill_spec_adapter_name(self, registry: PolicyRegistry) -> None:
+        policy = registry.get_kind_policy(GrowthObjectKind.skill_spec)
+        assert policy.adapter_name == "skill"
+
+    def test_skill_spec_requires_approval(self, registry: PolicyRegistry) -> None:
+        policy = registry.get_kind_policy(GrowthObjectKind.skill_spec)
+        assert policy.requires_explicit_approval is True
+
+
 class TestGetKindPolicyReserved:
-    @pytest.mark.parametrize(
-        "kind",
-        [
-            GrowthObjectKind.skill_spec,
-            GrowthObjectKind.wrapper_tool,
-            GrowthObjectKind.procedure_spec,
-            GrowthObjectKind.memory_application_spec,
-        ],
-    )
+    _RESERVED_KINDS = [
+        GrowthObjectKind.wrapper_tool,
+        GrowthObjectKind.procedure_spec,
+        GrowthObjectKind.memory_application_spec,
+    ]
+
+    @pytest.mark.parametrize("kind", _RESERVED_KINDS)
     def test_reserved_state(self, registry: PolicyRegistry, kind: GrowthObjectKind) -> None:
         policy = registry.get_kind_policy(kind)
         assert policy.onboarding_state == GrowthOnboardingState.reserved
 
-    @pytest.mark.parametrize(
-        "kind",
-        [
-            GrowthObjectKind.skill_spec,
-            GrowthObjectKind.wrapper_tool,
-            GrowthObjectKind.procedure_spec,
-            GrowthObjectKind.memory_application_spec,
-        ],
-    )
+    @pytest.mark.parametrize("kind", _RESERVED_KINDS)
     def test_reserved_adapter_none(self, registry: PolicyRegistry, kind: GrowthObjectKind) -> None:
         policy = registry.get_kind_policy(kind)
         assert policy.adapter_name is None
 
-    @pytest.mark.parametrize(
-        "kind",
-        [
-            GrowthObjectKind.skill_spec,
-            GrowthObjectKind.wrapper_tool,
-            GrowthObjectKind.procedure_spec,
-            GrowthObjectKind.memory_application_spec,
-        ],
-    )
+    @pytest.mark.parametrize("kind", _RESERVED_KINDS)
     def test_reserved_requires_approval(
         self, registry: PolicyRegistry, kind: GrowthObjectKind
     ) -> None:

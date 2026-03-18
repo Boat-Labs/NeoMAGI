@@ -12,6 +12,7 @@ from src.tools.base import ToolMode
 if TYPE_CHECKING:
     from src.config.settings import MemorySettings
     from src.memory.searcher import MemorySearchResult
+    from src.skills.types import ResolvedSkillView
     from src.tools.registry import ToolRegistry
 
 logger = structlog.get_logger()
@@ -54,6 +55,7 @@ class PromptBuilder:
         scope_key: str = "main",
         recent_messages: list[str] | None = None,
         recall_results: list[MemorySearchResult] | None = None,
+        skill_view: ResolvedSkillView | None = None,
     ) -> str:
         """Build the complete system prompt by concatenating all non-empty layers.
 
@@ -65,12 +67,18 @@ class PromptBuilder:
         recent_messages: reserved for future use (keyword extraction happens
                          in AgentLoop, results passed via recall_results).
         recall_results: pre-fetched memory search results from AgentLoop.
+        skill_view: resolved skill delta projected by SkillProjector.
+
+        Layer physical order: Safety -> Skills -> Workspace context.
+        Semantic authority: Safety > AGENTS.md > USER.md > skill delta
+                            > SOUL.md > IDENTITY.md
+        Skill delta must not override AGENTS.md or USER.md directives.
         """
         layers = [
             self._layer_identity(),
             self._layer_tooling(mode),
             self._layer_safety(mode),
-            self._layer_skills(),
+            self._layer_skills(skill_view),
             self._layer_workspace(session_id, scope_key=scope_key),
             self._layer_compacted_context(compacted_context),
             self._layer_memory_recall(recall_results=recall_results),
@@ -120,9 +128,18 @@ class PromptBuilder:
             )
         return ""
 
-    def _layer_skills(self) -> str:
-        # Placeholder — no skills in M1.2
-        return ""
+    def _layer_skills(self, skill_view: ResolvedSkillView | None = None) -> str:
+        """Generate skill experience layer from resolved skill view.
+
+        Consumes only ``skill_view.llm_delta`` — runtime_hints and
+        escalation_signals are consumed by the agent loop, not the prompt.
+        """
+        if not skill_view or not skill_view.llm_delta:
+            return ""
+        lines = ["## Skill Experience", ""]
+        for delta in skill_view.llm_delta:
+            lines.append(f"- {delta}")
+        return "\n".join(lines)
 
     def _layer_workspace(self, session_id: str, *, scope_key: str = "main") -> str:
         """Load workspace bootstrap files and concatenate their contents."""

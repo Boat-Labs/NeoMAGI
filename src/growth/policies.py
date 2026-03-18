@@ -24,10 +24,10 @@ _KIND_POLICIES: dict[GrowthObjectKind, GrowthKindPolicy] = {
     ),
     GrowthObjectKind.skill_spec: GrowthKindPolicy(
         kind=GrowthObjectKind.skill_spec,
-        onboarding_state=GrowthOnboardingState.reserved,
+        onboarding_state=GrowthOnboardingState.onboarded,
         requires_explicit_approval=True,
-        adapter_name=None,
-        notes="Reserved for P2-M1b+",
+        adapter_name="skill",
+        notes="Onboarded in P2-M1b",
     ),
     GrowthObjectKind.wrapper_tool: GrowthKindPolicy(
         kind=GrowthObjectKind.wrapper_tool,
