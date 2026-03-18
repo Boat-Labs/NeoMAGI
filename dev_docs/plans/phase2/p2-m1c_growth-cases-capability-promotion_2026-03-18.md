@@ -1,7 +1,7 @@
-# P2-M1c 草案：Growth Cases 与 Capability Promotion
+# P2-M1c 实施计划：Growth Cases 与 Capability Promotion
 
 - Date: 2026-03-18
-- Status: draft
+- Status: approved
 - Scope: `P2-M1c` only; deliver the minimum audited closed loop for growth cases, builder work memory, and `skill_spec -> wrapper_tool` capability promotion on top of the completed `P2-M1b` skill runtime
 - Basis:
   - [`design_docs/phase2/p2_m1_architecture.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/phase2/p2_m1_architecture.md)
