@@ -161,6 +161,7 @@
 
 - `GrowthCaseSpec` 作为 hardcoded curated catalog，放在 `src/growth/cases.py`
 - `GrowthCaseRun` 不进入 PostgreSQL；使用 workspace artifact（如 `dev_docs/cases/<case_id>/<run_id>.md`）保存，并通过 bead comments / artifact refs 建索引
+- V1 case runner 的程序化访问通过 `dev_docs/cases/<case_id>/` 扫描和 bead refs 完成，不额外引入独立 run store / query API
 - 原因：`P2-M1c` 只有 2~3 条 curated case，不值得为 case catalog / run records 新增 DB schema 与 migration
 
 建议 `P2-M1c` 先只跑 2~3 条 case：
@@ -408,11 +409,13 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 建议拆成 5 个顺序 work packages。依赖链需要显式写清：
 
 - `WP-A` 先冻结边界、存储和 runtime entrypoint 语义
-- `WP-B` 在 `WP-A` 之后执行，并先完成 `bd` feasibility spike
-- `WP-C` 在 `WP-A` 之后执行，完成 `wrapper_tool` onboarding
+- `WP-B` 与 `WP-C` 都在 `WP-A` 之后执行，写集分离时可并行推进
+- `WP-B` 先完成 `bd` feasibility spike，再进入 builder work memory substrate
+- `WP-C` 完成 `wrapper_tool` onboarding
 - `WP-D` 的 case 依赖分层：
   - `GC-1` 可在 `WP-B` 后独立验证
-  - `GC-2` 必须等 `WP-C` 完成后才能验证 `propose -> evaluate -> apply`
+  - `GC-2` 的 core apply path 依赖 `WP-C`
+  - `GC-2` 的完整闭环依赖 `WP-B + WP-C`
   - `GC-3` 只有在 `WP-A` 先冻结 import 协议时才进入 `P2-M1c`
 - `WP-E` 只在前面至少完成 `GC-1 + GC-2` 后再进入 closeout
 
@@ -438,7 +441,8 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 产出：
 
 - work memory 与 control-plane 语义分离
-- `wrapper_tool` contract skeleton 升级为 V1 concrete contract
+- 新建 `WRAPPER_TOOL_EVAL_CONTRACT_V1` 常量，并将 `_CONTRACTS` 的 runtime 引用从 skeleton 切到 `V1`
+- `WRAPPER_TOOL_EVAL_CONTRACT_SKELETON` 可保留为历史/草案常量，但不再被 runtime 使用
 - `GrowthCaseSpec = hardcoded catalog`，`GrowthCaseRun = workspace artifact`
 - `implementation_ref = Python entrypoint string <module>:<factory>`
 - `scope_claim`、`implementation_ref`、`deny_semantics` 等术语定型
@@ -495,7 +499,11 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 - `wrapper_tool_versions` governance ledger
 - `WrapperToolGovernedObjectAdapter`
 - Alembic migration：`wrapper_tools` + `wrapper_tool_versions`
-- runtime registration / deregistration path
+- `ToolRegistry` 的 wrapper replace/remove 路径：
+  - 支持 rollback / disable 时移除 active wrapper tool
+  - 支持 supersede 时替换同名 wrapper tool
+  - 相关 mode override 必须与 deregistration 一起清理，避免 registry 漂移
+- `src/growth/policies.py` 中 `wrapper_tool.notes` 与 `procedure_spec.notes` 同步更新，避免 milestone 口径残留歧义
 - `wrapper_tool` V1 eval
 
 验证：
@@ -528,7 +536,8 @@ V1 建议沿用 skeleton 的四层结构，但把执行语义具体化：
 - case run 能生成 bead + artifact + proposal refs
 - case 失败时能产出 `candidate_only` / `veto` / `rollback` 结论
 - case 成功时能产出 apply 后 replay 证据
-- `GC-2` 只有在 `wrapper_tool` 已 onboard 且已接入 `ToolRegistry` 后才进入 apply 测试
+- `GC-2` 的 core apply path 只有在 `wrapper_tool` 已 onboard 且已接入 `ToolRegistry` 后才进入 apply 测试
+- `GC-2` 的完整闭环只有在 `WP-B + WP-C` 都完成后才计入 acceptance
 - `GC-3` 若 import 协议未冻结，则不纳入本轮 acceptance
 
 ### Work Package E: Acceptance Closeout
