@@ -58,6 +58,8 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0052 | Project beads backup: Git-tracked JSONL exports over Dolt remote sync | accepted | 2026-03-08 | `decisions/0052-project-beads-backup-git-tracked-jsonl-exports.md` |
 | 0053 | Memory entry stable IDs with projection-only content hashes | accepted | 2026-03-16 | `decisions/0053-memory-entry-ids-and-projection-only-content-hashes.md` |
 | 0054 | Growth eval contracts: immutable and object-scoped | accepted | 2026-03-16 | `decisions/0054-growth-eval-contracts-immutable-and-object-scoped.md` |
+| 0055 | Builder work memory via bd and workspace artifacts | proposed | 2026-03-18 | `decisions/0055-builder-work-memory-via-bd-and-workspace-artifacts.md` |
+| 0056 | Wrapper tool onboarding and runtime boundary | proposed | 2026-03-18 | `decisions/0056-wrapper-tool-onboarding-and-runtime-boundary.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。
