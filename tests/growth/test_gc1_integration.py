@@ -27,17 +27,12 @@ from src.growth.case_runner import CaseRunner
 from src.growth.case_types import GrowthCaseStatus
 from src.growth.engine import GrowthGovernanceEngine
 from src.growth.policies import PolicyRegistry
-from src.growth.types import (
-    GrowthEvalResult,
-    GrowthLifecycleStatus,
-    GrowthObjectKind,
-)
+from src.growth.types import GrowthObjectKind
 from src.skills.learner import SkillLearner
 from src.skills.projector import SkillProjector
 from src.skills.resolver import SkillResolver
 from src.skills.store import SkillProposalRecord
 from src.skills.types import SkillEvidence, SkillSpec, TaskFrame, TaskType
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -167,76 +162,87 @@ def gc1_components(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
+async def _run_propose_eval_apply(
+    components: dict,
+) -> tuple:
+    """Execute propose → eval → apply steps, return (run, gv)."""
+    spec = components["spec"]
+    evidence = components["evidence"]
+    learner: SkillLearner = components["learner"]
+    engine: GrowthGovernanceEngine = components["engine"]
+    runner: CaseRunner = components["runner"]
+
+    run = await runner.start_run("gc-1")
+    assert run.status == GrowthCaseStatus.running
+
+    gv = await learner.propose_new_skill(spec, evidence)
+    assert gv == 1
+    run = await runner.record_proposal(run, governance_version=gv)
+    assert "gv:1" in run.proposal_refs
+
+    eval_result = await engine.evaluate(GrowthObjectKind.skill_spec, gv)
+    assert eval_result.passed is True
+    run = await runner.record_eval(run, eval_result)
+    assert len(run.eval_refs) == 1
+    assert "passed=True" in run.eval_refs[0]
+
+    await engine.apply(GrowthObjectKind.skill_spec, gv)
+    run = await runner.record_apply(run, success=True)
+    assert "success=True" in run.apply_refs[0]
+
+    store = components["store"]
+    active_skills = await store.list_active()
+    assert any(s.id == spec.id for s in active_skills)
+    return run, gv
+
+
+async def _run_reuse_phase(components: dict) -> None:
+    """Verify resolver matches the taught skill and projector produces delta."""
+    spec = components["spec"]
+    resolver: SkillResolver = components["resolver"]
+    projector: SkillProjector = components["projector"]
+
+    frame = TaskFrame(task_type=TaskType.edit, target_outcome="format python code with ruff")
+    candidates = await resolver.resolve(frame)
+    assert len(candidates) >= 1
+    assert candidates[0][0].id == spec.id
+
+    view = projector.project(candidates, frame)
+    assert len(view.llm_delta) > 0
+    assert "ruff" in view.llm_delta[0].lower()
+
+
+def _assert_artifact_contains(
+    artifact_base: Path, case_id: str, run_id: str, expected: tuple[str, ...],
+) -> None:
+    """Assert the artifact file exists and contains all expected strings."""
+    artifact_path = artifact_base / case_id / f"{run_id}.md"
+    assert artifact_path.exists()
+    content = artifact_path.read_text(encoding="utf-8")
+    for text in expected:
+        assert text in content
+
+
 class TestGC1FullFlow:
     """Full GC-1 integration: teach -> propose -> eval -> apply -> reuse."""
 
     async def test_teach_propose_eval_apply_reuse(self, gc1_components: dict) -> None:
-        spec = gc1_components["spec"]
-        evidence = gc1_components["evidence"]
-        learner: SkillLearner = gc1_components["learner"]
-        engine: GrowthGovernanceEngine = gc1_components["engine"]
-        resolver: SkillResolver = gc1_components["resolver"]
-        projector: SkillProjector = gc1_components["projector"]
         runner: CaseRunner = gc1_components["runner"]
         artifact_base: Path = gc1_components["artifact_base"]
 
-        # --- Step 1: Start case run ---
-        run = await runner.start_run("gc-1")
-        assert run.status == GrowthCaseStatus.running
+        run, _gv = await _run_propose_eval_apply(gc1_components)
+        await _run_reuse_phase(gc1_components)
 
-        # --- Step 2: Propose skill via learner ---
-        gv = await learner.propose_new_skill(spec, evidence)
-        assert gv == 1
-        run = await runner.record_proposal(run, governance_version=gv)
-        assert "gv:1" in run.proposal_refs
-
-        # --- Step 3: Evaluate skill ---
-        eval_result = await engine.evaluate(GrowthObjectKind.skill_spec, gv)
-        assert eval_result.passed is True
-        run = await runner.record_eval(run, eval_result)
-        assert len(run.eval_refs) == 1
-        assert "passed=True" in run.eval_refs[0]
-
-        # --- Step 4: Apply skill ---
-        await engine.apply(GrowthObjectKind.skill_spec, gv)
-        run = await runner.record_apply(run, success=True)
-        assert "success=True" in run.apply_refs[0]
-
-        # --- Step 5: Verify skill is active (mock returns it in list_active) ---
-        store = gc1_components["store"]
-        active_skills = await store.list_active()
-        assert any(s.id == spec.id for s in active_skills)
-
-        # --- Step 6: Second similar task -- resolver finds the skill ---
-        frame = TaskFrame(
-            task_type=TaskType.edit,
-            target_outcome="format python code with ruff",
-        )
-        candidates = await resolver.resolve(frame)
-        assert len(candidates) >= 1
-        matched_spec, matched_evidence = candidates[0]
-        assert matched_spec.id == spec.id
-
-        # --- Step 7: Projector generates llm_delta ---
-        view = projector.project(candidates, frame)
-        assert len(view.llm_delta) > 0
-        assert "ruff" in view.llm_delta[0].lower()
-
-        # --- Step 8: Finalize case run ---
         run = await runner.finalize(
             run, summary="Skill taught and reused successfully", passed=True,
         )
         assert run.status == GrowthCaseStatus.passed
         assert run.summary == "Skill taught and reused successfully"
 
-        # --- Step 9: Verify artifact file ---
-        artifact_path = artifact_base / "gc-1" / f"{run.run_id}.md"
-        assert artifact_path.exists()
-        content = artifact_path.read_text(encoding="utf-8")
-        assert "gv:1" in content
-        assert "passed=True" in content
-        assert "success=True" in content
-        assert "Skill taught and reused successfully" in content
+        _assert_artifact_contains(
+            artifact_base, "gc-1", run.run_id,
+            ("gv:1", "passed=True", "success=True", "Skill taught and reused successfully"),
+        )
 
 
 class TestGC1ReuseRequired:

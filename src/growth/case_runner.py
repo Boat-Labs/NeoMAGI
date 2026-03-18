@@ -145,12 +145,25 @@ class CaseRunner:
         await _write_artifact(updated, self._artifact_base)
         return updated
 
+    async def record_veto(self, run: GrowthCaseRun) -> GrowthCaseRun:
+        """Record veto. Mark as vetoed (symmetric with record_rollback)."""
+        updated = run.model_copy(
+            update={"status": GrowthCaseStatus.vetoed},
+        )
+        await _write_artifact(updated, self._artifact_base)
+        return updated
+
     async def finalize(
         self, run: GrowthCaseRun, summary: str, *, passed: bool = True,
     ) -> GrowthCaseRun:
         """Write final artifact and return completed run."""
         final_status = GrowthCaseStatus.passed if passed else run.status
-        if run.status in (GrowthCaseStatus.failed, GrowthCaseStatus.rolled_back):
+        _terminal = (
+            GrowthCaseStatus.failed,
+            GrowthCaseStatus.rolled_back,
+            GrowthCaseStatus.vetoed,
+        )
+        if run.status in _terminal:
             final_status = run.status
 
         updated = run.model_copy(

@@ -146,6 +146,15 @@ class TestRecordRollback:
         assert "rollback:executed" in updated.rollback_refs
 
 
+class TestRecordVeto:
+    """CaseRunner.record_veto should mark as vetoed."""
+
+    async def test_marks_vetoed(self, runner: CaseRunner) -> None:
+        run = await runner.start_run("gc-2")
+        updated = await runner.record_veto(run)
+        assert updated.status == GrowthCaseStatus.vetoed
+
+
 class TestFinalize:
     """CaseRunner.finalize should set summary and final status."""
 
@@ -169,6 +178,12 @@ class TestFinalize:
         rolled = await runner.record_rollback(run)
         final = await runner.finalize(rolled, summary="Rolled back")
         assert final.status == GrowthCaseStatus.rolled_back
+
+    async def test_finalize_preserves_vetoed_status(self, runner: CaseRunner) -> None:
+        run = await runner.start_run("gc-2")
+        vetoed = await runner.record_veto(run)
+        final = await runner.finalize(vetoed, summary="Eval veto", passed=False)
+        assert final.status == GrowthCaseStatus.vetoed
 
     async def test_finalize_writes_artifact(
         self, runner: CaseRunner, artifact_base: Path,

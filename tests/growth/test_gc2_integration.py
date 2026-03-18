@@ -38,7 +38,6 @@ from src.skills.types import SkillEvidence, SkillSpec
 from src.wrappers.store import WrapperToolProposalRecord
 from src.wrappers.types import WrapperToolSpec
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -217,6 +216,62 @@ def gc2_components(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
+def _stub_importlib(mock_importlib: MagicMock) -> None:
+    """Stub importlib.import_module for dry_run_smoke check."""
+    mock_mod = MagicMock()
+    mock_mod.loads = MagicMock()
+    mock_importlib.import_module.return_value = mock_mod
+
+
+def _make_promote_proposal(wt_spec: WrapperToolSpec) -> GrowthProposal:
+    """Build a standard GC-2 promote proposal."""
+    return GrowthProposal(
+        object_kind=GrowthObjectKind.wrapper_tool,
+        object_id=wt_spec.id,
+        intent="Promote skill to wrapper tool",
+        risk_notes="Low risk - proven skill",
+        diff_summary="Promote file_summarizer to wrapper tool",
+        payload={
+            "wrapper_tool_spec": wt_spec.model_dump(),
+            "smoke_test_results": {"passed": True},
+        },
+    )
+
+
+async def _run_gc2_propose_eval_apply(
+    components: dict,
+) -> tuple:
+    """Execute start → propose → eval → apply for GC-2, return (run, gv)."""
+    wt_spec: WrapperToolSpec = components["wt_spec"]
+    engine: GrowthGovernanceEngine = components["engine"]
+    runner: CaseRunner = components["runner"]
+
+    run = await runner.start_run("gc-2")
+    assert run.status == GrowthCaseStatus.running
+
+    proposal = _make_promote_proposal(wt_spec)
+    gv = await engine.propose(GrowthObjectKind.wrapper_tool, proposal)
+    assert gv == 1
+    run = await runner.record_proposal(run, governance_version=gv)
+
+    eval_result = await engine.evaluate(GrowthObjectKind.wrapper_tool, gv)
+    assert eval_result.passed is True
+    run = await runner.record_eval(run, eval_result)
+
+    await engine.apply(GrowthObjectKind.wrapper_tool, gv)
+    run = await runner.record_apply(run, success=True)
+    return run, gv
+
+
+def _assert_gc2_artifact(artifact_base: Path, run_id: str, expected: tuple[str, ...]) -> None:
+    """Assert the GC-2 artifact file contains all expected strings."""
+    path = artifact_base / "gc-2" / f"{run_id}.md"
+    assert path.exists()
+    content = path.read_text(encoding="utf-8")
+    for text in expected:
+        assert text in content
+
+
 class TestGC2FullFlow:
     """Full GC-2: skill with evidence -> promote -> wrapper_tool applied."""
 
@@ -224,69 +279,23 @@ class TestGC2FullFlow:
     async def test_promote_skill_to_wrapper_tool(
         self, mock_importlib: MagicMock, gc2_components: dict,
     ) -> None:
-        skill_evidence: SkillEvidence = gc2_components["skill_evidence"]
-        wt_spec: WrapperToolSpec = gc2_components["wt_spec"]
-        engine: GrowthGovernanceEngine = gc2_components["engine"]
+        _stub_importlib(mock_importlib)
+        assert _check_promote_conditions(gc2_components["skill_evidence"])
+
+        run, _gv = await _run_gc2_propose_eval_apply(gc2_components)
+
+        gc2_components["mock_registry"].replace.assert_called_once()
+        gc2_components["wrapper_store"].upsert_active.assert_called_once()
+
         runner: CaseRunner = gc2_components["runner"]
-        mock_registry: MagicMock = gc2_components["mock_registry"]
-        artifact_base: Path = gc2_components["artifact_base"]
-
-        # Stub importlib for dry_run_smoke check
-        mock_mod = MagicMock()
-        mock_mod.loads = MagicMock()
-        mock_importlib.import_module.return_value = mock_mod
-
-        # --- Step 1: Check promote conditions ---
-        assert _check_promote_conditions(skill_evidence)
-
-        # --- Step 2: Start case run ---
-        run = await runner.start_run("gc-2")
-        assert run.status == GrowthCaseStatus.running
-
-        # --- Step 3: Propose wrapper_tool ---
-        proposal = GrowthProposal(
-            object_kind=GrowthObjectKind.wrapper_tool,
-            object_id=wt_spec.id,
-            intent="Promote skill to wrapper tool",
-            risk_notes="Low risk - proven skill",
-            diff_summary="Promote file_summarizer to wrapper tool",
-            payload={
-                "wrapper_tool_spec": wt_spec.model_dump(),
-                "smoke_test_results": {"passed": True},
-            },
-        )
-        gv = await engine.propose(GrowthObjectKind.wrapper_tool, proposal)
-        assert gv == 1
-        run = await runner.record_proposal(run, governance_version=gv)
-
-        # --- Step 4: Evaluate ---
-        eval_result = await engine.evaluate(GrowthObjectKind.wrapper_tool, gv)
-        assert eval_result.passed is True
-        run = await runner.record_eval(run, eval_result)
-
-        # --- Step 5: Apply ---
-        await engine.apply(GrowthObjectKind.wrapper_tool, gv)
-        run = await runner.record_apply(run, success=True)
-
-        # Verify ToolRegistry.replace was called
-        mock_registry.replace.assert_called_once()
-
-        # Verify wrapper store upsert_active was called
-        wrapper_store: AsyncMock = gc2_components["wrapper_store"]
-        wrapper_store.upsert_active.assert_called_once()
-
-        # --- Step 6: Finalize ---
         run = await runner.finalize(
             run, summary="Skill promoted to wrapper tool successfully",
         )
         assert run.status == GrowthCaseStatus.passed
 
-        # Verify artifact
-        artifact_path = artifact_base / "gc-2" / f"{run.run_id}.md"
-        assert artifact_path.exists()
-        content = artifact_path.read_text(encoding="utf-8")
-        assert "gv:1" in content
-        assert "passed=True" in content
+        _assert_gc2_artifact(
+            gc2_components["artifact_base"], run.run_id, ("gv:1", "passed=True"),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -294,66 +303,52 @@ class TestGC2FullFlow:
 # ---------------------------------------------------------------------------
 
 
+def _build_bad_io_engine() -> tuple[WrapperToolSpec, GrowthGovernanceEngine]:
+    """Build engine with a WrapperToolSpec that has invalid input_schema."""
+    wt_spec = WrapperToolSpec(
+        id="wt-bad-io",
+        capability="bad_tool",
+        version=1,
+        summary="Tool with invalid schemas",
+        input_schema={"missing": "type"},  # missing "type" key
+        output_schema={"type": "object"},
+        implementation_ref="json:loads",
+        deny_semantics=("no_write",),
+    )
+
+    wrapper_store = AsyncMock()
+    wrapper_store.create_proposal = AsyncMock(return_value=1)
+    wrapper_store.store_eval_result = AsyncMock()
+
+    proposed = _make_wrapper_proposal_record(wt_spec, gv=1, status="proposed")
+    wrapper_store.get_proposal = AsyncMock(return_value=proposed)
+
+    mock_session = MagicMock()
+
+    @asynccontextmanager
+    async def _fake_tx():
+        yield mock_session
+
+    wrapper_store.transaction = _fake_tx
+
+    mock_registry = MagicMock()
+    wrapper_adapter = WrapperToolGovernedObjectAdapter(wrapper_store, mock_registry)
+    engine = GrowthGovernanceEngine(
+        adapters={GrowthObjectKind.wrapper_tool: wrapper_adapter},
+        policy_registry=PolicyRegistry(),
+    )
+    return wt_spec, engine
+
+
 class TestGC2EvalFailure:
     """GC-2 with eval failure -> vetoed."""
 
     async def test_eval_failure_vetoes_run(self, tmp_path: Path) -> None:
-        wt_spec = WrapperToolSpec(
-            id="wt-bad-io",
-            capability="bad_tool",
-            version=1,
-            summary="Tool with invalid schemas",
-            input_schema={"missing": "type"},  # missing "type" key
-            output_schema={"type": "object"},
-            implementation_ref="json:loads",
-            deny_semantics=("no_write",),
-        )
-
-        wrapper_store = AsyncMock()
-        wrapper_store.create_proposal = AsyncMock(return_value=1)
-        wrapper_store.store_eval_result = AsyncMock()
-
-        proposed = _make_wrapper_proposal_record(wt_spec, gv=1, status="proposed")
-        proposed = WrapperToolProposalRecord(
-            governance_version=1,
-            wrapper_tool_id=wt_spec.id,
-            status="proposed",
-            proposal={
-                "intent": "Promote",
-                "payload": {
-                    "wrapper_tool_spec": wt_spec.model_dump(),
-                    "smoke_test_results": {"passed": True},
-                },
-            },
-            eval_result=None,
-            created_by="agent",
-            created_at=datetime(2026, 3, 1, tzinfo=UTC),
-            applied_at=None,
-            rolled_back_from=None,
-        )
-        wrapper_store.get_proposal = AsyncMock(return_value=proposed)
-
-        mock_session = MagicMock()
-
-        @asynccontextmanager
-        async def _fake_tx():
-            yield mock_session
-
-        wrapper_store.transaction = _fake_tx
-
-        mock_registry = MagicMock()
-        wrapper_adapter = WrapperToolGovernedObjectAdapter(wrapper_store, mock_registry)
-        policy_registry = PolicyRegistry()
-        engine = GrowthGovernanceEngine(
-            adapters={GrowthObjectKind.wrapper_tool: wrapper_adapter},
-            policy_registry=policy_registry,
-        )
+        wt_spec, engine = _build_bad_io_engine()
         runner = CaseRunner(artifact_base=tmp_path / "growth_cases")
 
-        # Start run
         run = await runner.start_run("gc-2")
 
-        # Propose
         proposal = GrowthProposal(
             object_kind=GrowthObjectKind.wrapper_tool,
             object_id=wt_spec.id,
@@ -365,26 +360,19 @@ class TestGC2EvalFailure:
         gv = await engine.propose(GrowthObjectKind.wrapper_tool, proposal)
         run = await runner.record_proposal(run, gv)
 
-        # Evaluate -- should fail on typed_io_validation
         eval_result = await engine.evaluate(GrowthObjectKind.wrapper_tool, gv)
         assert eval_result.passed is False
         run = await runner.record_eval(run, eval_result)
 
-        # Verify the failure is typed_io
         failed_names = [c["name"] for c in eval_result.checks if not c["passed"]]
         assert "typed_io_validation" in failed_names
 
-        # Finalize as vetoed
-        vetoed_run = run.model_copy(
-            update={"status": GrowthCaseStatus.vetoed},
-        )
+        run = await runner.record_veto(run)
         final = await runner.finalize(
-            vetoed_run,
+            run,
             summary="Eval failed: typed_io_validation check did not pass",
             passed=False,
         )
-        # vetoed is not in (failed, rolled_back), so finalize with passed=False
-        # does not override it (it's not running either), let's check
         assert final.status == GrowthCaseStatus.vetoed
         assert "typed_io_validation" in final.summary
 
@@ -401,59 +389,27 @@ class TestGC2Rollback:
     async def test_apply_then_rollback(
         self, mock_importlib: MagicMock, gc2_components: dict,
     ) -> None:
+        _stub_importlib(mock_importlib)
+
+        run, _gv = await _run_gc2_propose_eval_apply(gc2_components)
+
         wt_spec: WrapperToolSpec = gc2_components["wt_spec"]
         engine: GrowthGovernanceEngine = gc2_components["engine"]
         runner: CaseRunner = gc2_components["runner"]
-        mock_registry: MagicMock = gc2_components["mock_registry"]
         wrapper_store: AsyncMock = gc2_components["wrapper_store"]
 
-        # Stub importlib
-        mock_mod = MagicMock()
-        mock_mod.loads = MagicMock()
-        mock_importlib.import_module.return_value = mock_mod
-
-        # Start
-        run = await runner.start_run("gc-2")
-
-        # Propose
-        proposal = GrowthProposal(
-            object_kind=GrowthObjectKind.wrapper_tool,
-            object_id=wt_spec.id,
-            intent="Promote",
-            risk_notes="Test",
-            diff_summary="Promote",
-            payload={
-                "wrapper_tool_spec": wt_spec.model_dump(),
-                "smoke_test_results": {"passed": True},
-            },
-        )
-        gv = await engine.propose(GrowthObjectKind.wrapper_tool, proposal)
-        run = await runner.record_proposal(run, gv)
-
-        # Evaluate + Apply
-        eval_result = await engine.evaluate(GrowthObjectKind.wrapper_tool, gv)
-        assert eval_result.passed
-        run = await runner.record_eval(run, eval_result)
-        await engine.apply(GrowthObjectKind.wrapper_tool, gv)
-        run = await runner.record_apply(run, success=True)
-
-        # Now rollback
         # Reset side_effect for rollback proposal creation
         wrapper_store.create_proposal = AsyncMock(return_value=2)
         wrapper_store.find_last_applied = AsyncMock(return_value=None)
 
-        rollback_gv = await engine.rollback(
+        await engine.rollback(
             GrowthObjectKind.wrapper_tool, wrapper_tool_id=wt_spec.id,
         )
         run = await runner.record_rollback(run)
 
-        # Verify ToolRegistry.unregister was called (no last_applied -> disable path)
-        mock_registry.unregister.assert_called_with(wt_spec.id)
-
-        # Verify wrapper store remove_active was called
+        gc2_components["mock_registry"].unregister.assert_called_with(wt_spec.id)
         wrapper_store.remove_active.assert_called_once()
 
-        # Finalize
         final = await runner.finalize(run, summary="Rolled back after apply")
         assert final.status == GrowthCaseStatus.rolled_back
         assert "rollback:executed" in final.rollback_refs
