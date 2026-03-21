@@ -21,6 +21,7 @@ from sqlalchemy import text
 
 from src.constants import DB_SCHEMA
 from src.growth.types import GrowthEvalResult, GrowthLifecycleStatus, GrowthProposal
+from src.infra.sql import jsonb_text
 from src.wrappers.types import WrapperToolSpec
 
 if TYPE_CHECKING:
@@ -110,7 +111,8 @@ def _row_to_proposal_record(row: object) -> WrapperToolProposalRecord:
 
 def _build_spec_upsert(spec: WrapperToolSpec) -> tuple:
     """Build the SQL + params for a spec upsert."""
-    sql = text(f"""
+    sql = jsonb_text(
+        f"""
         INSERT INTO {DB_SCHEMA}.wrapper_tools
             (id, capability, version, summary, input_schema, output_schema,
              bound_atomic_tools, implementation_ref, deny_semantics,
@@ -131,7 +133,12 @@ def _build_spec_upsert(spec: WrapperToolSpec) -> tuple:
             scope_claim = EXCLUDED.scope_claim,
             disabled = EXCLUDED.disabled,
             updated_at = now()
-    """)
+    """,
+        "input_schema",
+        "output_schema",
+        "bound_atomic_tools",
+        "deny_semantics",
+    )
     params = {
         "id": spec.id,
         "capability": spec.capability,
@@ -253,13 +260,16 @@ class WrapperToolStore:
 
         Returns governance_version.
         """
-        sql = text(f"""
+        sql = jsonb_text(
+            f"""
             INSERT INTO {DB_SCHEMA}.wrapper_tool_versions
                 (wrapper_tool_id, status, proposal, created_by)
             VALUES
                 (:wrapper_tool_id, 'proposed', :proposal, :created_by)
             RETURNING governance_version
-        """)
+        """,
+            "proposal",
+        )
         params = {
             "wrapper_tool_id": proposal.object_id,
             "proposal": {
@@ -299,11 +309,14 @@ class WrapperToolStore:
 
     async def store_eval_result(self, governance_version: int, result: GrowthEvalResult) -> None:
         """Persist eval result to the governance ledger entry."""
-        sql = text(f"""
+        sql = jsonb_text(
+            f"""
             UPDATE {DB_SCHEMA}.wrapper_tool_versions SET
                 eval_result = :eval_result
             WHERE governance_version = :gv
-        """)
+        """,
+            "eval_result",
+        )
         eval_dict: dict[str, object] = {
             "passed": result.passed,
             "checks": result.checks,

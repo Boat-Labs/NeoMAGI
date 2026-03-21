@@ -140,16 +140,27 @@ async def _integration_cleanup(request):
 async def _truncate_integration_tables(factory) -> None:
     """Truncate test schema tables for integration test isolation."""
     async with factory() as db_session:
-        result = await db_session.execute(text(
-            "SELECT table_name FROM information_schema.tables"
-            f" WHERE table_schema = '{DB_SCHEMA}'"
-        ))
+        result = await db_session.execute(
+            text(
+                "SELECT table_name FROM information_schema.tables"
+                f" WHERE table_schema = '{DB_SCHEMA}'"
+            )
+        )
         existing = {row[0] for row in result.fetchall()}
 
         truncatable = [
-            t for t in [
-                "messages", "sessions", "memory_entries", "soul_versions",
+            t
+            for t in [
+                "messages",
+                "sessions",
+                "memory_entries",
+                "soul_versions",
                 "budget_reservations",
+                "skill_spec_versions",
+                "skill_evidence",
+                "skill_specs",
+                "wrapper_tool_versions",
+                "wrapper_tools",
             ]
             if t in existing
         ]
@@ -158,11 +169,13 @@ async def _truncate_integration_tables(factory) -> None:
             await db_session.execute(text(f"TRUNCATE {qualified} CASCADE"))
 
         if "budget_state" in existing:
-            await db_session.execute(text(
-                f"UPDATE {DB_SCHEMA}.budget_state"
-                " SET cumulative_eur = 0, updated_at = NOW()"
-                " WHERE id = 'global'"
-            ))
+            await db_session.execute(
+                text(
+                    f"UPDATE {DB_SCHEMA}.budget_state"
+                    " SET cumulative_eur = 0, updated_at = NOW()"
+                    " WHERE id = 'global'"
+                )
+            )
 
         await db_session.commit()
 

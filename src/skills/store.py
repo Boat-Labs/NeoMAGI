@@ -21,6 +21,7 @@ from sqlalchemy import text
 
 from src.constants import DB_SCHEMA
 from src.growth.types import GrowthEvalResult, GrowthLifecycleStatus, GrowthProposal
+from src.infra.sql import jsonb_text
 from src.skills.types import SkillEvidence, SkillSpec
 
 if TYPE_CHECKING:
@@ -130,7 +131,8 @@ def _row_to_proposal_record(row: object) -> SkillProposalRecord:
 
 def _build_spec_upsert(spec: SkillSpec) -> tuple:
     """Build the SQL + params for a spec upsert."""
-    sql = text(f"""
+    sql = jsonb_text(
+        f"""
         INSERT INTO {DB_SCHEMA}.skill_specs
             (id, capability, version, summary, activation,
              activation_tags, preconditions, delta, tool_preferences,
@@ -152,7 +154,13 @@ def _build_spec_upsert(spec: SkillSpec) -> tuple:
             exchange_policy = EXCLUDED.exchange_policy,
             disabled = EXCLUDED.disabled,
             updated_at = now()
-    """)
+    """,
+        "activation_tags",
+        "preconditions",
+        "delta",
+        "tool_preferences",
+        "escalation_rules",
+    )
     params = {
         "id": spec.id,
         "capability": spec.capability,
@@ -172,7 +180,8 @@ def _build_spec_upsert(spec: SkillSpec) -> tuple:
 
 def _build_evidence_upsert(skill_id: str, evidence: SkillEvidence) -> tuple:
     """Build the SQL + params for an evidence upsert."""
-    sql = text(f"""
+    sql = jsonb_text(
+        f"""
         INSERT INTO {DB_SCHEMA}.skill_evidence
             (skill_id, source, success_count, failure_count, last_validated_at,
              positive_patterns, negative_patterns, known_breakages, updated_at)
@@ -188,7 +197,11 @@ def _build_evidence_upsert(skill_id: str, evidence: SkillEvidence) -> tuple:
             negative_patterns = EXCLUDED.negative_patterns,
             known_breakages = EXCLUDED.known_breakages,
             updated_at = now()
-    """)
+    """,
+        "positive_patterns",
+        "negative_patterns",
+        "known_breakages",
+    )
     params = {
         "skill_id": skill_id,
         "source": evidence.source,
@@ -229,8 +242,7 @@ class SkillStore:
     async def list_active(self) -> list[SkillSpec]:
         """Return all non-disabled, materialized skills."""
         sql = text(
-            f"SELECT {_SPEC_COLS} FROM {DB_SCHEMA}.skill_specs "
-            "WHERE disabled = false ORDER BY id"
+            f"SELECT {_SPEC_COLS} FROM {DB_SCHEMA}.skill_specs WHERE disabled = false ORDER BY id"
         )
         async with self._db_factory() as db:
             result = await db.execute(sql)
@@ -284,7 +296,8 @@ class SkillStore:
         session: AsyncSession | None = None,
     ) -> None:
         """Update evidence for an existing skill."""
-        sql = text(f"""
+        sql = jsonb_text(
+            f"""
             UPDATE {DB_SCHEMA}.skill_evidence SET
                 source = :source,
                 success_count = :success_count,
@@ -295,7 +308,11 @@ class SkillStore:
                 known_breakages = :known_breakages,
                 updated_at = now()
             WHERE skill_id = :skill_id
-        """)
+        """,
+            "positive_patterns",
+            "negative_patterns",
+            "known_breakages",
+        )
         params = {
             "skill_id": skill_id,
             "source": evidence.source,
@@ -315,9 +332,7 @@ class SkillStore:
 
     async def get_by_id(self, skill_id: str) -> SkillSpec | None:
         """Return a single skill spec by ID, or None."""
-        sql = text(
-            f"SELECT {_SPEC_COLS} FROM {DB_SCHEMA}.skill_specs WHERE id = :skill_id"
-        )
+        sql = text(f"SELECT {_SPEC_COLS} FROM {DB_SCHEMA}.skill_specs WHERE id = :skill_id")
         async with self._db_factory() as db:
             result = await db.execute(sql, {"skill_id": skill_id})
             row = result.first()
@@ -325,9 +340,7 @@ class SkillStore:
                 return None
             return _row_to_spec(row)
 
-    async def disable(
-        self, skill_id: str, *, session: AsyncSession | None = None
-    ) -> None:
+    async def disable(self, skill_id: str, *, session: AsyncSession | None = None) -> None:
         """Mark a skill as disabled (soft-delete)."""
         sql = text(
             f"UPDATE {DB_SCHEMA}.skill_specs SET disabled = true, updated_at = now() "
@@ -349,13 +362,16 @@ class SkillStore:
         session: AsyncSession | None = None,
     ) -> int:
         """Insert a new governance ledger entry (status='proposed'). Returns governance_version."""
-        sql = text(f"""
+        sql = jsonb_text(
+            f"""
             INSERT INTO {DB_SCHEMA}.skill_spec_versions
                 (skill_id, status, proposal, created_by)
             VALUES
                 (:skill_id, 'proposed', :proposal, :created_by)
             RETURNING governance_version
-        """)
+        """,
+            "proposal",
+        )
         params = {
             "skill_id": proposal.object_id,
             "proposal": {
@@ -393,15 +409,16 @@ class SkillStore:
                 return None
             return _row_to_proposal_record(row)
 
-    async def store_eval_result(
-        self, governance_version: int, result: GrowthEvalResult
-    ) -> None:
+    async def store_eval_result(self, governance_version: int, result: GrowthEvalResult) -> None:
         """Persist eval result to the governance ledger entry."""
-        sql = text(f"""
+        sql = jsonb_text(
+            f"""
             UPDATE {DB_SCHEMA}.skill_spec_versions SET
                 eval_result = :eval_result
             WHERE governance_version = :gv
-        """)
+        """,
+            "eval_result",
+        )
         eval_dict: dict[str, object] = {
             "passed": result.passed,
             "checks": result.checks,
