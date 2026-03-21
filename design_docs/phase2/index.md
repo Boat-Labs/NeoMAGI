@@ -11,13 +11,16 @@
 2. `design_docs/phase2/p2_m1_architecture.md`
    - `P2-M1`：显式成长、builder 治理、atomic tools / skill objects / work memory。
 
-3. `design_docs/phase2/p2_m2_architecture.md`
+3. `design_docs/phase2/p2_m1_user_test_guide.md`
+   - `P2-M1`：完成态用户测试方案，覆盖 WebChat 手工验证与 growth case 回放验证。
+
+4. `design_docs/phase2/p2_m2_architecture.md`
    - `P2-M2`：Procedure Runtime、多 agent runtime、handoff / steering / resume。
 
-4. `design_docs/phase2/p2_m3_architecture.md`
+5. `design_docs/phase2/p2_m3_architecture.md`
    - `P2-M3`：身份认证、用户连续性、记忆质量与 memory applications。
 
-5. `design_docs/phase2/p2_m4_architecture.md`
+6. `design_docs/phase2/p2_m4_architecture.md`
    - `P2-M4`：外部协作表面、Slack、浏览器/外部平台读写边界。
 
 ## 2. 跨阶段设计（按需）
