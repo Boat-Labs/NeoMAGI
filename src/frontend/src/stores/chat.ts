@@ -21,7 +21,7 @@ export interface ToolCall {
   callId: string
   toolName: string
   arguments: Record<string, unknown>
-  status: "running" | "complete" | "denied"
+  status: "running" | "complete" | "denied" | "aborted"
   deniedInfo?: {
     mode: string
     errorCode: string
@@ -427,7 +427,8 @@ export const useChatStore = create<ChatState>()(
                             ...m,
                             status: "complete" as const,
                             toolCalls: m.toolCalls?.map((tc) =>
-                              tc.status === "denied"
+                              tc.status === "denied" ||
+                              tc.status === "aborted"
                                 ? tc
                                 : { ...tc, status: "complete" as const },
                             ),
@@ -710,7 +711,7 @@ export const useChatStore = create<ChatState>()(
                             error: "Connection lost",
                             toolCalls: m.toolCalls?.map((tc) =>
                               tc.status === "running"
-                                ? { ...tc, status: "complete" as const }
+                                ? { ...tc, status: "aborted" as const }
                                 : tc,
                             ),
                           }

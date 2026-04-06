@@ -15,6 +15,7 @@ export function ToolCallIndicator({ toolCall }: ToolCallIndicatorProps) {
   const [open, setOpen] = useState(false)
   const isRunning = toolCall.status === "running"
   const isDenied = toolCall.status === "denied"
+  const isAborted = toolCall.status === "aborted"
   const hasArgs = Object.keys(toolCall.arguments).length > 0
   const hasDetails = hasArgs || isDenied
 
@@ -26,9 +27,11 @@ export function ToolCallIndicator({ toolCall }: ToolCallIndicatorProps) {
           "hover:bg-background/50",
           isDenied
             ? "text-red-500"
-            : isRunning
-              ? "text-muted-foreground"
-              : "text-muted-foreground/70"
+            : isAborted
+              ? "text-muted-foreground/70"
+              : isRunning
+                ? "text-muted-foreground"
+                : "text-muted-foreground/70"
         )}
       >
         {isDenied ? (
@@ -40,6 +43,16 @@ export function ToolCallIndicator({ toolCall }: ToolCallIndicatorProps) {
             strokeWidth={3}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        ) : isAborted ? (
+          <svg
+            className="h-3 w-3 text-muted-foreground"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={3}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01" />
           </svg>
         ) : isRunning ? (
           <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
@@ -57,9 +70,11 @@ export function ToolCallIndicator({ toolCall }: ToolCallIndicatorProps) {
         <span>
           {isDenied
             ? `${toolCall.toolName} denied`
-            : isRunning
-              ? `Calling ${toolCall.toolName}...`
-              : toolCall.toolName}
+            : isAborted
+              ? `${toolCall.toolName} interrupted`
+              : isRunning
+                ? `Calling ${toolCall.toolName}...`
+                : toolCall.toolName}
         </span>
         {hasDetails && (
           <svg

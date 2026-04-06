@@ -1163,8 +1163,8 @@ describe("connection loss recovers in-flight requests", () => {
     // Message transitioned to terminal error state
     expect(main.messages[0].status).toBe("error")
     expect(main.messages[0].error).toBe("Connection lost")
-    // Tool call transitioned to complete
-    expect(main.messages[0].toolCalls![0].status).toBe("complete")
+    // Tool call transitioned to aborted (not complete — it didn't succeed)
+    expect(main.messages[0].toolCalls![0].status).toBe("aborted")
   })
 
   it("reconnecting clears requestToSession and resets isStreaming", () => {
