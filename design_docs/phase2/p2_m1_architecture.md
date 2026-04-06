@@ -139,3 +139,26 @@
 - 至少一类新经验能先沉淀为 `skill object`，并在相似任务中优先复用。
 - 至少一类 growth case 能完成 propose -> eval -> apply 的闭环。
 - 失败时系统能回到上一个稳定状态。
+
+## 7. P2-M1 Post Works（P2-M2 前补充计划）
+
+以下内容不是原始 `P2-M1` 主线验收的一部分，而是 `P2-M1` closeout 后、`P2-M2` 开工前，为降低后续实现复杂度而追加的 post-works 规划。
+
+总览索引：
+
+- [`p2-m1-post-works_pre-p2-m2-session-concurrency-atomic-tools_2026-04-06_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works_pre-p2-m2-session-concurrency-atomic-tools_2026-04-06_draft.md)
+
+拆分计划：
+
+- [`p2-m1-post-works-p1_multi-session-threads_2026-04-06_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p1_multi-session-threads_2026-04-06_draft.md)
+  - 目标：补齐 Codex 风格左侧 `threads` rail，支持 multi-session 切换与后台运行完成信号
+- [`p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06_draft.md)
+  - 目标：在 tool interface 上同时引入 `is_read_only` 与 `is_concurrency_safe`，并实现同一 turn 内连续只读批次的有界并行
+- [`p2-m1-post-works-p3_atomic-coding-tools_2026-04-06_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p3_atomic-coding-tools_2026-04-06_draft.md)
+  - 目标：按风险分层补齐 coding atomic tools，先 `glob / grep`，再 `write_file / edit_file`，`bash` 作为条件性 follow-up
+
+当前收敛结论：
+
+- multi-session V1 采用左侧 `threads` rail，不做文件夹。
+- tool concurrency 采用双元数据，而不是只保留 `is_read_only`。
+- atomic tools 按三层落地，其中 `bash` 当前不作为第一轮硬验收项。
