@@ -140,3 +140,7 @@ reindex *ARGS:
 # Reconcile SOUL.md projection from DB
 reconcile:
     uv run python -m src.backend.cli reconcile
+
+# Show row counts for governance tables (skills, wrappers, soul)
+check-governance-tables:
+    uv run python -m src.backend.cli check-governance-tables

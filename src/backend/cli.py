@@ -6,6 +6,7 @@ Usage:
   python -m src.backend.cli reindex [--scope main]
   python -m src.backend.cli reset-user-db [--yes]
   python -m src.backend.cli reconcile
+  python -m src.backend.cli check-governance-tables
 """
 
 from __future__ import annotations
@@ -66,6 +67,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("reconcile", help="Reconcile SOUL.md projection from DB")
+
+    sub.add_parser(
+        "check-governance-tables",
+        help="Show row counts for governance tables (skills, wrappers, soul)",
+    )
 
     return parser
 
@@ -207,6 +213,43 @@ async def _run_reset_user_db(confirm: bool) -> int:
 
     logger.info("reset_user_db_done", database=db.name, schema=db.schema_)
     print(f"reset-user-db complete: rebuilt {target} from a blank schema")  # noqa: T201
+    return 0
+
+
+async def _run_check_governance_tables() -> int:
+    """Print row counts for all governance-related tables."""
+    from sqlalchemy import text
+
+    from src.config.settings import get_settings
+    from src.session.database import create_db_engine
+
+    settings = get_settings()
+    schema = settings.database.schema_
+    tables = [
+        "soul_versions",
+        "skill_specs",
+        "skill_evidence",
+        "skill_spec_versions",
+        "wrapper_tools",
+        "wrapper_tool_versions",
+    ]
+
+    engine = await create_db_engine(settings.database)
+    try:
+        print(  # noqa: T201
+            f"db={settings.database.name} host={settings.database.host} schema={schema}"
+        )
+        async with engine.connect() as conn:
+            for name in tables:
+                count = (
+                    await conn.execute(
+                        text(f"SELECT COUNT(*) FROM {schema}.{name}")
+                    )
+                ).scalar_one()
+                print(f"  {name}: {count}")  # noqa: T201
+    finally:
+        await engine.dispose()
+
     return 0
 
 
@@ -362,6 +405,22 @@ async def _run_init_soul(source: str | None) -> int:
         await engine.dispose()
 
 
+def _dispatch(args: argparse.Namespace) -> int:
+    """Map parsed CLI args to the corresponding async handler and return exit code."""
+    dispatch = {
+        "doctor": lambda: _run_doctor(deep=args.deep),
+        "init-soul": lambda: _run_init_soul(source=args.source),
+        "reindex": lambda: _run_reindex(scope_key=args.scope),
+        "reset-user-db": lambda: _run_reset_user_db(confirm=args.yes),
+        "reconcile": _run_reconcile,
+        "check-governance-tables": _run_check_governance_tables,
+    }
+    handler = dispatch.get(args.command)
+    if handler is None:
+        return 1
+    return asyncio.run(handler())
+
+
 def main() -> None:
     setup_logging(json_output=False)
     parser = _build_parser()
@@ -371,25 +430,7 @@ def main() -> None:
         parser.print_help()
         sys.exit(0)
 
-    if args.command == "doctor":
-        code = asyncio.run(_run_doctor(deep=args.deep))
-        sys.exit(code)
-
-    if args.command == "init-soul":
-        code = asyncio.run(_run_init_soul(source=args.source))
-        sys.exit(code)
-
-    if args.command == "reindex":
-        code = asyncio.run(_run_reindex(scope_key=args.scope))
-        sys.exit(code)
-
-    if args.command == "reset-user-db":
-        code = asyncio.run(_run_reset_user_db(confirm=args.yes))
-        sys.exit(code)
-
-    if args.command == "reconcile":
-        code = asyncio.run(_run_reconcile())
-        sys.exit(code)
+    sys.exit(_dispatch(args))
 
 
 if __name__ == "__main__":

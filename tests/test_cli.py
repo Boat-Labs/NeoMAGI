@@ -78,6 +78,11 @@ class TestCliParser:
         args = parser.parse_args(["reconcile"])
         assert args.command == "reconcile"
 
+    def test_check_governance_tables_subcommand(self) -> None:
+        parser = _build_parser()
+        args = parser.parse_args(["check-governance-tables"])
+        assert args.command == "check-governance-tables"
+
 
 class TestCliModule:
     def test_module_help(self) -> None:
@@ -146,6 +151,17 @@ class TestCliModule:
             timeout=10,
         )
         assert result.returncode == 0
+
+    def test_check_governance_tables_help(self) -> None:
+        """python -m src.backend.cli check-governance-tables --help should exit 0."""
+        result = subprocess.run(
+            [sys.executable, "-m", "src.backend.cli", "check-governance-tables", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0
+        assert "governance" in result.stdout.lower()
 
 
 def _make_async_cm(return_value):
@@ -445,6 +461,51 @@ class TestInitSoulCli:
         err = capsys.readouterr().err
         assert "differs from the requested source" in err
         mock_evolution.ensure_bootstrap.assert_not_called()
+
+
+class TestCheckGovernanceTablesCli:
+    @pytest.mark.asyncio
+    async def test_prints_all_table_counts(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """check-governance-tables should print counts for all 6 governance tables."""
+        from src.backend.cli import _run_check_governance_tables
+
+        mock_settings = MagicMock()
+        mock_db = MagicMock(host="localhost", schema_="neomagi")
+        mock_db.name = "neomagi"
+        mock_settings.database = mock_db
+
+        call_count = 0
+
+        mock_conn = AsyncMock()
+
+        async def track_execute(stmt):
+            nonlocal call_count
+            call_count += 1
+            return MagicMock(scalar_one=lambda: call_count * 10)
+
+        mock_conn.execute = track_execute
+
+        mock_engine = MagicMock()
+        mock_engine.connect = MagicMock(return_value=_make_async_cm(mock_conn))
+        mock_engine.dispose = AsyncMock()
+
+        with (
+            patch("src.config.settings.get_settings", return_value=mock_settings),
+            patch("src.session.database.create_db_engine", return_value=mock_engine),
+        ):
+            code = await _run_check_governance_tables()
+
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "db=neomagi" in out
+        assert "soul_versions:" in out
+        assert "skill_specs:" in out
+        assert "skill_spec_versions:" in out
+        assert "wrapper_tools:" in out
+        assert "wrapper_tool_versions:" in out
+        assert call_count == 6
 
 
 class TestReconcileCli:

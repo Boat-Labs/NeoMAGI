@@ -1,7 +1,7 @@
 # P2-M1 用户测试指导
 
-> 版本：P2-M1 完成态（含 post-review 修正）  
-> 日期：2026-03-20  
+> 版本：P2-M1 完成态（含 post-review 修正 + 验收实操反馈）  
+> 日期：2026-04-06  
 > 目标：指导用户验证 `P2-M1` 显式成长与 Builder 治理是否已完整落地。
 
 ## 0. 完成度结论
@@ -48,7 +48,29 @@
 
 建议顺序：先做 A 层，再做 B 层。
 
-## 3. 环境准备（一次性）
+## 3. 环境准备
+
+### 3.0 首次 vs 重新执行
+
+如果是**首次执行**，按 3.1~3.5 顺序走一遍。
+
+如果是**重新执行**（如中断多天后回来），建议先清空再重建：
+
+```bash
+# 确认 PG 容器正在运行
+podman start neomagi-pg
+
+# 清空 DB schema 并重建（会删除全部用户数据）
+just reset-user-db YES
+
+# 重置 workspace（清除残留的 SOUL.md、artifacts 等）
+rm -rf workspace && just init-workspace
+
+# 重新初始化 SOUL
+just init-soul
+```
+
+清空后从 Section 4 开始即可，不需要重复 3.1~3.3。
 
 ### 3.1 安装依赖
 
@@ -139,8 +161,18 @@ just dev-frontend
 
 说明：
 - 示例输入是建议文案，不要求逐字一致。
-- 预期关注“闭环是否发生”，不要求模型回答一字不差。
+- 预期关注”闭环是否发生”，不要求模型回答一字不差。
 - 当前会话固定为 `chat_safe`，这是预期行为，不是失败。
+
+### 用例依赖关系
+
+```
+T01 (独立)
+T02 (独立)
+T03 → T03b → T04 (链式依赖：rollback 需要至少 2 个版本)
+T05 (独立，建议在 T03 之后执行)
+T06 (独立)
+```
 
 ### T01 启动与基础对话
 
@@ -160,24 +192,12 @@ just dev-frontend
   - 若带 history，应看到最近版本链。
   - 工具调用成功，不报 `NOT_CONFIGURED`。
 
-### T03 `soul_propose` 提案并生效
+### T03 `soul_propose` 提案并生效（确定性 CLI 路径，推荐）
 
-- 示例输入：
-  - `请先调用 soul_status 了解当前版本，再调用 soul_propose。把你的默认回答方式调整为更适合我长期使用的风格：默认先给结论，再给不超过 3 条要点；信息不确定时先明确不确定，不要装作确定；涉及需要我执行的步骤时，优先给可直接复制的命令或操作步骤。`
-- 预期：
-  - 返回 `applied` 或 `rejected`。
-  - 若 `applied`，应给出新的 version。
-  - fresh workspace 下，首次成功 apply 很可能直接生成当前唯一的 active 版本（例如 `v1`）；这是正常现象。
-  - 再调用一次 `soul_status`，应能看到 active 版本与最近历史。
-  - 若返回 `rejected` 且原因是 `diff_sanity` / “差异检查失败”，通常表示模型虽然调用了 `soul_propose`，但构造出的 `new_content` 与当前 active SOUL 实际相同；这不应直接判为功能失败，而应改用更明确的新内容再试一次。
+验收目标是验证 propose → evaluate → apply 闭环存在，不是验证 LLM prompt engineering 的稳定性。
+推荐使用确定性 CLI 路径作为默认验证方式。
 
-说明：
-- `EvolutionEngine.evaluate()` 的第三个检查是 `diff_sanity`，要求 `new_content` 与当前 active version 不完全相同。
-- WebChat 当前没有“手填 tool arguments 表单”，因此仅靠自然语言让模型构造一份“完整且明确不同”的 `new_content`，稳定性不高。
-
-### T03-cli 确定性替代验证（推荐）
-
-若 T03 在 WebChat 中多次因 `diff_sanity` 被拒，可直接用下面的命令做确定性验证：
+执行：
 
 ```bash
 uv run python - <<'PY'
@@ -193,23 +213,23 @@ async def main():
     session_factory = make_session_factory(engine)
     evo = EvolutionEngine(session_factory, settings.workspace_dir, settings.memory)
 
-    soul_path = Path(settings.workspace_dir) / "SOUL.md"
-    current = soul_path.read_text(encoding="utf-8").strip()
-    new_content = current + "\n\n## Runtime Test Rule\n- 回答时先给一句结论，再给最多 3 条要点。\n"
+    soul_path = Path(settings.workspace_dir) / “SOUL.md”
+    current = soul_path.read_text(encoding=”utf-8”).strip()
+    new_content = current + “\n\n## Runtime Test Rule\n- 回答时先给一句结论，再给最多 3 条要点。\n”
 
     version = await evo.propose(
         SoulProposal(
-            intent="P2-M1 user test deterministic propose",
-            risk_notes="manual test",
-            diff_summary="append one explicit runtime rule",
+            intent=”P2-M1 user test deterministic propose”,
+            risk_notes=”manual test”,
+            diff_summary=”append one explicit runtime rule”,
             new_content=new_content,
         )
     )
     result = await evo.evaluate(version)
-    print({"version": version, "passed": result.passed, "summary": result.summary})
+    print({“version”: version, “passed”: result.passed, “summary”: result.summary})
     if result.passed:
         await evo.apply(version)
-        print({"applied": version})
+        print({“applied”: version})
 
     await engine.dispose()
 
@@ -221,6 +241,24 @@ PY
 - 输出中 `passed` 应为 `True`。
 - 若通过，应能看到 `applied` 版本号。
 - 之后再执行 `soul_status` 或数据库查询，应能看到新的 active version。
+
+### T03-webchat 可选体验验证（WebChat 路径）
+
+如果希望额外验证 WebChat 端的 propose 体验，可尝试以下方式。
+注意：此路径因 `diff_sanity` 检查对 LLM 构造内容的稳定性要求较高，**失败不应判为功能缺陷**。
+
+- 示例输入：
+  - `请先调用 soul_status 了解当前版本，再调用 soul_propose。把你的默认回答方式调整为更适合我长期使用的风格：默认先给结论，再给不超过 3 条要点；信息不确定时先明确不确定，不要装作确定；涉及需要我执行的步骤时，优先给可直接复制的命令或操作步骤。`
+- 预期：
+  - 返回 `applied` 或 `rejected`。
+  - 若 `applied`，应给出新的 version。
+  - fresh workspace 下，首次成功 apply 很可能直接生成当前唯一的 active 版本（例如 `v1`）；这是正常现象。
+  - 再调用一次 `soul_status`，应能看到 active 版本与最近历史。
+  - 若返回 `rejected` 且原因是 `diff_sanity` / “差异检查失败”，通常表示模型虽然调用了 `soul_propose`，但构造出的 `new_content` 与当前 active SOUL 实际相同；改用更明确的新内容再试。
+
+说明：
+- `EvolutionEngine.evaluate()` 的第三个检查是 `diff_sanity`，要求 `new_content` 与当前 active version 不完全相同。
+- WebChat 当前没有”手填 tool arguments 表单”，因此仅靠自然语言让模型构造一份”完整且明确不同”的 `new_content`，稳定性不高。
 
 ### T03b 生成第二个可回滚版本
 
@@ -250,43 +288,25 @@ PY
 - 预期：
   - assistant 正常回应，不需要显式暴露内部 proposal 细节。
   - 本轮结束后，后台应已尝试按治理路径创建新的 `skill_spec` proposal。
-- 可选终端验证：
+
+**必做验证**（教学闭环是 P2-M1 核心价值，不可跳过）：
+
+**步骤 1**：检查后端终端输出中是否有失败日志：
+
+在后端终端中搜索 `teaching_skill_proposal_failed`。如果出现，说明教学闭环在 proposal 阶段断裂，应视为失败并排查原因。
+
+**步骤 2**：检查 DB 中是否产生了新记录：
 
 ```bash
-uv run python - <<'PY'
-import asyncio
-from sqlalchemy import text
-from src.config import get_settings
-from src.session.database import create_db_engine
-
-async def main():
-    s = get_settings()
-    engine = await create_db_engine(s.database)
-    async with engine.connect() as conn:
-        rows = (
-            await conn.execute(
-                text(f"""
-                SELECT governance_version, skill_id, status, created_by, created_at
-                FROM {s.database.schema_}.skill_spec_versions
-                ORDER BY governance_version DESC
-                LIMIT 5
-                """)
-            )
-        ).fetchall()
-        print(
-            f"db={s.database.name} host={s.database.host} "
-            f"schema={s.database.schema_} rows={len(rows)}"
-        )
-        for row in rows:
-            print(tuple(row))
-    await engine.dispose()
-
-asyncio.run(main())
-PY
+just check-governance-tables
 ```
 
-应能看到最新 `skill_spec_versions` 记录，且 `created_by` 通常为 `user` 或治理链上的对应 actor。
-如果输出 `rows=0`，先确认你检查的是脚本打印出来的同一个 `db/schema`，不要手工连到别的库或 schema。
+应能看到 `skill_spec_versions` 中出现新记录（`rows > 0`），且 `created_by` 通常为 `user` 或治理链上的对应 actor。
+
+如果输出 `rows=0`：
+1. 先确认本轮输入包含明确教学信号（`记住这个方法`、`以后这类任务`、`remember this`、`from now on`）。
+2. 确认检查的是脚本打印出来的同一个 `db/schema`。
+3. 再检查后端日志中是否有 `teaching_skill_proposal_failed`。
 
 ### T06 会话仍保持 `chat_safe` 边界
 
@@ -299,9 +319,23 @@ PY
 
 ## 6. B 层：受控回放测试用例
 
-这一层用于验证 `P2-M1` 的关键闭环已经真实存在，而不是只在对话里“声称支持”。
+这一层用于验证 `P2-M1` 的关键闭环已经真实存在，而不是只在对话里”声称支持”。
+
+### 前置条件速查
+
+| 用例 | 需要 PG | 说明 |
+|------|---------|------|
+| T07 | **是** | skill runtime e2e，需要 skill_specs/skill_evidence 表 |
+| T08 | **是** | GC-1 集成，需要 skill governance 表 |
+| T09 | **是** | GC-2 集成，需要 wrapper_tools 表 |
+| T10 | 否 | builder work memory，使用临时目录和 mock |
+| T11 | 否 | wrapper tool 启动恢复，使用 mock store |
+
+建议顺序：先跑不需要 PG 的 T10/T11，再跑需要 PG 的 T07~T09。
 
 ### T07 Skill Runtime 最小闭环
+
+> 前置：PG running + migration done
 
 执行：
 
@@ -314,6 +348,8 @@ uv run pytest tests/integration/test_skill_runtime_e2e.py -q
 - 证明 `skill_spec` 的 `propose -> evaluate -> apply -> resolve -> project` 已完整存在。
 
 ### T08 `GC-1` Human-Taught Skill Reuse
+
+> 前置：PG running + migration done
 
 执行：
 
@@ -333,6 +369,8 @@ uv run pytest tests/growth/test_gc1_integration.py -q
 
 ### T09 `GC-2` Skill -> Wrapper Tool Promotion
 
+> 前置：PG running + migration done
+
 执行：
 
 ```bash
@@ -350,6 +388,8 @@ uv run pytest tests/growth/test_gc2_integration.py -q
 
 ### T10 Builder Work Memory 双层结构
 
+> 前置：无（使用临时目录和 mock）
+
 执行：
 
 ```bash
@@ -364,6 +404,8 @@ uv run pytest tests/builder/test_work_memory.py -q
   - `update_task_progress()` 能更新 artifact 与 bead comment
 
 ### T11 Wrapper Tool 启动恢复
+
+> 前置：无（使用 mock store）
 
 执行：
 
@@ -392,38 +434,10 @@ find workspace/artifacts -maxdepth 3 -type f | sort
 
 ### 7.2 skill / wrapper governance tables
 
-可选检查：
+执行：
 
 ```bash
-uv run python - <<'PY'
-import asyncio
-from sqlalchemy import text
-from src.config import get_settings
-from src.session.database import create_db_engine
-
-QUERIES = [
-    "skill_specs",
-    "skill_evidence",
-    "skill_spec_versions",
-    "wrapper_tools",
-    "wrapper_tool_versions",
-]
-
-async def main():
-    s = get_settings()
-    engine = await create_db_engine(s.database)
-    async with engine.connect() as conn:
-        for name in QUERIES:
-            count = (
-                await conn.execute(
-                    text(f"SELECT COUNT(*) FROM {s.database.schema_}.{name}")
-                )
-            ).scalar_one()
-            print(f"{name}: {count}")
-    await engine.dispose()
-
-asyncio.run(main())
-PY
+just check-governance-tables
 ```
 
 预期：
@@ -459,9 +473,7 @@ bd ready --json
   - `以后这类任务`
   - `remember this`
   - `from now on`
-- 数据库检查脚本必须使用 `create_db_engine(settings.database)` 与
-  `settings.database.schema_`；不要使用不存在的 `settings.database_url`
-  或 `settings.database.schema`
+- 使用 `just check-governance-tables` 检查，避免手写 SQL 脚本出错
 - 再确认后端日志中没有 `teaching_skill_proposal_failed`
 
 ### 9.2 `GC-1` / `GC-2` 测试通过，但 `workspace/artifacts/` 没看到新文件
@@ -483,7 +495,27 @@ find . -path '*growth_cases*' -o -path '*builder_runs*'
 - 这是当前产品边界，不是 `P2-M1` 未完成。
 - 当前 `SessionManager` 仍会将非 `chat_safe` mode fail-closed 到 `chat_safe`，属于既定行为。
 
-## 10. 退出与清理
+### 9.5 中断多天后回来，不确定上次跑到哪里
+
+- 查看 `dev_docs/logs/phase2/p2-m1_user_acceptance.md` 中的执行记录表。
+- 如果不确定 DB 状态是否干净，建议按 Section 3.0 重新开始。
+
+## 10. 执行记录
+
+每次执行验收测试时，在 `dev_docs/logs/phase2/p2-m1_user_acceptance.md` 中记录结果。
+模板已在该文件中提供，格式如下：
+
+```markdown
+| 用例 | 状态 | 日期 | 备注 |
+|------|------|------|------|
+| T01  | PASS | 4/06 | - |
+| T03  | PASS | 4/06 | 使用 CLI 路径 |
+| T05  | FAIL | 4/06 | rows=0, 后端无 teaching 日志 |
+```
+
+多次执行时，在同一文件中追加新的表格即可。
+
+## 11. 退出与清理
 
 - 停止前后端：对应终端 `Ctrl+C`
 - 若使用了测试容器，可执行：
