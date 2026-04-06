@@ -206,12 +206,19 @@ V1 不做 LLM 标题生成。
   - `tool_call`
   - `tool_denied`
   - `response`
+    - 注意：`response`（history 返回）不通过 `requestToSession` 路由，而是通过各 thread 的 `pendingHistoryId` 匹配
 - 重写 `_setConnectionStatus`，明确连接级故障下的 pending history 清理语义
+  - 连接级断线 / 重连是全局事件，应清理所有 thread 的 `pendingHistoryId`，而不是只清 active thread
 - 定义 `requestToSession` cleanup 规则
 - 新增多 session store tests
 - 新增后台完成信号测试
 - 新增刷新后恢复 thread 列表但不恢复 streaming 中间态的测试
 - 显式覆盖 tool calls 不跨 thread 污染
+
+### Slice Dependency
+
+- `Slice A` 先行
+- `Slice B` 与 `Slice C` 可并行
 
 ## Acceptance
 
