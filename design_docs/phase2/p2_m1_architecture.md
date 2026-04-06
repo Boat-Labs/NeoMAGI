@@ -150,7 +150,7 @@
 
 拆分计划：
 
-- [`p2-m1-post-works-p1_multi-session-threads_2026-04-06_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p1_multi-session-threads_2026-04-06_draft.md)
+- [`p2-m1-post-works-p1_multi-session-threads_2026-04-06.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p1_multi-session-threads_2026-04-06.md)
   - 目标：补齐 Codex 风格左侧 `threads` rail，支持 multi-session 切换与后台运行完成信号
 - [`p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06_draft.md)
   - 目标：在 tool interface 上同时引入 `is_read_only` 与 `is_concurrency_safe`，并实现同一 turn 内连续只读批次的有界并行

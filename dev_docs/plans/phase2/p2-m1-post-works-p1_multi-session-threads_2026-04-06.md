@@ -1,7 +1,7 @@
-# P2-M1 Post Works P1：Multi-Session Threads（草案）
+# P2-M1 Post Works P1：Multi-Session Threads
 
 - Date: 2026-04-06
-- Status: draft
+- Status: approved
 - Scope: 为 WebChat 增加 Codex 风格的左侧 `threads` rail，使用户可以创建、切换多个 session，并允许非当前激活 session 在后台继续运行
 - Basis:
   - [`src/frontend/src/stores/chat.ts`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/src/frontend/src/stores/chat.ts)
