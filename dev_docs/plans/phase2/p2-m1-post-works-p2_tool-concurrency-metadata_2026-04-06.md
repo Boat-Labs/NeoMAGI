@@ -3,10 +3,10 @@ doc_id: 019d648c-4aa8-7ada-9add-18fd3287aa88
 doc_id_format: uuidv7
 doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 ---
-# P2-M1 Post Works P2：Tool Concurrency Metadata（草案）
+# P2-M1 Post Works P2：Tool Concurrency Metadata
 
 - Date: 2026-04-06
-- Status: draft
+- Status: approved
 - Scope: 为 tool runtime 增加轻量、fail-closed 的并发元数据与同 turn 只读工具并行调度能力
 - Basis:
   - [`src/tools/base.py`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/src/tools/base.py)
