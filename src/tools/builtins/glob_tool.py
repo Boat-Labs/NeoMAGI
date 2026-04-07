@@ -125,14 +125,19 @@ class GlobTool(BaseTool):
         }
 
     def _glob_sync(self, search_dir: Path, pattern: str) -> list[Path]:
-        """Synchronous glob, runs in thread pool."""
-        results = sorted(search_dir.glob(pattern))
-        # Filter: only files, within workspace boundary
-        filtered = []
-        for p in results:
+        """Synchronous glob, runs in thread pool.
+
+        Iterates lazily, collects at most ``max_results + 1`` entries
+        (the extra one detects truncation), then sorts the bounded
+        result set.  No full materialization of the glob iterator.
+        """
+        cap = self._max_results + 1
+        filtered: list[Path] = []
+        for p in search_dir.glob(pattern):
             resolved = p.resolve()
             if resolved.is_file() and resolved.is_relative_to(self._workspace_dir):
                 filtered.append(p)
-            if len(filtered) > self._max_results:
-                break
+                if len(filtered) >= cap:
+                    break
+        filtered.sort()
         return filtered

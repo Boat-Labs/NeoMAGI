@@ -404,3 +404,75 @@ class TestEditFileIntegration:
         )
         assert edit_result["ok"] is True
         assert (workspace / "existing.txt").read_text(encoding="utf-8") == "goodbye world\n"
+
+
+# ========== Boolean Coercion Tests ==========
+
+
+class TestBooleanCoercion:
+    """Verify that string "false"/"true" are handled strictly, not by truthiness."""
+
+    @pytest.mark.asyncio()
+    async def test_overwrite_string_false_does_not_overwrite(
+        self, write_tool, workspace, ctx
+    ):
+        """overwrite: "false" (string) must NOT allow overwrite."""
+        result = await write_tool.execute(
+            {
+                "file_path": str(workspace / "existing.txt"),
+                "content": "evil",
+                "overwrite": "false",
+            },
+            ctx,
+        )
+        assert result["error_code"] == "FILE_EXISTS"
+
+    @pytest.mark.asyncio()
+    async def test_overwrite_string_true_allows_overwrite(
+        self, write_tool, workspace, read_state_store, ctx
+    ):
+        _record_full_read(read_state_store, workspace, "existing.txt")
+        result = await write_tool.execute(
+            {
+                "file_path": str(workspace / "existing.txt"),
+                "content": "ok",
+                "overwrite": "true",
+            },
+            ctx,
+        )
+        assert result["ok"] is True
+        assert result["operation"] == "update"
+
+    @pytest.mark.asyncio()
+    async def test_replace_all_string_false_rejects_multi_match(
+        self, edit_tool, workspace, read_state_store, ctx
+    ):
+        """replace_all: "false" (string) must NOT replace all."""
+        _record_full_read(read_state_store, workspace, "multi.txt")
+        result = await edit_tool.execute(
+            {
+                "file_path": str(workspace / "multi.txt"),
+                "old_string": "line1",
+                "new_string": "x",
+                "replace_all": "false",
+            },
+            ctx,
+        )
+        assert result["error_code"] == "MULTIPLE_MATCHES"
+
+    @pytest.mark.asyncio()
+    async def test_replace_all_string_true_replaces_all(
+        self, edit_tool, workspace, read_state_store, ctx
+    ):
+        _record_full_read(read_state_store, workspace, "multi.txt")
+        result = await edit_tool.execute(
+            {
+                "file_path": str(workspace / "multi.txt"),
+                "old_string": "line1",
+                "new_string": "X",
+                "replace_all": "true",
+            },
+            ctx,
+        )
+        assert result["ok"] is True
+        assert result["replacements"] == 2

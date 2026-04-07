@@ -82,15 +82,11 @@ export interface SessionSetModeParams {
   mode: "chat_safe" | "coding"
 }
 
-// === Server → Client: session.set_mode response ===
-
-export interface SessionModeResponseMessage {
-  type: "response"
-  id: RequestId
-  data: {
-    session_id: string
-    mode: string
-  }
+// session.set_mode response shares type:"response" with ResponseMessage.
+// Routing distinguishes by checking whether data contains "mode".
+export interface SessionModeResponseData {
+  session_id: string
+  mode: string
 }
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting"

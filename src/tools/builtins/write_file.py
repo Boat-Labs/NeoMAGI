@@ -26,6 +26,20 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
+def _coerce_bool(value: object) -> bool:
+    """Strict boolean coercion for tool arguments.
+
+    Only Python ``True`` or the string ``"true"`` (case-insensitive) yield
+    ``True``.  Everything else — including truthy strings like ``"false"``
+    — yields ``False``.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == "true"
+    return False
+
+
 class WriteFileTool(BaseTool):
     """Write or create a text/code file within the workspace."""
 
@@ -90,7 +104,7 @@ class WriteFileTool(BaseTool):
     async def execute(self, arguments: dict, context: ToolContext | None = None) -> dict:
         raw_path = arguments.get("file_path", "")
         content = arguments.get("content")
-        overwrite = arguments.get("overwrite", False)
+        overwrite = _coerce_bool(arguments.get("overwrite", False))
 
         if content is None:
             return {"error_code": "INVALID_ARGS", "message": "content is required."}

@@ -7,6 +7,8 @@ import type {
   ServerMessage,
   ChatSendParams,
   HistoryMessage,
+  SessionSetModeParams,
+  SessionModeResponseData,
 } from "@/types/rpc"
 
 // Error codes considered non-recoverable (persistent toast)
@@ -40,10 +42,14 @@ export interface ChatMessage {
   toolCalls?: ToolCall[]
 }
 
+export type SessionMode = "chat_safe" | "coding"
+
 export interface SessionViewState {
   sessionId: string
+  mode: SessionMode
   messages: ChatMessage[]
   pendingHistoryId: string | null
+  pendingModeRequestId: string | null
   isHistoryLoading: boolean
   isStreaming: boolean
   lastActivityAt: number
@@ -64,6 +70,7 @@ export interface ChatState {
   connect: (url: string) => void
   disconnect: () => void
   sendMessage: (content: string) => boolean
+  setMode: (mode: SessionMode) => void
   loadHistory: (sessionId?: string) => void
   createThread: () => void
   switchThread: (sessionId: string) => void
@@ -79,8 +86,10 @@ export function createSessionViewState(
 ): SessionViewState {
   return {
     sessionId,
+    mode: "chat_safe",
     messages: [],
     pendingHistoryId: null,
+    pendingModeRequestId: null,
     isHistoryLoading: false,
     isStreaming: false,
     lastActivityAt: Date.now(),
@@ -358,6 +367,31 @@ export const useChatStore = create<ChatState>()(
           return true
         },
 
+        // ── Mode switching ──
+
+        setMode: (mode: SessionMode) => {
+          if (!wsClient?.isConnected) return
+          const state = get()
+          const sessionId = state.activeSessionId
+
+          const requestId = crypto.randomUUID()
+          updateSession(
+            sessionId,
+            () => ({ pendingModeRequestId: requestId }),
+            "setModePending",
+          )
+
+          wsClient.send({
+            type: "request",
+            id: requestId,
+            method: "session.set_mode",
+            params: {
+              session_id: sessionId,
+              mode,
+            } satisfies SessionSetModeParams,
+          })
+        },
+
         // ── Thread management ──
 
         createThread: () => {
@@ -614,6 +648,29 @@ export const useChatStore = create<ChatState>()(
             }
 
             case "response": {
+              // Mode response — route by pendingModeRequestId
+              const modeData = message.data as
+                | SessionModeResponseData
+                | undefined
+              if (modeData && "mode" in modeData) {
+                for (const [sid, session] of Object.entries(
+                  state.sessionsById,
+                )) {
+                  if (session.pendingModeRequestId === message.id) {
+                    updateSession(
+                      sid,
+                      () => ({
+                        mode: modeData.mode as SessionMode,
+                        pendingModeRequestId: null,
+                      }),
+                      "setModeComplete",
+                    )
+                    break
+                  }
+                }
+                break
+              }
+
               // History response — route by pendingHistoryId
               let targetSessionId: string | null = null
               for (const [sid, session] of Object.entries(

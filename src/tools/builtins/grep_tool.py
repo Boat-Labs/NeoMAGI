@@ -151,11 +151,17 @@ class GrepTool(BaseTool):
     def _grep_sync(
         self, search_dir: Path, regex: re.Pattern, file_glob: str
     ) -> list[dict]:
-        """Synchronous grep, runs in thread pool."""
+        """Synchronous grep, runs in thread pool.
+
+        Iterates the glob lazily and collects at most ``max_results + 1``
+        matching lines.  File enumeration order is filesystem-dependent;
+        no full sort of the glob iterator.
+        """
+        cap = self._max_results + 1
         results: list[dict] = []
 
-        for file_path in sorted(search_dir.glob(file_glob)):
-            if len(results) > self._max_results:
+        for file_path in search_dir.glob(file_glob):
+            if len(results) >= cap:
                 break
             resolved = file_path.resolve()
             if not resolved.is_file():
@@ -181,7 +187,7 @@ class GrepTool(BaseTool):
                         "line": line_no,
                         "content": display_line,
                     })
-                    if len(results) > self._max_results:
+                    if len(results) >= cap:
                         break
 
         return results

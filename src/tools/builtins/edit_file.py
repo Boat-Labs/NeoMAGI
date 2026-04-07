@@ -25,6 +25,20 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
+def _coerce_bool(value: object) -> bool:
+    """Strict boolean coercion for tool arguments.
+
+    Only Python ``True`` or the string ``"true"`` (case-insensitive) yield
+    ``True``.  Everything else — including truthy strings like ``"false"``
+    — yields ``False``.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == "true"
+    return False
+
+
 class EditFileTool(BaseTool):
     """Edit a file via exact string replacement within the workspace."""
 
@@ -96,7 +110,7 @@ class EditFileTool(BaseTool):
         raw_path = arguments.get("file_path", "")
         old_string = arguments.get("old_string")
         new_string = arguments.get("new_string")
-        replace_all = arguments.get("replace_all", False)
+        replace_all = _coerce_bool(arguments.get("replace_all", False))
 
         if old_string is None or not isinstance(old_string, str):
             return {"error_code": "INVALID_ARGS", "message": "old_string must be a string."}
