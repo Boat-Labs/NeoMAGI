@@ -108,7 +108,9 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - `read_file` V1 只支持 text/code 文件。
 - 输入支持 `file_path`、`offset`、`limit`；默认限制输出，返回 `total_lines`、实际 range、`truncated` 标记。
 - V1 只支持 UTF-8。非 UTF-8 返回明确错误，不做 encoding detection。
-- V1 不要求 line-ending detection / roundtrip；实现不得主动归一化未触碰内容的 line ending。
+- V1 不要求 line-ending detection / roundtrip；但文件读写路径不得使用会隐式转换换行符的默认 text mode。
+- 实现应使用 `open(..., encoding="utf-8", newline="")` 或 binary read/write + 显式 UTF-8 decode/encode，避免 Python universal newline mode 静默把 CRLF 归一化为 LF。
+- 这不要求 V1 检测 LF / CRLF / mixed 风格，也不要求自动修复调用方传入的新内容；只要求 I/O 层不隐式改写未触碰内容。
 
 #### Write / Edit Semantics
 
@@ -282,7 +284,8 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - 更新 `read_file` 为 text/code file reader：`file_path`、`offset`、`limit`、输出截断、process-local read state tracking。
 - V1 同时接受既有 `path` alias 和新 `file_path`，内部统一 canonicalize；schema / description 应推荐 `file_path`。
 - 返回 canonical `file_path`、`relative_path`、`total_lines`、实际 range、`truncated`。
-- read state V1 只要求 `mtime_ns + size + read_scope + truncated`，不要求 `content_hash`、encoding detection 或 line-ending detection。
+- read state V1 的 staleness check 只要求 `mtime_ns + size + read_scope + truncated`；完整 read state record 仍按 Contract 字段实现：`session_id`、`file_path`、`relative_path`、`mtime_ns`、`size`、`read_scope`、`truncated`、`read_at`。
+- 不要求 `content_hash`、encoding detection 或 line-ending detection。
 - 补齐 `read_file` schema / return shape / workspace boundary / partial read tests。
 - 不默认改 `read_file.is_concurrency_safe`；若要改，必须同 slice 完成非阻塞读取改造和测试更新。
 
