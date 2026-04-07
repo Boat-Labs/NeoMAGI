@@ -161,6 +161,7 @@ async def _truncate_integration_tables(factory) -> None:
                 "skill_specs",
                 "wrapper_tool_versions",
                 "wrapper_tools",
+                "active_procedures",
             ]
             if t in existing
         ]

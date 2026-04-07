@@ -29,6 +29,7 @@ from src.session.scope_resolver import SessionIdentity, resolve_scope_key
 from src.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
+    from src.procedures.runtime import ProcedureRuntime
     from src.skills.projector import SkillProjector
     from src.skills.resolver import SkillResolver
 
@@ -64,6 +65,7 @@ class AgentLoop:
         skill_resolver: SkillResolver | None = None,
         skill_projector: SkillProjector | None = None,
         skill_learner: object | None = None,
+        procedure_runtime: ProcedureRuntime | None = None,
     ) -> None:
         self._model_client = model_client
         self._session_manager = session_manager
@@ -71,9 +73,7 @@ class AgentLoop:
         self._memory_settings = memory_settings
         self._memory_searcher = memory_searcher
         self._prompt_builder = PromptBuilder(
-            workspace_dir,
-            tool_registry=tool_registry,
-            memory_settings=memory_settings,
+            workspace_dir, tool_registry=tool_registry, memory_settings=memory_settings,
         )
         self._tool_registry = tool_registry
         self._model = model
@@ -85,10 +85,10 @@ class AgentLoop:
         self._evolution_engine = evolution_engine
         self._bootstrap_done = False
         self._contract = load_contract(workspace_dir)
-        # ── skill runtime (P2-M1b-P3) ──
         self._skill_resolver = skill_resolver
         self._skill_projector = skill_projector
-        self._skill_learner = skill_learner  # P4 will implement SkillLearner
+        self._skill_learner = skill_learner
+        self._procedure_runtime = procedure_runtime
         if memory_settings is not None:
             self._memory_writer = MemoryWriter(workspace_dir, memory_settings)
         if compaction_settings is not None:

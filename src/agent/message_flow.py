@@ -41,10 +41,16 @@ class RequestState:
     skill_view: Any = None  # ResolvedSkillView | None
     teaching_intent: bool = False
     accumulated_failure_signals: list = None  # type: ignore[assignment]
+    # ── procedure runtime fields (P2-M2a) ──
+    active_procedure: Any = None  # ActiveProcedure | None
+    procedure_view: Any = None  # ProcedureView | None
+    procedure_action_map: dict = None  # type: ignore[assignment]  # action_id -> ActionSpec
 
     def __post_init__(self) -> None:
         if self.accumulated_failure_signals is None:
             self.accumulated_failure_signals = []
+        if self.procedure_action_map is None:
+            self.procedure_action_map = {}
 
 
 @dataclass
@@ -106,12 +112,13 @@ async def _initialize_request_state(
     loop._contract = maybe_refresh_contract(loop._contract, loop._workspace_dir)
 
     skill_result = await _resolve_skills_for_request(loop, content, mode, identity)
+    procedure_result = await _resolve_procedure_for_request(loop, session_id, mode)
 
     return _assemble_request_state(
         loop, session_id, lock_token, mode, scope_key, user_msg.seq,
         tools_schema, tools_schema_list,
         last_compaction_seq, compacted_context, recall_results,
-        skill_result,
+        skill_result, procedure_result,
     )
 
 
@@ -128,32 +135,47 @@ def _assemble_request_state(
     compacted_context: str | None,
     recall_results: list[Any],
     skill_result: tuple[Any, tuple, Any, bool],
+    procedure_result: tuple[Any, Any, dict] | None = None,
 ) -> RequestState:
     """Build the final RequestState from pre-resolved components."""
     task_frame, resolved_skills, skill_view, teaching_intent = skill_result
+    active_procedure, procedure_view, procedure_action_map = (
+        procedure_result if procedure_result else (None, None, {})
+    )
+    tools_schema, tools_schema_list = _merge_procedure_schemas(
+        loop, tools_schema, tools_schema_list, procedure_action_map,
+    )
     system_prompt = _build_system_prompt(
-        loop, session_id, mode, compacted_context, scope_key, recall_results, skill_view,
+        loop, session_id, mode, compacted_context, scope_key, recall_results,
+        skill_view, procedure_view,
     )
     max_compactions = loop._settings.max_compactions_per_request if loop._settings else 2
     return RequestState(
-        session_id=session_id,
-        lock_token=lock_token,
-        mode=mode,
-        scope_key=scope_key,
-        current_user_seq=current_user_seq,
-        tools_schema=tools_schema,
-        tools_schema_list=tools_schema_list,
-        compaction_count=0,
-        max_compactions=max_compactions,
-        last_compaction_seq=last_compaction_seq,
-        compacted_context=compacted_context,
-        recall_results=recall_results,
-        system_prompt=system_prompt,
-        task_frame=task_frame,
-        resolved_skills=resolved_skills,
-        skill_view=skill_view,
-        teaching_intent=teaching_intent,
+        session_id=session_id, lock_token=lock_token, mode=mode,
+        scope_key=scope_key, current_user_seq=current_user_seq,
+        tools_schema=tools_schema, tools_schema_list=tools_schema_list,
+        compaction_count=0, max_compactions=max_compactions,
+        last_compaction_seq=last_compaction_seq, compacted_context=compacted_context,
+        recall_results=recall_results, system_prompt=system_prompt,
+        task_frame=task_frame, resolved_skills=resolved_skills,
+        skill_view=skill_view, teaching_intent=teaching_intent,
+        active_procedure=active_procedure, procedure_view=procedure_view,
+        procedure_action_map=procedure_action_map,
     )
+
+
+def _merge_procedure_schemas(
+    loop: AgentLoop,
+    tools_schema: list[dict[str, Any]] | None,
+    tools_schema_list: list[dict[str, Any]],
+    procedure_action_map: dict,
+) -> tuple[list[dict[str, Any]] | None, list[dict[str, Any]]]:
+    """Merge procedure virtual action schemas into tools schema."""
+    if not procedure_action_map or tools_schema is None:
+        return tools_schema, tools_schema_list
+    virtual_schemas = _build_virtual_action_schemas(loop, procedure_action_map)
+    merged = tools_schema + virtual_schemas
+    return merged, merged
 
 
 async def _resolve_skills_for_request(
@@ -187,6 +209,25 @@ async def _resolve_skills_for_request(
     resolved_skills = tuple(spec for spec, _ in candidates) if candidates else ()
     teaching_intent = _detect_teaching_intent(content)
     return task_frame, resolved_skills, skill_view, teaching_intent
+
+
+async def _resolve_procedure_for_request(
+    loop: AgentLoop, session_id: str, mode: Any,
+) -> tuple[Any, Any, dict] | None:
+    from src.agent.procedure_bridge import resolve_procedure_for_request
+    return await resolve_procedure_for_request(loop, session_id, mode)
+
+
+def _build_virtual_action_schemas(loop: AgentLoop, action_map: dict) -> list[dict[str, Any]]:
+    from src.agent.procedure_bridge import build_virtual_action_schemas
+    return build_virtual_action_schemas(loop, action_map)
+
+
+async def _rebuild_procedure_checkpoint(loop: AgentLoop, state: RequestState) -> None:
+    from src.agent.procedure_bridge import rebuild_procedure_checkpoint
+    await rebuild_procedure_checkpoint(
+        loop, state, _build_system_prompt, _resolve_tools_schema, _merge_procedure_schemas,
+    )
 
 
 async def _run_iteration_loop(
@@ -337,6 +378,7 @@ def _apply_compaction_result(loop: AgentLoop, state: RequestState, result: Any) 
         state.scope_key,
         state.recall_results,
         state.skill_view,
+        state.procedure_view,
     )
 
 
@@ -405,43 +447,32 @@ async def _handle_tool_calls(
     guard_state: GuardCheckResult,
 ) -> Any:
     await loop._session_manager.append_message(
-        state.session_id,
-        "assistant",
-        collected_text,
+        state.session_id, "assistant", collected_text,
         tool_calls=_tool_calls_payload(tool_calls_result),
         lock_token=state.lock_token,
     )
-    groups = _build_execution_groups(tool_calls_result, loop._tool_registry)
+    action_ids = frozenset(state.procedure_action_map) if state.procedure_action_map else None
+    groups = _build_execution_groups(tool_calls_result, loop._tool_registry, action_ids)
     for group in groups:
-        # Phase 1: yield ToolCallInfo for all tools BEFORE execution
         for tc in group.tool_calls:
             parsed_args = _log_parse_result(tc)
-            yield ToolCallInfo(
-                tool_name=tc["name"], arguments=parsed_args, call_id=tc["id"],
-            )
-        # Phase 2: execute group (serial or parallel)
+            yield ToolCallInfo(tool_name=tc["name"], arguments=parsed_args, call_id=tc["id"])
         outcomes = await _execute_group(
             loop, state, group, guard_state,
             session_id=state.session_id, iteration=iteration,
         )
-        # Phase 3: emit ToolDenied, merge failure signals, append transcript in order
         for outcome in outcomes:
             if outcome.denied_event is not None:
                 yield outcome.denied_event
             if outcome.failure_signal is not None:
                 state.accumulated_failure_signals.append(outcome.failure_signal)
             await loop._session_manager.append_message(
-                state.session_id,
-                "tool",
-                json.dumps(outcome.result),
-                tool_call_id=outcome.tool_call["id"],
-                lock_token=state.lock_token,
+                state.session_id, "tool", json.dumps(outcome.result),
+                tool_call_id=outcome.tool_call["id"], lock_token=state.lock_token,
             )
     _agent_logger().info(
-        "tool_call_iteration",
-        iteration=iteration + 1,
-        tools_called=len(tool_calls_result),
-        session_id=state.session_id,
+        "tool_call_iteration", iteration=iteration + 1,
+        tools_called=len(tool_calls_result), session_id=state.session_id,
     )
 
 
@@ -493,6 +524,7 @@ def _build_system_prompt(
     scope_key: str,
     recall_results: list[Any],
     skill_view: Any = None,
+    procedure_view: Any = None,
 ) -> str:
     return loop._prompt_builder.build(
         session_id,
@@ -501,6 +533,7 @@ def _build_system_prompt(
         scope_key=scope_key,
         recall_results=recall_results,
         skill_view=skill_view,
+        procedure_view=procedure_view,
     )
 
 

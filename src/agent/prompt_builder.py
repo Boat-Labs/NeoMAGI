@@ -12,6 +12,7 @@ from src.tools.base import ToolMode
 if TYPE_CHECKING:
     from src.config.settings import MemorySettings
     from src.memory.searcher import MemorySearchResult
+    from src.procedures.types import ProcedureView
     from src.skills.types import ResolvedSkillView
     from src.tools.registry import ToolRegistry
 
@@ -56,6 +57,7 @@ class PromptBuilder:
         recent_messages: list[str] | None = None,
         recall_results: list[MemorySearchResult] | None = None,
         skill_view: ResolvedSkillView | None = None,
+        procedure_view: ProcedureView | None = None,
     ) -> str:
         """Build the complete system prompt by concatenating all non-empty layers.
 
@@ -68,8 +70,9 @@ class PromptBuilder:
                          in AgentLoop, results passed via recall_results).
         recall_results: pre-fetched memory search results from AgentLoop.
         skill_view: resolved skill delta projected by SkillProjector.
+        procedure_view: active procedure projection (P2-M2a).
 
-        Layer physical order: Safety -> Skills -> Workspace context.
+        Layer physical order: Safety -> Skills -> Procedure -> Workspace context.
         Semantic authority: Safety > AGENTS.md > USER.md > skill delta
                             > SOUL.md > IDENTITY.md
         Skill delta must not override AGENTS.md or USER.md directives.
@@ -79,6 +82,7 @@ class PromptBuilder:
             self._layer_tooling(mode),
             self._layer_safety(mode),
             self._layer_skills(skill_view),
+            self._layer_procedure(procedure_view),
             self._layer_workspace(session_id, scope_key=scope_key),
             self._layer_compacted_context(compacted_context),
             self._layer_memory_recall(recall_results=recall_results),
@@ -139,6 +143,32 @@ class PromptBuilder:
         lines = ["## Skill Experience", ""]
         for delta in skill_view.llm_delta:
             lines.append(f"- {delta}")
+        return "\n".join(lines)
+
+    def _layer_procedure(self, procedure_view: ProcedureView | None = None) -> str:
+        """Generate active procedure layer from ProcedureView.
+
+        Only injects current checkpoint: id, state, allowed actions,
+        and soft policies. Does NOT include full state graph or guard code.
+        """
+        if procedure_view is None:
+            return ""
+        lines = [
+            "## Active Procedure",
+            "",
+            f"- **id**: {procedure_view.id} (v{procedure_view.version})",
+            f"- **summary**: {procedure_view.summary}",
+            f"- **state**: {procedure_view.state}",
+            f"- **revision**: {procedure_view.revision}",
+        ]
+        if procedure_view.allowed_actions:
+            actions_str = ", ".join(procedure_view.allowed_actions)
+            lines.append(f"- **allowed actions**: {actions_str}")
+        else:
+            lines.append("- **allowed actions**: (none — terminal state)")
+        if procedure_view.soft_policies:
+            for policy in procedure_view.soft_policies:
+                lines.append(f"- *policy*: {policy}")
         return "\n".join(lines)
 
     def _layer_workspace(self, session_id: str, *, scope_key: str = "main") -> str:

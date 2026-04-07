@@ -28,6 +28,12 @@ _GUARD_DENY_CODES = frozenset({
     "MODE_DENIED",
 })
 
+# Procedure error codes that represent guard denials, not tool failures.
+_PROCEDURE_DENY_CODES = frozenset({
+    "PROCEDURE_ACTION_DENIED",
+    "PROCEDURE_CONFLICT",
+})
+
 
 @dataclass
 class _ExecutionGroup:
@@ -56,19 +62,22 @@ class _ToolOutcome:
 def _build_execution_groups(
     tool_calls: list[dict[str, str]],
     registry: Any,
+    procedure_action_ids: frozenset[str] | None = None,
 ) -> list[_ExecutionGroup]:
     """Split tool calls into execution groups.
 
     Consecutive tools that are both read_only AND concurrency_safe form a
     parallel group.  Any other tool acts as a barrier that flushes the
     current parallel group and executes alone.
+
+    Procedure virtual actions are always barriers (P2-M2a D4).
     """
     groups: list[_ExecutionGroup] = []
     pending: list[dict[str, str]] = []
     pending_start = 0
 
     for i, tc in enumerate(tool_calls):
-        if _is_parallel_eligible(tc["name"], registry):
+        if _is_parallel_eligible(tc["name"], registry, procedure_action_ids):
             if not pending:
                 pending_start = i
             pending.append(tc)
@@ -87,8 +96,17 @@ def _build_execution_groups(
     return groups
 
 
-def _is_parallel_eligible(tool_name: str, registry: Any) -> bool:
-    """Return True only if the tool declares both read_only and concurrency_safe."""
+def _is_parallel_eligible(
+    tool_name: str,
+    registry: Any,
+    procedure_action_ids: frozenset[str] | None = None,
+) -> bool:
+    """Return True only if the tool declares both read_only and concurrency_safe.
+
+    Procedure virtual actions are ALWAYS barriers (never parallel).
+    """
+    if procedure_action_ids and tool_name in procedure_action_ids:
+        return False
     if registry is None:
         return False
     tool = registry.get(tool_name)
@@ -146,6 +164,10 @@ async def _run_single_tool(
     guard_state: GuardCheckResult,
 ) -> _ToolOutcome:
     """Execute one tool call and return an outcome without side effects."""
+    # ── Procedure action routing (P2-M2a) ──
+    if state.procedure_action_map and tool_call["name"] in state.procedure_action_map:
+        return await _run_procedure_action(loop, state, tool_call, guard_state)
+
     denial = _mode_denial(
         loop._tool_registry, state.mode, state.session_id, tool_call,
     )
@@ -176,6 +198,58 @@ async def _run_single_tool(
         result=result,
         failure_signal=failure_signal,
     )
+
+
+async def _run_procedure_action(
+    loop: Any,
+    state: Any,
+    tool_call: dict[str, str],
+    guard_state: GuardCheckResult,
+) -> _ToolOutcome:
+    """Route a virtual action tool call to ProcedureRuntime.apply_action()."""
+    from src.tools.context import ToolContext
+
+    action_id = tool_call["name"]
+    active = state.active_procedure
+    if active is None or loop._procedure_runtime is None:
+        return _ToolOutcome(tool_call=tool_call, result={
+            "ok": False, "error_code": "PROCEDURE_UNKNOWN",
+            "message": "No active procedure for this session",
+        })
+
+    tool_context = ToolContext(scope_key=state.scope_key, session_id=state.session_id)
+    result = await loop._procedure_runtime.apply_action(
+        instance_id=active.instance_id,
+        action_id=action_id,
+        args_json=tool_call["arguments"],
+        expected_revision=active.revision,
+        tool_context=tool_context,
+        guard_state=guard_state,
+        mode=state.mode,
+    )
+
+    if isinstance(result, dict) and result.get("ok", False):
+        await _refresh_procedure_state(loop, state)
+
+    failure_signal: str | None = None
+    if isinstance(result, dict) and not result.get("ok", True):
+        error_code = result.get("error_code", "")
+        if error_code in _PROCEDURE_DENY_CODES:
+            failure_signal = f"guard_denied:{action_id}"
+        else:
+            failure_signal = f"tool_failure:{action_id}"
+    return _ToolOutcome(tool_call=tool_call, result=result, failure_signal=failure_signal)
+
+
+async def _refresh_procedure_state(loop: Any, state: Any) -> None:
+    """Refresh procedure checkpoint, system prompt, and tool schema.
+
+    Called after a successful procedure action to ensure the next model
+    iteration sees the updated state, allowed actions, and prompt view.
+    """
+    from src.agent.message_flow import _rebuild_procedure_checkpoint
+
+    await _rebuild_procedure_checkpoint(loop, state)
 
 
 # ---------------------------------------------------------------------------

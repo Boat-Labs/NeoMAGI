@@ -43,6 +43,7 @@ async def ensure_schema(engine: AsyncEngine, schema: str = DB_SCHEMA) -> None:
         await _add_memory_entry_columns(conn, schema)
         await _create_search_trigger(conn, schema)
         await _create_skill_tables(conn, schema)
+        await _create_procedure_tables(conn, schema)
 
     logger.info("db_schema_ensured", schema=schema)
 
@@ -165,6 +166,39 @@ def _skill_table_ddl(schema: str) -> list[str]:
             ON {schema}.skill_spec_versions (skill_id)""",
         f"""CREATE INDEX IF NOT EXISTS idx_skill_spec_versions_status
             ON {schema}.skill_spec_versions (status)""",
+    ]
+
+
+async def _create_procedure_tables(conn, schema: str) -> None:
+    """Create active_procedures table (IF NOT EXISTS) for fresh-DB startup path.
+
+    Normally created by Alembic migration c0d1e2f3a4b5.
+    """
+    for ddl in _procedure_table_ddl(schema):
+        await conn.execute(text(ddl))
+
+
+def _procedure_table_ddl(schema: str) -> list[str]:
+    """Return idempotent DDL for the active_procedures table."""
+    return [
+        f"""CREATE TABLE IF NOT EXISTS {schema}.active_procedures (
+            instance_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            spec_id TEXT NOT NULL,
+            spec_version INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            context JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            execution_metadata JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+            revision INTEGER NOT NULL DEFAULT 0,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            completed_at TIMESTAMPTZ
+        )""",
+        f"""CREATE UNIQUE INDEX IF NOT EXISTS uq_active_procedures_session_single_active
+            ON {schema}.active_procedures (session_id)
+            WHERE completed_at IS NULL""",
+        f"""CREATE INDEX IF NOT EXISTS idx_active_procedures_session_id
+            ON {schema}.active_procedures (session_id)""",
     ]
 
 

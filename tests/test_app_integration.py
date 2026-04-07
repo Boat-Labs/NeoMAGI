@@ -178,6 +178,38 @@ async def test_empty_bot_token_skips_telegram(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_has_procedure_runtime(tmp_path):
+    """P2-M2a wiring: AgentLoop._procedure_runtime is not None after startup."""
+    app = MagicMock()
+    app.state = MagicMock()
+
+    fake_engine = AsyncMock()
+    fake_engine.dispose = AsyncMock()
+
+    fake_session_factory = MagicMock()
+
+    with (
+        patch("src.gateway.app.setup_logging"),
+        patch("src.gateway.app.get_settings") as mock_settings,
+        patch("src.gateway.app.create_db_engine", return_value=fake_engine),
+        patch("src.gateway.app.ensure_schema", return_value=None),
+        patch("src.gateway.app.make_session_factory", return_value=fake_session_factory),
+        patch("src.gateway.app.run_preflight", return_value=_mock_preflight_ok()),
+        patch("src.memory.evolution.EvolutionEngine") as mock_evolution_cls,
+    ):
+        mock_evolution = AsyncMock()
+        mock_evolution.reconcile_soul_projection = AsyncMock()
+        mock_evolution_cls.return_value = mock_evolution
+
+        settings = _make_mock_settings(tmp_path)
+        mock_settings.return_value = settings
+
+        async with lifespan(app):
+            agent_loop = app.state.agent_loop
+            assert agent_loop._procedure_runtime is not None
+
+
+@pytest.mark.asyncio
 async def test_workspace_path_mismatch_fails(tmp_path):
     """ADR 0037: mismatched workspace paths must fail-fast on startup (via preflight)."""
     app = MagicMock()

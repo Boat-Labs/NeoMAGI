@@ -216,16 +216,42 @@ async def _build_memory_and_tools(settings, db_session_factory):
 
     await _restore_active_wrappers(wrapper_tool_store, tool_registry)
 
+    procedure_runtime = _build_procedure_runtime(db_session_factory, tool_registry)
+
     return (
         memory_searcher, evolution_engine, tool_registry,
         skill_resolver, skill_projector, skill_learner,
+        procedure_runtime,
     )
+
+
+def _build_procedure_runtime(db_session_factory, tool_registry):
+    """Build ProcedureRuntime with empty registries.
+
+    Specs, context models, and guards are registered by callers or at
+    startup.  V1 ships with no built-in specs; the runtime is wired so
+    that ``AgentLoop._procedure_runtime`` is not None and can load/resume
+    active procedures from the DB.
+    """
+    from src.procedures.registry import (
+        ProcedureContextRegistry,
+        ProcedureGuardRegistry,
+        ProcedureSpecRegistry,
+    )
+    from src.procedures.runtime import ProcedureRuntime
+    from src.procedures.store import ProcedureStore
+
+    context_registry = ProcedureContextRegistry()
+    guard_registry = ProcedureGuardRegistry()
+    spec_registry = ProcedureSpecRegistry(tool_registry, context_registry, guard_registry)
+    store = ProcedureStore(db_session_factory)
+    return ProcedureRuntime(spec_registry, context_registry, guard_registry, store, tool_registry)
 
 
 def _build_provider_registry(settings, session_manager, memory_searcher,
                              evolution_engine, tool_registry, health_tracker,
                              skill_resolver=None, skill_projector=None,
-                             skill_learner=None):
+                             skill_learner=None, procedure_runtime=None):
     """Register OpenAI + optional Gemini providers."""
     def _make_agent_loop(client: OpenAICompatModelClient, model: str) -> AgentLoop:
         return AgentLoop(
@@ -236,6 +262,7 @@ def _build_provider_registry(settings, session_manager, memory_searcher,
             memory_searcher=memory_searcher, evolution_engine=evolution_engine,
             skill_resolver=skill_resolver, skill_projector=skill_projector,
             skill_learner=skill_learner,
+            procedure_runtime=procedure_runtime,
         )
 
     registry = AgentLoopRegistry(default_provider=settings.provider.active)
@@ -293,6 +320,15 @@ def _bind_app_state(app, *, registry, session_manager, budget_gate,
     app.state.health_tracker = health_tracker
 
 
+def _log_settings_errors(exc: ValidationError) -> None:
+    for err in exc.errors():
+        logger.error(
+            "settings_validation_error",
+            field=".".join(str(loc) for loc in err["loc"]),
+            error_type=err["type"], message=err["msg"],
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: initialize shared state on startup."""
@@ -300,12 +336,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         settings = _load_settings()
     except ValidationError as e:
-        for err in e.errors():
-            logger.error(
-                "settings_validation_error",
-                field=".".join(str(loc) for loc in err["loc"]),
-                error_type=err["type"], message=err["msg"],
-            )
+        _log_settings_errors(e)
         raise
 
     engine, db_session_factory = await _init_database(settings)
@@ -318,6 +349,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     (
         memory_searcher, evolution_engine, tool_registry,
         skill_resolver, skill_projector, skill_learner,
+        procedure_runtime,
     ) = await _build_memory_and_tools(settings, db_session_factory)
     health_tracker = ComponentHealthTracker()
     registry = _build_provider_registry(
@@ -325,6 +357,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         evolution_engine, tool_registry, health_tracker,
         skill_resolver=skill_resolver, skill_projector=skill_projector,
         skill_learner=skill_learner,
+        procedure_runtime=procedure_runtime,
     )
     budget_gate = BudgetGate(engine, schema=settings.database.schema_)
     _bind_app_state(app, registry=registry, session_manager=session_manager,

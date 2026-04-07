@@ -584,3 +584,21 @@ doc_id_assigned_at: 2026-04-07T09:55:53+02:00
 - Decisions: ADR 0058 (coding mode open conditions)
 - Next: 评估 Stage C (bash) follow-up; 之后按 roadmap 进入 P2-M2
 - Risk: ModeToggle UI 路径无专用测试，不阻塞
+
+## 2026-04-07 (local) | P2-M2a: Procedure Runtime Core
+- Status: done
+- Done: 交付最小可用 Procedure Runtime Core — ProcedureSpec 静态校验 + ProcedureStore (PostgreSQL CAS + single-active) + ProcedureRuntime (enter/apply/resume) + AgentLoop 集成 (virtual action schema + barrier 串行 + prompt view) + gateway composition root wiring; 3 轮 review 修复 7 个 findings (stale prompt P1, invalid args P1, gateway wiring P2, PG integration test P2, context_patch error P2, registry fail-closed P2, deny signal classification P2)
+- Detail:
+  - `src/procedures/`: 6 个新模块 (types, result, registry, runtime, store, __init__)
+  - `src/agent/procedure_bridge.py`: bridge 函数 (resolve/build/rebuild checkpoint)
+  - `alembic/versions/c0d1e2f3a4b5`: active_procedures 表 (partial unique index, CAS)
+  - `src/session/database.py`: `_create_procedure_tables()` fresh-DB 启动路径
+  - AgentLoop 新增 `procedure_runtime` 可选依赖; RequestState 新增 procedure 字段
+  - PromptBuilder 新增 `_layer_procedure()` + `procedure_view` 参数
+  - tool_concurrency 新增 procedure action barrier + `_PROCEDURE_DENY_CODES` guard_denied 分类
+  - ProcedureSpecRegistry 带 registry 构造时 register() 自动 validate (fail-closed)
+  - 96 新增测试 (87 unit + 6 PG integration + 1 gateway wiring + 2 concurrency)
+- Evidence: `dev_docs/logs/phase2/p2-m2a_procedure-runtime-core_2026-04-07.md`; 1709 tests passed
+- Plan: `dev_docs/plans/phase2/p2-m2a_procedure-runtime-core_2026-04-07.md`
+- Next: P2-M2a-post (procedure_spec governance adapter); 之后按 roadmap 进入 P2-M2b (multi-agent handoff)
+- Risk: procedure_spec 仍为 growth reserved kind，governance adapter 需要独立 follow-up
