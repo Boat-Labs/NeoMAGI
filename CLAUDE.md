@@ -49,7 +49,7 @@ neomagi/
   ```
 - 新建文档时手动添加，或用 `uv run python scripts/assign_doc_ids.py --apply` 批量补录。
 - UUIDv7 的时间戳分量编码文件的 git 最后修改时间（新文件即当前时间）。
-- `doc_id_assigned_at` 记录 ID 分配时间，不是文件创建时间。
+- `doc_id_assigned_at` 必须从 `doc_id` 的 UUIDv7 前 48 bit 解码得到，不得手动估算。解码方式：将前 48 bit 解释为 unix 毫秒时间戳，转换为本地时区 ISO 8601。
 - 已有 `doc_id` 的文件不会被覆盖（脚本幂等）。
 
 ## 编码规范
