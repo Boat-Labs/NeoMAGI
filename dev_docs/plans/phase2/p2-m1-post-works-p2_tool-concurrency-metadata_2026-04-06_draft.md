@@ -63,9 +63,23 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 
 ### Examples
 
-- `[glob, grep, read_file]` -> 一个并行组
-- `[grep, write_file, grep]` -> 并行组 -> barrier -> 新组
-- `[bash, grep]` -> 默认串行，除非未来 `bash` 明确声明并发安全
+- `[current_time, memory_search, soul_status]` -> 一个并行组
+- `[memory_search, memory_append, current_time]` -> 并行组 -> barrier -> 新并行组
+- `[read_file, memory_search]` -> `read_file` 默认 barrier，除非本轮先完成 async 文件读取改造并明确声明并发安全
+- `[unknown_tool, memory_search]` -> `unknown_tool` barrier -> 新并行组
+
+### Runtime Shape
+
+当前 `message_flow._execute_single_tool` 是 async generator，边执行边 `yield` `ToolCallInfo` / `ToolDenied`，并在函数内部写 transcript。并发实现不得直接并发消费多个 async generator。
+
+V1 需要把单工具执行拆成“准备事件 / 执行工具 / 返回结果 / 串行落盘”四步：
+
+- 外层按原 tool call 顺序先生成并 `yield` `ToolCallInfo`
+- 并发组内使用 `asyncio.TaskGroup` 执行工具调用
+- 每个 task 返回自己的 `result`、`failure_signals`、可选 `ToolDenied` event
+- 外层等待组内任务完成后，按原 tool call 顺序 `yield` `ToolDenied`、合并 `failure_signals`、串行 append `tool` message
+
+这样避免多个 async generator 并发 `yield`，同时保持 UI 事件和 transcript 的确定性顺序。
 
 ## Transcript Semantics
 
@@ -75,21 +89,43 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 
 - 执行可以并行
 - `tool` messages 仍按原 tool call 顺序 append
+- `append_message(role="tool")` 必须在并发组执行完成后按原序串行调用，不允许 task 内部自行 append
 
 ### Why
 
 - 保持与当前串行语义尽量一致
 - 降低 replay / compaction / debug 风险
 - 避免“谁先跑完谁先写回”污染模型的顺序预期
+- session `seq` 分配依赖 append 顺序；并发 append 会让 DB 原子性正确但 transcript 顺序不确定
 
 ## Bounded Parallelism
 
 V1 必须设置并发上限。
 
-建议：
+决策：
 
-- 每组最多 `2~4` 个并发 tool calls
+- 每组最多 `3` 个并发 tool calls
 - 超出部分按顺序分批执行
+- 后续如有明确观测数据，再通过独立变更调整该值
+
+## V1 Tool Marking
+
+默认仍 fail-closed：未显式覆盖的 tool 都保持 `False + False`，不会自动并行。
+
+V1 明确标注：
+
+- `current_time`: `is_read_only=True`, `is_concurrency_safe=True`
+- `memory_search`: `is_read_only=True`, `is_concurrency_safe=True`
+- `soul_status`: `is_read_only=True`, `is_concurrency_safe=True`
+
+V1 明确不标注为并发安全：
+
+- `memory_append`: 写 memory，保持默认 `False + False`
+- `soul_propose`: 会 propose / evaluate / apply，保持默认 `False + False`
+- `soul_rollback`: 会 rollback / veto，保持默认 `False + False`
+- `read_file`: 语义只读，但当前实现使用同步 `Path.read_text()`；本计划不要求顺手重构文件 I/O，因此只允许在同一实现中先改为 async 文件读取后，才标记 `is_concurrency_safe=True`。否则保持 `is_read_only=True`, `is_concurrency_safe=False`。
+
+`risk_level` 不是并发 eligibility。group builder 只检查 `is_read_only and is_concurrency_safe`，guardrail 仍由现有 pre-tool guard 执行。
 
 ## Suggested Implementation Slices
 
@@ -99,34 +135,67 @@ V1 必须设置并发上限。
   - `is_read_only`
   - `is_concurrency_safe`
 - 默认值都为 `False`
+- 两个字段都使用 `@property`，与现有 `group`、`allowed_modes`、`risk_level` 元数据模式一致
+- 按 `V1 Tool Marking` 清单更新 builtin tools
+- 增加 metadata 声明测试，验证默认 fail-closed 与 V1 显式覆盖
 
 ### Slice B. Group Builder
 
 - 在 `message_flow` 中增加 execution group 切分逻辑
 - 把连续可并发工具收成 group
 - barrier 单独执行
+- unknown tool、写入型 tool、未声明并发安全的 tool 都必须作为 barrier
+- group 内保留原始 `tool_index`，用于后续按模型顺序 merge / yield / append
 
 ### Slice C. Parallel Executor
 
-- 对只读 group 使用 bounded parallel execution
-- 收集结果后按原顺序写回 transcript
+- 对只读 group 使用 bounded parallel execution，必须使用 `asyncio.TaskGroup`
+- 每个 task 返回独立 execution outcome，不直接写 `state.accumulated_failure_signals`，不直接 append transcript
+- 收集结果后按原顺序：
+  - `yield` `ToolDenied` event
+  - merge `failure_signals`
+  - append `tool` message
 - 保留现有 guard / error 语义
+- 串行 barrier 可复用同一 execution outcome 路径，减少并行 / 串行语义分叉
 
 ### Slice D. Observability
 
 - 新增日志：
   - `tool_parallel_group_started`
   - `tool_parallel_group_finished`
-  - `group_size`
   - `serial_barrier_tool`
+- 组级日志字段至少包含：
+  - `session_id`
+  - `iteration`
+  - `group_index`
+  - `group_size`
+  - `max_concurrency`
+  - `tool_names`
+- barrier 日志字段至少包含：
+  - `session_id`
+  - `iteration`
+  - `tool_index`
+  - `tool_name`
+  - `reason`
+
+### Slice E. Tests
+
+- metadata：验证 `BaseTool` 默认 `False + False`，V1 标注工具显式 override
+- grouping：验证连续 `current_time + memory_search` 形成并发组，`memory_append` / 未声明工具形成 barrier
+- executor：用受控 async fake tool 验证并发执行存在 overlap，但 `ToolCallInfo`、`ToolDenied`、`tool` message append 顺序仍按原 tool call 顺序
+- failure signals：验证并发组内多个失败按原 tool call 顺序 merge
+- regression：验证 mode denied、unknown tool、guardrail denied 的现有语义不回归
 
 ## Acceptance
 
-- 至少两种只读工具能在同一 turn 内并行执行。
+- 至少两种 V1 双标记工具（建议 `current_time` + `memory_search`）能在同一 turn 内并行执行。
 - 写入型工具会形成 barrier。
 - 未声明元数据的工具继续串行，保持 fail-closed。
 - transcript 中的 `tool` message 顺序仍 deterministic。
+- `ToolCallInfo` / `ToolDenied` event 顺序仍 deterministic。
+- `state.accumulated_failure_signals` 不受 task 完成顺序影响。
 - 现有 guardrail 拒绝语义不回归。
+- 并发组日志可通过 `group_index` 与同一 iteration 内的 group 关联。
 
 ## Risks
 
@@ -144,6 +213,11 @@ V1 必须设置并发上限。
 
 这不是灾难性问题，因为 fail-closed 优先级更高。  
 收益不足可以后续再放宽，不能先放开再回收。
+
+### R4. read_file 语义只读但实现仍是同步 I/O
+
+`read_file` 不能仅因为语义只读就进入并发组。
+若本轮不改为 async 文件读取，必须保持 `is_concurrency_safe=False`。
 
 ## Clean Handoff Boundary
 
