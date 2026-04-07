@@ -83,46 +83,55 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 
 `read_file` / `write_file` / `edit_file` 必须共享同一套 text/coding file transaction contract。
 
-### Path Model
+### V1 Hard Requirements
+
+#### Path Model
 
 - Agent-facing 参数统一使用 `file_path`，要求是 workspace 内绝对路径。
-- 若为了兼容现有 `read_file(path=...)` 短期保留相对路径 alias，工具入口必须立即 canonicalize，并在返回中给出 canonical `file_path`。
+- V1 过渡期内，`read_file` 同时接受既有 `path` alias 和新 `file_path`。新工具 `glob` / `grep` / `write_file` / `edit_file` 直接使用 `file_path`。
+- 若传入 `path` alias，工具入口必须立即 canonicalize，并在返回中给出 canonical `file_path`。
 - 工具结果同时返回 workspace-relative `relative_path`，供 UI / 日志展示，避免把绝对路径作为唯一人类可读标识。
 - 所有 path 必须 `resolve()` 后做 workspace boundary 检查；symlink escape 必须拒绝。
 
-### Read State
+#### Read State
 
-- `read_file` 成功后记录 read state，至少包含：`session_id`、canonical `file_path`、`relative_path`、`mtime_ns`、`size`、`content_hash`、`encoding`、`line_ending`、`read_scope`、`truncated`、`read_at`。
+- `read_file` 成功后记录 read state，至少包含：`session_id`、canonical `file_path`、`relative_path`、`mtime_ns`、`size`、`read_scope`、`truncated`、`read_at`。
 - `read_scope` 至少包含本次读取的 line `offset` / `limit`；后续若支持 richer scope，也必须保持可序列化和可审计。
 - read state 不保存完整文件内容，避免扩大内存、DB 与隐私风险。
-- V1 可先用进程内 map keyed by `(session_id, file_path)`，不要求数据库迁移。
-- `write_file` 覆盖已有文件、`edit_file` 修改文件前，必须检查当前文件状态与 read state 是否一致。
+- V1 使用进程内 map keyed by `(session_id, file_path)`，不要求数据库迁移；进程重启后 read state 丢失，replace / edit 返回 `READ_REQUIRED` 是可接受行为。
+- `write_file` 覆盖已有文件、`edit_file` 修改文件前，必须检查当前 `mtime_ns + size` 与 read state 是否一致。
 - 若未读过或文件已被外部修改，必须 fail-fast，提示先重新 `read_file`。
+- V1 不合并多次 partial read；同一 `(session_id, file_path)` 只保留最后一次 read state。
 
-### Read Semantics
+#### Read Semantics
 
 - `read_file` V1 只支持 text/code 文件。
 - 输入支持 `file_path`、`offset`、`limit`；默认限制输出，返回 `total_lines`、实际 range、`truncated` 标记。
-- 非 UTF-8 或未知 encoding 可以先返回明确错误；若实现支持 encoding detection，必须记录并在写回时保留。
-- line ending 必须记录为 `lf` / `crlf` / `mixed` / `unknown`，供写回时保持风格。
+- V1 只支持 UTF-8。非 UTF-8 返回明确错误，不做 encoding detection。
+- V1 不要求 line-ending detection / roundtrip；实现不得主动归一化未触碰内容的 line ending。
 
-### Write / Edit Semantics
+#### Write / Edit Semantics
 
 - `write_file` create 新文件不要求 read-before-write。
 - `write_file` replace 已有文件必须 read-before-write，并通过 staleness check。
-- `write_file` full-file update 必须基于完整且未截断的 read state；只读过局部 range 时不得覆盖整个既有文件。
+- `write_file` 的 `overwrite=true` 且目标已存在即视为 full-file update。
+- `write_file` full-file update 必须基于完整且未截断的 read state；V1 中“完整”定义为最近一次 read state 的 `offset=0` 且 `truncated=false`。
+- 由于 V1 不合并多次 partial read，即使 agent 曾分段读过同一文件，只要最近一次 read state 不是完整 read，也不得覆盖整个既有文件。
 - `write_file` 默认 create-only；文件已存在时返回 `FILE_EXISTS`，只有显式 `overwrite=true` 才允许 replace。
 - `write_file` 成功结果必须明确 `operation=create|update`，不要只返回通用 success。
 - `edit_file` 必须 read-before-edit，并通过 staleness check。
+- `edit_file` 不要求完整 read state；V1 最低要求是同一文件存在未 stale 的 read state，然后由 `old_string` 唯一匹配负责局部上下文精确性。
 - `edit_file` 采用 `old_string -> new_string` 精确字符串匹配；默认必须唯一匹配。
 - 多处匹配时，除非显式 `replace_all=true`，否则必须 fail-fast，要求调用方提供更精确上下文。
-- 写回必须尽量保持原 encoding 与 line ending；不能保持时必须返回明确错误或 warning。
 
-### Diff And Post-Commit Event
+### V1+ Reserved Enhancements
 
-- `write_file` / `edit_file` 成功后必须返回 structured diff 或 unified diff，不能只返回 success。
-- 成功写入后返回轻量 `file_event`，字段建议包含：`operation`、`file_path`、`before_hash`、`after_hash`、`diff`、`encoding`、`line_ending`。
-- V1 只返回事件或调用轻量 no-op hook；不要直接引入 LSP client。
+- `content_hash` 进入 read state，用于比 `mtime_ns + size` 更强的 staleness check。
+- encoding detection 与 encoding roundtrip。
+- line-ending detection 与 line-ending roundtrip。
+- `write_file` / `edit_file` 返回 structured diff 或 unified diff。
+- 成功写入后返回轻量 `file_event`，字段可包含：`operation`、`file_path`、`before_hash`、`after_hash`、`diff`、`encoding`、`line_ending`。
+- V1 不直接引入 LSP client。
 - 后续 LSP adapter 只能监听成功提交后的 `file_event`，LSP 失败不得回滚已成功的文件事务，只能作为 warning / diagnostics unavailable。
 
 ## Implementation Assumptions
@@ -206,7 +215,7 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - `edit_file` 采用 `old_string -> new_string` 精确字符串匹配
 - `edit_file` 要求 `old_string` 在目标文件中唯一匹配；0 次匹配或多次匹配都必须 fail-fast
 - `edit_file` 不做模糊 patch、不做 regex patch、不默认按行号替换
-- `write_file` / `edit_file` 成功后必须返回 diff 与 `file_event`
+- structured diff 与 `file_event` 属于 V1+ 预留，不作为本轮硬要求
 
 ### Acceptance
 
@@ -216,8 +225,9 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - `write_file` 在文件已存在且未传 `overwrite=true` 时明确失败
 - `write_file` 在仅有 partial read state 时拒绝 full-file update
 - `edit_file` 在 0 次匹配和多次匹配时都明确失败
+- `edit_file` 在 `replace_all=true` 且存在多处匹配时全部替换；`replace_all=true` 且 0 次匹配时仍明确失败
 - 未先 `read_file` 或 read state stale 时，replace / edit 明确失败
-- 成功 replace / edit 返回 diff 和 `file_event`
+- 成功 create / update 返回 `operation=create|update`
 - path escape / symlink escape 被正确拒绝
 - `chat_safe` mode 下 `write_file` / `edit_file` 不可见且不可执行
 
@@ -263,24 +273,34 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - 增加显式用户触发的 WebSocket RPC mode 切换方法；不要把 mode 加成 `chat.send` 的隐式升级参数。
 - 保持 `SessionSettings.default_mode` validator 只接受 `chat_safe`。
 - 更新 frontend RPC 类型与最小 UI 入口，使用户可以显式切换当前 session mode。
+- 确认现有 `ToolDeniedData.mode` 足以表达 mode denial；除非实现发现缺字段，否则 `gateway/protocol.py` schema 不作为本 slice 必改项。
+- 保持“tool 未注册”和“tool 已注册但当前 mode 不允许”的执行闸门错误区分，避免把 coding-only tool call 在 `chat_safe` 下误报为普通 unknown tool。
 - 补齐 mode 相关测试：`chat_safe` 默认路径、per-session `coding` 生效、非法 mode 拒绝、DB 异常 fail-closed、模型不能通过 tool call 自行升级。
 
-### Slice B. Stage A Tools
+### Slice B1. `read_file` Upgrade
 
-- 更新 `read_file` 为 text/code file reader：`file_path`、`offset`、`limit`、输出截断、read state tracking、encoding / line-ending metadata
+- 更新 `read_file` 为 text/code file reader：`file_path`、`offset`、`limit`、输出截断、process-local read state tracking。
+- V1 同时接受既有 `path` alias 和新 `file_path`，内部统一 canonicalize；schema / description 应推荐 `file_path`。
+- 返回 canonical `file_path`、`relative_path`、`total_lines`、实际 range、`truncated`。
+- read state V1 只要求 `mtime_ns + size + read_scope + truncated`，不要求 `content_hash`、encoding detection 或 line-ending detection。
+- 补齐 `read_file` schema / return shape / workspace boundary / partial read tests。
+- 不默认改 `read_file.is_concurrency_safe`；若要改，必须同 slice 完成非阻塞读取改造和测试更新。
+
+### Slice B2. `glob` / `grep`
+
 - `glob`
 - `grep`
 - 相关 schema / tests
 - 推荐 `glob` / `grep` 使用有界非阻塞封装后声明 `is_concurrency_safe = True`；若直接使用同步文件系统 API，则必须保持 `False`
-- 不默认改 `read_file.is_concurrency_safe`；若要改，必须同 slice 完成非阻塞读取改造和测试更新
 
 ### Slice C. Stage B Tools
 
 - `write_file`
 - `edit_file`
-- read state / staleness check
-- structured diff / `file_event`
-- workspace boundary / overwrite / unique-match fail-fast tests
+- 基于 `mtime_ns + size` 的 read state / staleness check
+- `write_file` create / update 语义与 `operation=create|update` 返回
+- `edit_file` unique-match 与 `replace_all=true` 语义
+- workspace boundary / overwrite / partial-read full-update / stale read / unique-match fail-fast tests
 
 ### Slice D. Stage C Evaluation
 
@@ -298,10 +318,11 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - workspace boundary 覆盖 `glob` / `grep` / `read_file` / `write_file` / `edit_file`
 - `read_file` 支持 line range 与 output truncation，并记录 read state
 - `edit_file` 对 0 次匹配和多次匹配都有负向测试
+- `edit_file` 对 `replace_all=true` 的多处匹配成功和 0 次匹配失败都有测试
 - `write_file` 对未显式 overwrite 的既有文件有负向测试
 - `write_file` 对 partial read 后尝试 full-file update 有负向测试
 - `write_file` replace 与 `edit_file` 对未读过 / stale read state 都有负向测试
-- `write_file` / `edit_file` 成功后返回 diff 与 `file_event`
+- `write_file` 成功后返回 `operation=create|update`
 - 若未重构 `read_file` 为 async / 非阻塞读取，则 `read_file.is_concurrency_safe` 保持 `False`
 
 ### Explicitly Not Required In First Round
@@ -309,6 +330,10 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - `bash`
 - 命令输出 streaming
 - 复杂 shell session 语义
+- `content_hash` read state
+- encoding detection / encoding roundtrip
+- line-ending detection / line-ending roundtrip
+- structured diff / `file_event`
 - PDF / image / notebook 等多格式读取
 - LSP client / diagnostics refresh / code action
 - dynamic skill trigger
