@@ -157,9 +157,9 @@ doc_id_assigned_at: 2026-04-06T23:03:54+02:00
 
 - [`p2-m1-post-works-p1_multi-session-threads_2026-04-06.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p1_multi-session-threads_2026-04-06.md)
   - 目标：补齐 Codex 风格左侧 `threads` rail，支持 multi-session 切换与后台运行完成信号
-- [`p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06_draft.md)
+- [`p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06.md)
   - 目标：在 tool interface 上同时引入 `is_read_only` 与 `is_concurrency_safe`，并实现同一 turn 内连续只读批次的有界并行
-- [`p2-m1-post-works-p3_atomic-coding-tools_2026-04-06_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p3_atomic-coding-tools_2026-04-06_draft.md)
+- [`p2-m1-post-works-p3_atomic-coding-tools_2026-04-06.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p3_atomic-coding-tools_2026-04-06.md)
   - 目标：按风险分层补齐 coding atomic tools，先 `glob / grep`，再 `write_file / edit_file`，`bash` 作为条件性 follow-up
 
 当前收敛结论：

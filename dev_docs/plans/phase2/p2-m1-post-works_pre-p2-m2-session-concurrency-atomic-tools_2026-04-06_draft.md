@@ -28,8 +28,8 @@ doc_id_assigned_at: 2026-04-06T23:03:54+02:00
 本轮 post-works 已拆成 3 份独立计划，便于 Claude Code 按单一工作面实现与验收：
 
 1. [`p2-m1-post-works-p1_multi-session-threads_2026-04-06.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p1_multi-session-threads_2026-04-06.md)
-2. [`p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06_draft.md)
-3. [`p2-m1-post-works-p3_atomic-coding-tools_2026-04-06_draft.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p3_atomic-coding-tools_2026-04-06_draft.md)
+2. [`p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06.md)
+3. [`p2-m1-post-works-p3_atomic-coding-tools_2026-04-06.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p3_atomic-coding-tools_2026-04-06.md)
 
 ## Resolved Decisions
 

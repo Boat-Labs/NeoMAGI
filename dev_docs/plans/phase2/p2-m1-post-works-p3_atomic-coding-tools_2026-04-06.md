@@ -3,10 +3,10 @@ doc_id: 019d648c-4aa8-74f0-8d02-703c98a7015b
 doc_id_format: uuidv7
 doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 ---
-# P2-M1 Post Works P3：Atomic Coding Tools（草案）
+# P2-M1 Post Works P3：Atomic Coding Tools
 
 - Date: 2026-04-06
-- Status: draft
+- Status: approved
 - Scope: 为后续 coding capability 测试补齐最小 atomic coding surface，并按风险分层推进
 - Basis:
   - [`design_docs/phase2/roadmap_milestones_v1.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/phase2/roadmap_milestones_v1.md)
