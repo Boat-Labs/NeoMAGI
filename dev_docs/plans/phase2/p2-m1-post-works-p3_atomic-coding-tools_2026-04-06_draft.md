@@ -37,6 +37,7 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - 当前虽然存在 `ToolMode.coding` 概念，但 `SessionManager.get_mode()` 存在 M1.5 guardrail：即使 DB 中 `mode=coding`，运行时也会被强制降级为 `chat_safe`
 - `SessionSettings.default_mode` 当前也通过 validator 拒绝非 `chat_safe` 的 `SESSION_DEFAULT_MODE`
 - 当前没有外部 mode 写接口：`SessionManager` 无 `set_mode()`，WebSocket `chat.send` 参数也没有 mode 字段
+- `gateway/protocol.py` 已有 `ToolDeniedData.mode`，可承载执行闸门拒绝事件中的 mode 信息；这为 `chat_safe` 下拒绝 coding-only tool call 提供现有协议基础
 
 这意味着：
 
@@ -86,11 +87,11 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 
 必须显式完成的前置任务：
 
-- 若本轮开放 `coding`，先新增或更新决策日志，明确这是 ADR 0025 之后的 mode 开放条件
+- 若本轮开放 `coding`，先新建下一编号 ADR，作为 ADR 0025 的后续决议，明确 mode 开放条件、交互提示与回退策略；当前建议文件名：`decisions/0058-coding-mode-open-conditions.md`
 - 决定入口策略：保持 per-session 显式用户切换，不允许模型自动从请求意图升级 mode
 - 决定 `chat_safe` 仍为默认路径，且高风险 coding tools 默认不暴露给 `chat_safe`
 - 移除或条件化 `SessionManager.get_mode()` 中的 M1.5 hard guardrail
-- 决定 `SessionSettings.default_mode` validator 是否继续只接受 `chat_safe`，还是仅在明确实验配置下允许 `coding`
+- 建议 `SessionSettings.default_mode` validator 继续只接受 `chat_safe`；`coding` 入口通过 per-session `set_mode()` 实现，而不是通过全局默认配置打开
 - 决定是否新增 `SessionManager.set_mode()` 与对应 RPC / UI 显式切换路径
 - 决定 `gateway/app.py` 中仅注入 `default_mode` 是否足够，还是必须支持 per-session 动态切换
 - 增加测试覆盖：DB 中 `mode=coding` 在已开放策略下不再被降级；未开放策略下仍 fail-closed 到 `chat_safe`
@@ -109,11 +110,13 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - `allowed_modes = coding`
 - `risk_level = low`
 - `is_read_only = True`
-- `is_concurrency_safe = True`
+- `is_concurrency_safe = True` only if implemented with bounded non-blocking filesystem operations; otherwise `False`
 
-`glob` / `grep` 可以声明并发安全的前提是：只读、无共享可变状态、输出有上限、不会写 cache / temp file。若实现引入共享缓存或外部命令调用，则必须重新评估 `is_concurrency_safe`。
+本计划沿用 P2 对 `is_concurrency_safe` 的定义：它表示“可进入 runtime 自动并行组”，不只是“无共享可变状态”。因此工具不能阻塞 event loop，也不能放大不可控资源争用。
 
-`read_file` 不随 `Stage A` 自动改为并发安全。除非同一 slice 明确把 `read_file` 改为 async / 非阻塞文件读取并同步更新 P2 并发测试，否则保持 `is_read_only = True`、`is_concurrency_safe = False`。
+`glob` / `grep` 可以声明并发安全的前提是：只读、无共享可变状态、输出有上限、不会写 cache / temp file，并且同步文件系统扫描 / 搜索必须通过有界 `asyncio.to_thread` 或等价非阻塞封装执行。若实现直接在 async 路径中调用同步 `Path.glob()` / `Path.read_text()` / 大规模文件遍历，则必须保持 `is_concurrency_safe = False`。
+
+`read_file` 采用同一标准，不随 `Stage A` 自动改为并发安全。除非同一 slice 明确把 `read_file` 改为非阻塞文件读取并同步更新 P2 并发测试，否则保持 `is_read_only = True`、`is_concurrency_safe = False`。
 
 ### Usage
 
@@ -208,12 +211,12 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 
 ### Slice A. Coding Entry Freeze
 
-- 新增或更新决策日志，明确开放 `coding` 的条件、交互提示与回退策略
+- 新建下一编号 ADR，作为 ADR 0025 的后续决议，明确开放 `coding` 的条件、交互提示与回退策略；当前建议文件名：`decisions/0058-coding-mode-open-conditions.md`
 - 明确 coding mode 的进入方式：per-session、用户显式动作、模型不可自行切换
 - 明确 default path 仍是 `chat_safe`
 - 移除或条件化 `SessionManager.get_mode()` 的 M1.5 hard guardrail
 - 决定是否新增 `SessionManager.set_mode()` 与 WebSocket RPC / frontend UI 显式切换
-- 决定 `SESSION_DEFAULT_MODE` 是否继续只能为 `chat_safe`
+- 保持 `SESSION_DEFAULT_MODE` 只允许 `chat_safe`，除非新 ADR 明确给出偏离理由
 - 更新并补齐 mode 相关测试
 
 ### Slice B. Stage A Tools
@@ -221,7 +224,8 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - `glob`
 - `grep`
 - 相关 schema / tests
-- 不默认改 `read_file.is_concurrency_safe`；若要改，必须同 slice 完成 async / 非阻塞读取改造和测试更新
+- 推荐 `glob` / `grep` 使用有界非阻塞封装后声明 `is_concurrency_safe = True`；若直接使用同步文件系统 API，则必须保持 `False`
+- 不默认改 `read_file.is_concurrency_safe`；若要改，必须同 slice 完成非阻塞读取改造和测试更新
 
 ### Slice C. Stage B Tools
 
