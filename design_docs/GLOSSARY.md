@@ -84,10 +84,11 @@ doc_id_assigned_at: 2026-04-06T21:49:14+02:00
 ### Shared Companion
 - **Category**：Product Direction / Identity & Memory
 - **Aliases**：shared AI companion, common companion
-- **Definition**：NeoMAGI 在明确授权的共享关系空间中服务多个已认证 principal 的产品能力方向。它不是群聊本身，也不是多长期人格；核心是 consent-scoped relationship memory、membership、provenance 与对关系本身有建设性的建议。
+- **Definition**：NeoMAGI 在明确授权的共享关系空间中服务多个已认证 principal 的产品能力方向。它不是群聊本身，也不是多长期人格；核心是 consent-scoped relationship memory、membership、provenance 与对关系本身有建设性的建议。它把 NeoMAGI 扩展为受治理的 AI 社会角色 / 关系网络节点，而不是只作为个人工具。
 - **Relations**：
   - `uses` → [Relationship Space](#relationship-space)
   - `serves` → [Principal](#principal)
+  - `guided-by` → [SOUL](#soul)
   - `requires` → [Memory Visibility](#memory-visibility)
 
 ### Relationship Space
@@ -102,7 +103,7 @@ doc_id_assigned_at: 2026-04-06T21:49:14+02:00
 ### Memory Visibility
 - **Category**：Memory / Sharing Policy
 - **Aliases**：visibility policy, consent-scoped memory visibility
-- **Definition**：记忆条目的可见性声明，用于区分 `private_to_principal`、`shared_in_space` 与 `shareable_summary` 等边界。它决定一条记忆能否在某个 principal 或 relationship space 中被检索、召回或发布。
+- **Definition**：记忆条目的可见性声明，用于区分 `private_to_principal`、`shared_in_space` 与 `shareable_summary` 等边界。它决定一条记忆能否在某个 principal 或 relationship space 中被检索、召回或发布。`shareable_summary` 是可分享摘要，不等于公开原始 private memory；确认规则留给 `P2-M3` 设计冻结。
 - **Relations**：
   - `bounds` → [Relationship Space](#relationship-space)
   - `protects` → [Principal](#principal)

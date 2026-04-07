@@ -7,6 +7,7 @@
 ## 选了什么
 
 - 将 `Shared Companion` 定义为 NeoMAGI 的一个长期产品能力方向：同一个 agent 可以在明确授权的共享关系空间中服务多个已认证 principal，维护关系记忆，并给出对关系本身有建设性的建议。
+- NeoMAGI 在这里不是“中立人格”或无立场裁判，而是一个受治理的 AI 社会角色：它仍有自己的 `SOUL`、长期原则和行为风格，但在 shared space 中承担关系网络节点 / 共同朋友式的建设性角色。
 - `Shared Companion` 的核心对象不是“群聊”或“多人格 agent”，而是显式的 `relationship/shared space`：
   - `principal_id` 表示单个已认证用户。
   - `shared_space_id` 表示双方或多方明确加入的共享关系空间。
@@ -22,6 +23,7 @@
 
 - 现有主流 chatbot / agent 默认是孤立社交节点：它只代表当前说话者，很容易在亲密关系、家庭、团队等场景中放大单方视角，给出“保护当前用户但伤害关系”的建议。
 - NeoMAGI 的 personal agent 方向不应退化成“帮当前用户赢得争论”；在明确授权的 shared space 中，它应能帮助多方降低误解、改善关系、形成可追溯的共同记忆。
+- 这个方向为 NeoMAGI 增加了 AI 的社会角色：它不只是个人工具，也可以在 consent-scoped 边界内成为人类关系网络中的真实节点，帮助用户承载社交关系。
 - 这不是模型能力问题，而是 runtime role 与 memory scope 问题：必须把“单方私有记忆”和“多方共享关系记忆”分开治理。
 - 如果先从群聊或 Slack 表面切入，会把问题误解成渠道适配；真正前置条件是 principal、membership、consent、scope-safe retrieval。
 - 如果直接把一方的私有 NeoMAGI 记忆用于另一方咨询，会形成隐性泄漏与偏置，违背当前 scope-aware memory 边界。
@@ -45,3 +47,11 @@
 - `design_docs/phase2/p2_m3_architecture.md` 应把 `shared_space_id`、membership、visibility 与 consent-scoped memory 作为 identity / sharing policy 的设计余量。
 - `design_docs/phase2/p2_m4_architecture.md` 应把群聊 / Slack 定位为 shared space 的表面之一，而不是 shared memory 的真源或 policy 决策点。
 - 后续实现 memory application 时，应允许 relationship memory 作为一类应用，但必须保持 workspace truth、scope filtering、provenance 与 reindexability。
+
+## 后续必须回答的问题
+
+- `SOUL in shared context`：`SOUL` 仍是 NeoMAGI 的受治理原则与行为基线，不因 shared space 变成中立人格或多 SOUL；但 `P2-M3` 必须定义 shared context 中如何避免某一方私聊 rapport、偏好或私有记忆污染共同空间。
+- `shareable_summary`：它是从私有内容派生出的可分享摘要，不等于公开原始 private memory；V1 至少要求来源 principal 明确确认，涉及共同事实时是否需要多方确认留给 `P2-M3` 设计。
+- relationship lifecycle：shared space 需要 leave / revoke / freeze / archive / dissolve / contested-memory correction 语义；关系结束后 shared memory 的保留、召回和更正必须显式定义。
+- threat model：必须覆盖 relationship memory poisoning、短时密集写入影响建议、"不要告诉对方" 请求、参与度不对称导致视角偏移、争议事实被误当共同事实等风险。
+- demo fidelity：`P2-M2` 可做无持久 shared memory 的 procedure demo；产品级 Shared Companion demo 必须等 `P2-M3` 的 identity / membership / visibility policy 最小闭环可用。若提前做 seeded-context 展示，必须明确标注为 fixture，不得作为 runtime 验收。

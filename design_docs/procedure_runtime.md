@@ -644,7 +644,8 @@ missing hard inputs: report_path, report_commit
 
 ## 16. 残余风险与开放问题
 
-- 当前草案尚未定义 actor/subject 分离；若未来需要代码层角色权限，或需要 Shared Companion 场景中的多 principal / shared space，可在 `ToolContext` / execution context 外扩展 actor、principal、shared_space、visibility intent，而不把这些语义塞进 `ActiveProcedure.context` 的任意 dict 中。
+- 当前草案尚未定义 actor/subject 分离。若未来需要代码层角色权限，应单独设计 actor 来源，以及它与 `ToolContext` / execution context 的关系。
+- 若未来需要 Shared Companion 场景中的多 principal / shared space，可在 `ToolContext` / execution context 外扩展 principal、shared_space、visibility intent，而不把这些语义塞进 `ActiveProcedure.context` 的任意 dict 中。
 - 当前草案尚未定义 deviation / waiver 的正式模型；V1 可先靠 `soft_policies` + warning 保持弹性。
 - V1 已固定为 session-scoped single active procedure；若未来需要并发 procedure，需要单独界定 session 语义、冲突策略与可见性规则。
 - 当前草案尚未决定 `ActiveProcedure` 的持久化表结构与清理策略，但已固定 optimistic CAS 语义。

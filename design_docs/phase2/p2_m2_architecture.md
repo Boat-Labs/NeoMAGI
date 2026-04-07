@@ -126,7 +126,7 @@ doc_id_assigned_at: 2026-03-07T17:15:06+01:00
   - publish target
   - visibility intent
   - future `shared_space_id`
-- 如果需要 demo，可选用无持久关系记忆的 `relationship_checkin` procedure 来验证 checkpoint / 双方输入收集 / 同意确认 / summary confirmation；该 demo 不得读取或写入真实 shared memory。
+- 如果需要 demo，可选用无持久关系记忆的 `relationship_checkin` procedure 来验证 checkpoint / 双方输入收集 / 同意确认 / summary confirmation；该 demo 不得读取或写入真实 shared memory，也不得被描述为产品级 Shared Companion demo。
 
 ## 5. 边界
 

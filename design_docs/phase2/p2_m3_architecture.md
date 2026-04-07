@@ -38,7 +38,7 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
 `P2-M3` 复杂度：**很高**。  
 原因：同时跨越 identity、session scope、channel binding、relationship shared-space、search quality、memory applications。
 
-建议拆成 3 个内部子阶段：
+建议拆成 4 个内部子阶段，避免把跨渠道同一用户连续性和多 principal relationship space 混成一个实施包：
 
 ### P2-M3a：Auth & Principal Kernel
 - WebChat 认证登录
@@ -46,14 +46,19 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
 - binding 模型
 - 为 shared-space membership 预留 principal-stable identity
 
-### P2-M3b：User Continuity, Relationship Space & Sharing Policy
+### P2-M3b：User Continuity & Sharing Policy
 - verified binding 之后的 per-user continuity
 - 跨渠道 / 跨 agent 分享规则
-- `shared_space_id` / membership / consent-scoped visibility
-- private memory 与 shared relationship memory 的硬隔离
+- private memory 与 published summary 的基础 visibility 边界
 - fail-closed 默认边界
 
-### P2-M3c：Retrieval Quality & Memory Applications
+### P2-M3c：Relationship Space & Consent-Scoped Memory
+- `shared_space_id` / membership / consent-scoped visibility
+- private memory 与 shared relationship memory 的硬隔离
+- relationship lifecycle 最小语义
+- Shared Companion threat model
+
+### P2-M3d：Retrieval Quality & Memory Applications
 - hybrid search
 - recall quality eval
 - memory application spec / manifest
@@ -98,6 +103,7 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
   - `shared_in_space`
   - `shareable_summary`
 - 私聊中产生的内容默认是 private；除非用户明确发布或确认，否则不得进入 relationship shared memory。
+- `shareable_summary` 是从私有内容派生出的可分享摘要，不等于公开原始 private memory；V1 至少要求来源 principal 明确确认，涉及共同事实时是否需要多方确认作为本阶段 open issue 处理。
 
 ### 4.4 Relationship Space Plane
 
@@ -109,6 +115,25 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
   - 哪些 summaries 是双方或多方确认可共享的
 - NeoMAGI 在 shared space 中的建议目标不是帮助当前说话者赢得争论，而是改善共同关系、降低误解、明确边界与下一步沟通。
 - 信息不对称时应 fail-safe：说明当前只有单方视角，建议邀请另一方补充，而不是使用未授权私有记忆暗中纠偏。
+- NeoMAGI 在 shared space 中是受治理的 AI 社会角色 / 关系网络节点，不是无立场裁判，也不是某一方私有 agent 的隐形延伸。
+- `SOUL` 在 shared context 中仍提供 NeoMAGI 的原则与风格基线；它不变成独立的“中立人格”，也不复制成多个 SOUL。私聊中形成的 rapport、个性化偏好或 private memory 不得自动成为 shared-space 行为依据。
+
+### 4.4.1 Relationship Lifecycle Open Issues
+
+- `join` / `leave`：成员加入和退出 shared space 后，哪些 shared memory 仍可见、哪些需要 freeze。
+- `revoke` / `dissolve`：一方撤回授权或关系结束时，shared space 是否冻结、归档或进入只读历史模式。
+- `contested memory`：一方认为某条 shared memory 不准确时，优先采用 append-only correction / dispute marker，而不是静默改写历史。
+- `retention`：关系结束后 shared memory 的保留、导出、删除或 tombstone 策略必须可解释。
+
+### 4.4.2 Shared Companion Threat Model
+
+- relationship memory poisoning：一方故意写入偏置内容来影响 NeoMAGI 对另一方的建议。
+- timing attack：在另一方咨询前密集写入 shared context 以扭曲建议。
+- secrecy request：在 shared space 中要求 NeoMAGI “不要告诉对方我说了这个”。
+- participation imbalance：一方频繁使用 shared space，另一方很少参与，导致建议视角偏移。
+- contested facts：未经确认的单方叙述被误当成共同事实。
+
+V1 应以 fail-safe 为默认：遇到上述风险时，优先标记单方视角、请求确认或暂停写入 shared memory，而不是继续自动沉淀。
 
 ### 4.5 Retrieval Quality Plane
 
@@ -158,3 +183,4 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
 - 记忆共享范围始终可解释。
 - 两个已认证 principal 可显式加入同一个 shared space；共同确认的 relationship memory 可在 shared context 中召回，任一方私有记忆不会被另一方隐式召回。
 - 系统能解释一条关系记忆为什么可见：来源 principal、产生上下文、shared_space membership、visibility policy 与是否经过确认。
+- Shared Companion demo 若发生在 `P2-M2`，只能验证 procedure / checkpoint，不得声称已具备真实关系记忆；产品级 demo 必须等 `P2-M3c` 的 shared-space identity 与 visibility policy 可用。
