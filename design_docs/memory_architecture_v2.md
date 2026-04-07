@@ -64,18 +64,23 @@ doc_id_assigned_at: 2026-03-05T22:54:30+01:00
   - 金融分析用户：watchlist、thesis ledger、earnings memory、source credibility memory
   - 自媒体作者：style memory、topic backlog、argument bank、audience feedback memory
   - 软件项目用户：decision memory、bug pattern memory、review checklist memory
+  - Shared Companion：relationship memory、shared-space summary、consent-scoped visibility ledger
+- relationship memory 只能作为 memory application 演化，不能把 shared-space schema 直接硬编码进 memory kernel；它必须继续复用 scope filtering、workspace truth 与可重建 retrieval projection。
 
 ## 5. 长期原则
 - 不预设唯一的“标准 memory schema”适用于所有用户。
 - 先提供最少必要原子操作，再允许 agent 在其上构建更适配用户的 memory applications。
 - agent 不应每次从零开始；应优先学习已有公开经验、案例和模式，再做本地适配。
 - hybrid search 适合作为通用任务的默认模板，但不是长期唯一形态。
+- Shared Companion 这类多 principal 场景必须先有身份、membership 与 consent policy，再设计检索增强；不能用更强检索能力绕过共享边界。
 
 ## 6. 关键边界
 - 平台不应把某一版数据库结构误当作 memory 的永久本体。
 - agent 可以演化记忆应用层，但不应随意破坏 memory kernel 的稳定契约。
 - workspace 中保存的是记忆原始材料、长期沉淀以及 memory specs；数据库中保存的是索引、缓存、派生结构与查询加速层。
 - `SOUL` 不属于此文档范畴：`SOUL` 是受治理对象，真源在 DB，`SOUL.md` 是 projection。
+- `scope_key` 回答“谁可以检索到这条记忆”；未来若引入 `shared_space_id`，也必须先映射到明确的 visibility / membership policy，再进入 retrieval。
+- 私有记忆与 shared-space memory 必须是硬边界；不能因为两个 principal 属于同一关系空间，就默认互相召回私聊记忆。
 
 ## 7. 对当前实现的含义
 - `memory_entries` 继续视为检索数据面，而非真源。

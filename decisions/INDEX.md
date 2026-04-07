@@ -62,6 +62,7 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0056 | Wrapper tool onboarding and runtime boundary | accepted | 2026-03-18 | `decisions/0056-wrapper-tool-onboarding-and-runtime-boundary.md` |
 | 0057 | Freeze only hard-to-remediate foundations | accepted | 2026-03-18 | `decisions/0057-freeze-only-hard-to-remediate-foundations.md` |
 | 0058 | Coding mode open conditions | accepted | 2026-04-07 | `decisions/0058-coding-mode-open-conditions.md` |
+| 0059 | Shared Companion relationship-space boundary | accepted | 2026-04-07 | `decisions/0059-shared-companion-relationship-space-boundary.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。

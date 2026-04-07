@@ -7,7 +7,7 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
 
 > 状态：planned  
 > 对应里程碑：`P2-M3` 身份认证、用户连续性与记忆质量  
-> 依据：`design_docs/phase2/roadmap_milestones_v1.md`、`design_docs/memory_architecture_v2.md`、ADR 0034、ADR 0044、ADR 0048
+> 依据：`design_docs/phase2/roadmap_milestones_v1.md`、`design_docs/memory_architecture_v2.md`、ADR 0034、ADR 0044、ADR 0048、ADR 0059
 
 ## 1. 目标
 
@@ -15,6 +15,7 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
 - 固化 canonical `user / principal` 语义，并保留 `account_id` / `peer_id` 作为绑定证据。
 - 在身份前提稳定后，建立受控的跨渠道连续性与跨 agent 上下文共享规则。
 - 提升记忆检索质量，并让 memory applications 开始进入正式演化入口。
+- 为 Shared Companion 建立最小 relationship/shared-space 语义：多个已认证 principal 可显式加入同一 shared space，并在 consent-scoped visibility 下共享关系记忆。
 
 ## 2. 当前基线（输入）
 
@@ -23,6 +24,7 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
 - `SessionIdentity` 已为 `peer_id` / `account_id` 预留字段，但尚未成为完整 principal / binding 模型。
 - 记忆真源已明确在 workspace，DB 作为 retrieval plane。
 - 检索质量已有基础能力，但 hybrid search、memory applications、跨渠道共享规则仍未正式落地。
+- 当前没有 `shared_space_id` / membership / memory visibility policy；因此不能安全支持“同一个 NeoMAGI 同时作为多方共同朋友”的 Shared Companion 场景。
 
 实现参考：
 - `src/session/scope_resolver.py`
@@ -34,7 +36,7 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
 ## 3. 复杂度评估与建议拆分
 
 `P2-M3` 复杂度：**很高**。  
-原因：同时跨越 identity、session scope、channel binding、search quality、memory applications。
+原因：同时跨越 identity、session scope、channel binding、relationship shared-space、search quality、memory applications。
 
 建议拆成 3 个内部子阶段：
 
@@ -42,16 +44,20 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
 - WebChat 认证登录
 - canonical principal
 - binding 模型
+- 为 shared-space membership 预留 principal-stable identity
 
-### P2-M3b：User Continuity & Sharing Policy
+### P2-M3b：User Continuity, Relationship Space & Sharing Policy
 - verified binding 之后的 per-user continuity
 - 跨渠道 / 跨 agent 分享规则
+- `shared_space_id` / membership / consent-scoped visibility
+- private memory 与 shared relationship memory 的硬隔离
 - fail-closed 默认边界
 
 ### P2-M3c：Retrieval Quality & Memory Applications
 - hybrid search
 - recall quality eval
 - memory application spec / manifest
+- relationship memory application skeleton
 
 ## 4. 目标架构（高层）
 
@@ -65,7 +71,13 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
   - `peer_id`
   - `channel_type`
   - `verified`
+- Shared Companion 额外需要：
+  - `shared_space_id`
+  - `membership`
+  - `visibility`
+  - `provenance`
 - 未验证 binding 不允许合并到同一用户连续体。
+- 未验证 principal 不允许加入 shared space；未确认 membership 不允许读取 shared-space memory。
 
 ### 4.2 Auth Plane
 
@@ -81,16 +93,33 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
   - 不默认跨渠道共享全部上下文
   - 不默认跨 agent 共享全部记忆
   - 只允许按 policy publish / merge
+- 对 Shared Companion，sharing policy 必须显式区分：
+  - `private_to_principal`
+  - `shared_in_space`
+  - `shareable_summary`
+- 私聊中产生的内容默认是 private；除非用户明确发布或确认，否则不得进入 relationship shared memory。
 
-### 4.4 Retrieval Quality Plane
+### 4.4 Relationship Space Plane
+
+- `relationship/shared space` 是 Shared Companion 的最小产品对象，不是 Slack channel 或 group chat 的同义词。
+- shared space 至少需要表达：
+  - 哪些 principal 是成员
+  - 成员是否 verified / active
+  - 哪些 memory entries 可在该 shared space 中召回
+  - 哪些 summaries 是双方或多方确认可共享的
+- NeoMAGI 在 shared space 中的建议目标不是帮助当前说话者赢得争论，而是改善共同关系、降低误解、明确边界与下一步沟通。
+- 信息不对称时应 fail-safe：说明当前只有单方视角，建议邀请另一方补充，而不是使用未授权私有记忆暗中纠偏。
+
+### 4.5 Retrieval Quality Plane
 
 - 检索路径建议从单一 lexical/BM25 升级为：
   - lexical
   - vector
   - hybrid template
 - 记忆质量必须通过已知 miss case 回归评测，而不是只看主观体感。
+- relationship-space retrieval 必须先做 visibility / membership filter，再做 lexical / vector / hybrid 检索；不得通过 graph expansion 绕过 scope。
 
-### 4.5 Memory Applications Plane
+### 4.6 Memory Applications Plane
 
 - 在 memory kernel 之上允许更明确的 application spec 进入正式路径。
 - 这层不改变：
@@ -100,6 +129,7 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
   - 领域化组织方式
   - 作用域与共享策略
   - capability / skill 对 memory app 的可见性
+- relationship memory 应作为 memory application 的候选，而不是 memory kernel 的硬编码 schema；其 source-of-truth 仍应是 workspace 中可重建、可审计、可解释的材料。
 
 ## 5. 边界
 
@@ -108,6 +138,7 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
   - principal / binding 模型。
   - verified continuity。
   - cross-channel / cross-agent sharing policy。
+  - relationship/shared-space membership 与 consent-scoped memory visibility。
   - hybrid search 与 retrieval quality eval。
   - memory application 入口。
 - Out:
@@ -115,6 +146,8 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
   - 不把未经验证 identity 直接合并。
   - 不做重型知识图谱工程。
   - 不默认全局共享全部上下文。
+  - 不把某个 principal 的私有记忆隐式用于另一个 principal 的咨询。
+  - 不把群聊 channel 当作 shared-space identity 或 memory policy 的真源。
 
 ## 6. 验收对齐（来自 roadmap）
 
@@ -123,3 +156,5 @@ doc_id_assigned_at: 2026-03-06T10:02:44+01:00
 - 系统能解释为什么某个渠道身份被视为同一个用户，或为什么没有被合并。
 - 已知自然语句检索 miss 至少有一部分被稳定消除。
 - 记忆共享范围始终可解释。
+- 两个已认证 principal 可显式加入同一个 shared space；共同确认的 relationship memory 可在 shared context 中召回，任一方私有记忆不会被另一方隐式召回。
+- 系统能解释一条关系记忆为什么可见：来源 principal、产生上下文、shared_space membership、visibility policy 与是否经过确认。

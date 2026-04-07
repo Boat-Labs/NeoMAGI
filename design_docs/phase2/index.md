@@ -23,7 +23,7 @@ doc_id_assigned_at: 2026-03-21T11:30:15+01:00
    - `P2-M2`：Procedure Runtime、多 agent runtime、handoff / steering / resume。
 
 5. `design_docs/phase2/p2_m3_architecture.md`
-   - `P2-M3`：身份认证、用户连续性、记忆质量与 memory applications。
+   - `P2-M3`：身份认证、用户连续性、Shared Companion / relationship shared space、记忆质量与 memory applications。
 
 6. `design_docs/phase2/p2_m4_architecture.md`
    - `P2-M4`：外部协作表面、Slack、浏览器/外部平台读写边界。
@@ -36,6 +36,8 @@ doc_id_assigned_at: 2026-03-21T11:30:15+01:00
   - `P2-M1` 的 skill object 运行时经验层正式设计文档。
 - `design_docs/memory_architecture_v2.md`
   - `P2-M3` 的 memory kernel / applications 长期原则。
+- `decisions/0059-shared-companion-relationship-space-boundary.md`
+  - Shared Companion 的 relationship/shared-space 边界：`P2-M2` 预留 runtime context，`P2-M3` 落地 identity / membership / consent-scoped memory，`P2-M4` 承接协作表面。
 
 ## 3. 当前状态
 

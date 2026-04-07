@@ -17,7 +17,7 @@ doc_id_assigned_at: 2026-04-06T21:49:14+02:00
 
 ## 阅读导航
 
-- `Identity & Prompt Context`：`SOUL`、`SOUL.md`、`USER.md`、`IDENTITY.md`、`Principal`
+- `Identity & Prompt Context`：`SOUL`、`SOUL.md`、`USER.md`、`IDENTITY.md`、`Principal`、`Shared Companion`、`Relationship Space`
 - `Governance & Evaluation`：growth object、proposal、contract、checks、veto、evidence
 - `Capability Layer`：tool、skill、wrapper、procedure、memory application
 - `Builder & Workspace Artifacts`：builder task、growth case、artifact identity
@@ -80,6 +80,32 @@ doc_id_assigned_at: 2026-04-06T21:49:14+02:00
 - **Definition**：NeoMAGI 在运行时所代表的“同一个用户利益”身份轴。多 agent 默认共享同一个 `SOUL / principal`，而不是各自拥有独立长期人格。
 - **Relations**：
   - `co-defined-by` → [SOUL](#soul)
+
+### Shared Companion
+- **Category**：Product Direction / Identity & Memory
+- **Aliases**：shared AI companion, common companion
+- **Definition**：NeoMAGI 在明确授权的共享关系空间中服务多个已认证 principal 的产品能力方向。它不是群聊本身，也不是多长期人格；核心是 consent-scoped relationship memory、membership、provenance 与对关系本身有建设性的建议。
+- **Relations**：
+  - `uses` → [Relationship Space](#relationship-space)
+  - `serves` → [Principal](#principal)
+  - `requires` → [Memory Visibility](#memory-visibility)
+
+### Relationship Space
+- **Category**：Identity / Memory Scope
+- **Aliases**：shared space, relationship shared space, `shared_space_id`
+- **Definition**：多个已认证 principal 明确加入的共享关系空间，例如情侣、家庭或团队。它回答“哪些人共同拥有这一段关系上下文、哪些记忆可在此召回”，不是 channel、Slack 群或 Telegram 群本身。
+- **Relations**：
+  - `contains` → [Principal](#principal)
+  - `bounds` → [Memory Visibility](#memory-visibility)
+  - `enables` → [Shared Companion](#shared-companion)
+
+### Memory Visibility
+- **Category**：Memory / Sharing Policy
+- **Aliases**：visibility policy, consent-scoped memory visibility
+- **Definition**：记忆条目的可见性声明，用于区分 `private_to_principal`、`shared_in_space` 与 `shareable_summary` 等边界。它决定一条记忆能否在某个 principal 或 relationship space 中被检索、召回或发布。
+- **Relations**：
+  - `bounds` → [Relationship Space](#relationship-space)
+  - `protects` → [Principal](#principal)
 
 ## Governance & Evaluation
 

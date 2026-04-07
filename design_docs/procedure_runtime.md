@@ -7,7 +7,7 @@ doc_id_assigned_at: 2026-03-07T17:15:06+01:00
 
 > 状态：approved
 > 日期：2026-03-07
-> 依据：`design_docs/system_prompt.md`、`design_docs/modules.md`、`design_docs/phase1/m1_5_architecture.md`、`design_docs/phase1/roadmap_milestones_v3.md`、ADR 0024、ADR 0042、ADR 0043、ADR 0048
+> 依据：`design_docs/system_prompt.md`、`design_docs/modules.md`、`design_docs/phase1/m1_5_architecture.md`、`design_docs/phase1/roadmap_milestones_v3.md`、ADR 0024、ADR 0042、ADR 0043、ADR 0048、ADR 0059
 
 ## 1. 为什么需要这份设计
 
@@ -320,7 +320,7 @@ class ToolResult(BaseModel):
 - 若 tool 返回裸 `dict`，executor 约定提取其中的 `context_patch` 键并映射到 `ToolResult.context_patch`；非 procedure 场景仍继续消费裸 `dict`，不强制升级到 `ToolResult`。
 - procedure guard 与现有 workspace safety guardrail 分层：先过 mode / risk gate，再跑 procedure guard。
 - V1 允许 sync / async 两种 procedure guard，但 executor 必须用 `inspect.isawaitable()` 统一归一化；新 guard 默认推荐 `async def`，避免遗漏 `await`。
-- 当前 `ToolContext` 只包含 `scope_key/session_id`；若后续需要 role-aware guard，应扩展 execution context 或单独解析 actor 来源。
+- 当前 `ToolContext` 只包含 `scope_key/session_id`；若后续需要 role-aware guard、principal-aware guard 或 Shared Companion 的 shared-space guard，应扩展 execution context 或单独解析 actor / principal / shared_space 来源。
 - `ToolResult.context_patch` 是唯一允许写回 `ActiveProcedure.context` 的 patch 面。
 
 ## 10. ActiveProcedure（V1 最小运行时对象）
@@ -644,14 +644,14 @@ missing hard inputs: report_path, report_commit
 
 ## 16. 残余风险与开放问题
 
-- 当前草案尚未定义 actor/subject 分离；若未来需要代码层角色权限，需单独设计 actor 来源，以及它与 `ToolContext` / execution context 的关系。
+- 当前草案尚未定义 actor/subject 分离；若未来需要代码层角色权限，或需要 Shared Companion 场景中的多 principal / shared space，可在 `ToolContext` / execution context 外扩展 actor、principal、shared_space、visibility intent，而不把这些语义塞进 `ActiveProcedure.context` 的任意 dict 中。
 - 当前草案尚未定义 deviation / waiver 的正式模型；V1 可先靠 `soft_policies` + warning 保持弹性。
 - V1 已固定为 session-scoped single active procedure；若未来需要并发 procedure，需要单独界定 session 语义、冲突策略与可见性规则。
 - 当前草案尚未决定 `ActiveProcedure` 的持久化表结构与清理策略，但已固定 optimistic CAS 语义。
 
 ## 17. 建议的下一步
 
-- 先按本文口径落地 `ProcedureSpec`、`ActiveProcedure`、`ProcedureContextRegistry`、`ProcedureGuardRegistry`、`ToolResult.context_patch` 与独立的 `ProcedureRuntime / ProcedureExecutor`。
+- 先按本文口径落地 `ProcedureSpec`、`ActiveProcedure`、`ProcedureContextRegistry`、`ProcedureGuardRegistry`、`ToolResult.context_patch` 与独立的 `ProcedureRuntime / ProcedureExecutor`；实现时避免把 execution context 永久写死为单 actor / 单 principal。
 - 再选一个最小真实案例验证，优先考虑：
   - `devcoord.pm.gate`
   - 或一个更轻量但具状态推进的内部流程。
