@@ -4,12 +4,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from src.tools.builtins.current_time import CurrentTimeTool
+from src.tools.builtins.edit_file import EditFileTool
+from src.tools.builtins.glob_tool import GlobTool
+from src.tools.builtins.grep_tool import GrepTool
 from src.tools.builtins.memory_append import MemoryAppendTool
 from src.tools.builtins.memory_search import MemorySearchTool
 from src.tools.builtins.read_file import ReadFileTool
 from src.tools.builtins.soul_propose import SoulProposeTool
 from src.tools.builtins.soul_rollback import SoulRollbackTool
 from src.tools.builtins.soul_status import SoulStatusTool
+from src.tools.builtins.write_file import WriteFileTool
 from src.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
@@ -34,6 +38,10 @@ def register_builtins(
     registry.register(CurrentTimeTool())
     registry.register(MemorySearchTool(memory_searcher))
     registry.register(ReadFileTool(workspace_dir))
+    registry.register(GlobTool(workspace_dir))
+    registry.register(GrepTool(workspace_dir))
+    registry.register(WriteFileTool(workspace_dir))
+    registry.register(EditFileTool(workspace_dir))
 
     if memory_writer is not None:
         registry.register(MemoryAppendTool(memory_writer))

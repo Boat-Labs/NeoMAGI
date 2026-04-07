@@ -119,7 +119,7 @@ def _mode_denial(
         session_id=session_id,
     )
     message = f"Tool '{tool_call['name']}' is not available in '{mode.value}' mode."
-    next_action = "当前为 chat_safe 模式，代码工具不可用。未来版本将支持 coding 模式。"
+    next_action = "当前为 chat_safe 模式，代码工具不可用。请切换到 coding 模式后再试。"
     denied = ToolDenied(
         tool_name=tool_call["name"],
         call_id=tool_call["id"],

@@ -25,9 +25,12 @@ from src.gateway.protocol import (
     RPCErrorData,
     RPCHistoryResponse,
     RPCHistoryResponseData,
+    RPCSessionModeResponse,
     RPCStreamChunk,
     RPCToolCall,
     RPCToolDenied,
+    SessionModeData,
+    SessionSetModeParams,
     StreamChunkData,
     ToolCallData,
     ToolDeniedData,
@@ -422,17 +425,18 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         logger.info("ws_disconnected")
 
 
+_RPC_HANDLERS: dict[str, object] = {}  # populated after handler definitions
+
+
 async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
     """Parse RPC request, invoke agent, stream response events back."""
     request_id = "unknown"
     try:
         request = parse_rpc_request(raw)
         request_id = request.id
-
-        if request.method == "chat.send":
-            await _handle_chat_send(websocket, request_id, request.params)
-        elif request.method == "chat.history":
-            await _handle_chat_history(websocket, request_id, request.params)
+        handler = _RPC_HANDLERS.get(request.method)
+        if handler is not None:
+            await handler(websocket, request_id, request.params)
         else:
             error = RPCError(
                 id=request_id,
@@ -523,3 +527,32 @@ async def _handle_chat_history(websocket: WebSocket, request_id: str, params: di
     history = await session_manager.get_history_for_display(parsed.session_id)
     response = RPCHistoryResponse(id=request_id, data=RPCHistoryResponseData(messages=history))
     await websocket.send_text(response.model_dump_json())
+
+
+async def _handle_session_set_mode(websocket: WebSocket, request_id: str, params: dict) -> None:
+    """Handle session.set_mode: explicitly switch session mode (ADR 0058)."""
+    try:
+        parsed = SessionSetModeParams.model_validate(params)
+    except ValidationError as e:
+        raise GatewayError(str(e), code="INVALID_PARAMS") from e
+
+    session_manager: SessionManager = websocket.app.state.session_manager
+
+    try:
+        effective_mode = await session_manager.set_mode(parsed.session_id, ToolMode(parsed.mode))
+    except ValueError as e:
+        raise GatewayError(str(e), code="INVALID_PARAMS") from e
+
+    response = RPCSessionModeResponse(
+        id=request_id,
+        data=SessionModeData(session_id=parsed.session_id, mode=effective_mode.value),
+    )
+    await websocket.send_text(response.model_dump_json())
+
+
+# Populate RPC handler dispatch table after all handlers are defined.
+_RPC_HANDLERS.update({
+    "chat.send": _handle_chat_send,
+    "chat.history": _handle_chat_history,
+    "session.set_mode": _handle_session_set_mode,
+})

@@ -72,7 +72,8 @@ class SessionSettings(BaseSettings):
     def _validate_default_mode(cls, v: str) -> str:
         if v != "chat_safe":
             raise ValueError(
-                f"SESSION_DEFAULT_MODE must be 'chat_safe' in M1.5 (got '{v}'). See ADR 0025."
+                f"SESSION_DEFAULT_MODE must be 'chat_safe' (got '{v}'). "
+                "Per-session coding mode is set via session.set_mode. See ADR 0025/0058."
             )
         return v
 

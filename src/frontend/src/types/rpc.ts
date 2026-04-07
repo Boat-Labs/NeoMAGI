@@ -75,4 +75,22 @@ export interface ToolDeniedMessage {
 
 export type ServerMessage = StreamChunkMessage | ErrorMessage | ToolCallMessage | ResponseMessage | ToolDeniedMessage
 
+// === Client → Server: session.set_mode ===
+
+export interface SessionSetModeParams {
+  session_id: string
+  mode: "chat_safe" | "coding"
+}
+
+// === Server → Client: session.set_mode response ===
+
+export interface SessionModeResponseMessage {
+  type: "response"
+  id: RequestId
+  data: {
+    session_id: string
+    mode: string
+  }
+}
+
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting"

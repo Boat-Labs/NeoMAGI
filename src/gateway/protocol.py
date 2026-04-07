@@ -116,6 +116,34 @@ class RPCError(BaseModel):
     error: RPCErrorData
 
 
+class SessionSetModeParams(BaseModel):
+    session_id: str = "main"
+    mode: str
+
+    @field_validator("session_id", mode="after")
+    @classmethod
+    def _reject_channel_exclusive_prefix(cls, v: str) -> str:
+        for prefix in CHANNEL_EXCLUSIVE_PREFIXES:
+            if v.startswith(prefix):
+                msg = (
+                    f"session_id with channel-exclusive prefix '{prefix}'"
+                    " cannot be accessed via WebSocket"
+                )
+                raise ValueError(msg)
+        return v
+
+
+class SessionModeData(BaseModel):
+    session_id: str
+    mode: str
+
+
+class RPCSessionModeResponse(BaseModel):
+    type: Literal["response"] = "response"
+    id: str
+    data: SessionModeData
+
+
 class RPCHistoryResponseData(BaseModel):
     messages: list[dict[str, Any]]
 

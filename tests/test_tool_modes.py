@@ -8,7 +8,7 @@ Covers:
 - Execution gate denial path
 - ToolDenied event generation
 - PromptBuilder mode-filtered tooling + safety layers
-- SessionManager.get_mode fail-closed + M1.5 guardrails
+- SessionManager.get_mode fail-closed + ADR 0058 coding mode
 - SessionSettings.default_mode config validation
 """
 
@@ -541,8 +541,8 @@ class TestExecutionGateDenial:
         assert tool_infos[0].tool_name == "current_time"
 
     @pytest.mark.asyncio
-    async def test_next_action_does_not_reference_unreachable_ops(self, tmp_path):
-        """next_action should not guide user to switch to coding (M1.5 unreachable)."""
+    async def test_next_action_guides_user_to_coding_mode(self, tmp_path):
+        """next_action should guide user to switch to coding mode (ADR 0058)."""
         agent, model_client, _ = self._make_agent(tmp_path)
 
         async def stream_denied(*args, **kwargs):
@@ -562,10 +562,8 @@ class TestExecutionGateDenial:
             events.append(event)
 
         denied = [e for e in events if isinstance(e, ToolDenied)][0]
-        na = denied.next_action.lower()
-        # Must not contain "switch to coding" or "/mode coding" or similar
-        assert "切换" not in na or "coding" not in na
-        assert "/mode" not in na
+        # ADR 0058: coding mode is now reachable; next_action should guide user
+        assert "coding" in denied.next_action.lower() or "切换" in denied.next_action
 
 
 # ===========================================================================
@@ -752,8 +750,8 @@ class TestGetModeFailClosed:
         assert mode == ToolMode.chat_safe
 
     @pytest.mark.asyncio
-    async def test_db_returns_coding_downgrades_in_m15(self):
-        """M1.5 guardrail: DB has 'coding' → downgrade to chat_safe."""
+    async def test_db_returns_coding_is_respected(self):
+        """ADR 0058: DB has 'coding' → return coding (M1.5 guardrail removed)."""
         from src.session.manager import SessionManager
 
         db_factory = MagicMock()
@@ -767,7 +765,7 @@ class TestGetModeFailClosed:
 
         mgr = SessionManager(db_session_factory=db_factory)
         mode = await mgr.get_mode("test-session")
-        assert mode == ToolMode.chat_safe
+        assert mode == ToolMode.coding
 
     @pytest.mark.asyncio
     async def test_db_returns_invalid_value_fallback(self):

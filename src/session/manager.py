@@ -77,7 +77,7 @@ class SessionManager:
         """Get the effective ToolMode for a session.
 
         Reads from DB. On any error or invalid value, fail-closed to chat_safe.
-        M1.5 guardrail: even valid 'coding' values are downgraded to chat_safe.
+        Respects per-session coding mode set via set_mode() (ADR 0058).
         """
         try:
             async with self._db() as db_session:
@@ -99,17 +99,6 @@ class SessionManager:
                 )
                 return ToolMode.chat_safe
 
-            # M1.5 guardrail: only chat_safe is allowed
-            if mode != ToolMode.chat_safe:
-                logger.warning(
-                    "session_mode_downgraded",
-                    session_id=session_id,
-                    requested_mode=mode.value,
-                    effective_mode="chat_safe",
-                    msg="M1.5 guardrail: non-chat_safe modes downgraded",
-                )
-                return ToolMode.chat_safe
-
             return mode
         except Exception:
             logger.exception(
@@ -118,6 +107,36 @@ class SessionManager:
                 msg="DB error; falling back to chat_safe",
             )
             return ToolMode.chat_safe
+
+    async def set_mode(self, session_id: str, mode: ToolMode) -> ToolMode:
+        """Set the ToolMode for a session (ADR 0058: user-explicit action).
+
+        Validates that mode is a legal ToolMode value; writes to DB.
+        Returns the newly effective mode.
+        Raises ValueError for invalid mode values.
+        """
+        if not isinstance(mode, ToolMode):
+            try:
+                mode = ToolMode(mode)
+            except ValueError:
+                raise ValueError(f"Invalid mode: {mode!r}. Must be one of {list(ToolMode)}")
+
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        async with self._db() as db_session:
+            stmt = (
+                pg_insert(SessionRecord)
+                .values(id=session_id, mode=mode.value, next_seq=0)
+                .on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={"mode": mode.value},
+                )
+            )
+            await db_session.execute(stmt)
+            await db_session.commit()
+
+        logger.info("session_mode_set", session_id=session_id, mode=mode.value)
+        return mode
 
     async def try_claim_session(self, session_id: str, ttl_seconds: int = 300) -> str | None:
         """Try to claim a session for exclusive processing.
