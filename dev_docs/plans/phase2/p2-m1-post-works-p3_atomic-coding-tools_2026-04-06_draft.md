@@ -10,8 +10,13 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - Scope: 为后续 coding capability 测试补齐最小 atomic coding surface，并按风险分层推进
 - Basis:
   - [`design_docs/phase2/roadmap_milestones_v1.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/design_docs/phase2/roadmap_milestones_v1.md)
+  - [`decisions/0025-mode-switching-user-controlled-chat-safe-default.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0025-mode-switching-user-controlled-chat-safe-default.md)
+  - [`decisions/0026-session-mode-storage-and-propagation.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/decisions/0026-session-mode-storage-and-propagation.md)
+  - [`dev_docs/plans/phase2/p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06.md`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/dev_docs/plans/phase2/p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06.md)
   - [`src/tools/base.py`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/src/tools/base.py)
   - [`src/session/manager.py`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/src/session/manager.py)
+  - [`src/config/settings.py`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/src/config/settings.py)
+  - [`src/gateway/protocol.py`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/src/gateway/protocol.py)
   - [`src/tools/builtins/read_file.py`](/Users/zhiliangzhou/devel/Zhiliang/NeoMAGI/src/tools/builtins/read_file.py)
 
 ## Goal
@@ -26,13 +31,17 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 
 ## Current Baseline
 
-- 当前已有 `read_file`
+- 当前已有 `read_file`，并且只在 `ToolMode.coding` 下可见
+- `read_file` 语义只读，已声明 `is_read_only = True`，但未声明 `is_concurrency_safe = True`；`BaseTool` 默认值为 `False`
 - 当前没有 `glob` / `grep` / `write_file` / `edit_file` / `bash`
-- 当前虽然存在 `ToolMode.coding` 概念，但 session mode 读取逻辑仍会把非 `chat_safe` 模式降级
+- 当前虽然存在 `ToolMode.coding` 概念，但 `SessionManager.get_mode()` 存在 M1.5 guardrail：即使 DB 中 `mode=coding`，运行时也会被强制降级为 `chat_safe`
+- `SessionSettings.default_mode` 当前也通过 validator 拒绝非 `chat_safe` 的 `SESSION_DEFAULT_MODE`
+- 当前没有外部 mode 写接口：`SessionManager` 无 `set_mode()`，WebSocket `chat.send` 参数也没有 mode 字段
 
 这意味着：
 
 - 先不解决入口策略，atomic coding tools 即使实现了也未必真正可用
+- 开放 `coding` 入口不是单纯参数调整，而是解除 M1.5 guardrail 与 ADR 0025 阶段边界
 
 ## Core Decision
 
@@ -75,6 +84,17 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - 这个入口是实验路径还是正式路径
 - `chat_safe` 是否继续保持默认降级
 
+必须显式完成的前置任务：
+
+- 若本轮开放 `coding`，先新增或更新决策日志，明确这是 ADR 0025 之后的 mode 开放条件
+- 决定入口策略：保持 per-session 显式用户切换，不允许模型自动从请求意图升级 mode
+- 决定 `chat_safe` 仍为默认路径，且高风险 coding tools 默认不暴露给 `chat_safe`
+- 移除或条件化 `SessionManager.get_mode()` 中的 M1.5 hard guardrail
+- 决定 `SessionSettings.default_mode` validator 是否继续只接受 `chat_safe`，还是仅在明确实验配置下允许 `coding`
+- 决定是否新增 `SessionManager.set_mode()` 与对应 RPC / UI 显式切换路径
+- 决定 `gateway/app.py` 中仅注入 `default_mode` 是否足够，还是必须支持 per-session 动态切换
+- 增加测试覆盖：DB 中 `mode=coding` 在已开放策略下不再被降级；未开放策略下仍 fail-closed 到 `chat_safe`
+
 如果这一步不先完成，后续工具会变成“实现了但跑不到”。
 
 ## Stage A: Read-Only Repo Inspection
@@ -91,17 +111,31 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 - `is_read_only = True`
 - `is_concurrency_safe = True`
 
+`glob` / `grep` 可以声明并发安全的前提是：只读、无共享可变状态、输出有上限、不会写 cache / temp file。若实现引入共享缓存或外部命令调用，则必须重新评估 `is_concurrency_safe`。
+
+`read_file` 不随 `Stage A` 自动改为并发安全。除非同一 slice 明确把 `read_file` 改为 async / 非阻塞文件读取并同步更新 P2 并发测试，否则保持 `is_read_only = True`、`is_concurrency_safe = False`。
+
 ### Usage
 
 - 文件发现
 - 文本 / 模式搜索
 - 与现有 `read_file` 形成最小 inspection surface
 
+### Required Boundaries
+
+- path / pattern 必须限制在 workspace 内
+- 输出必须有 `max_results` / `max_bytes` 或等价截断策略
+- path escape / symlink escape 必须被拒绝或明确按 `read_file` 同等规则处理
+- `grep` 正则错误必须返回结构化错误，不能抛出未处理异常
+
 ### Acceptance
 
 - agent 能找到相关文件
 - agent 能搜索文本或模式
 - `glob` / `grep` 可以与 `read_file` 联合完成最小 repo inspection
+- path escape 被正确拒绝
+- 超限输出会被截断并带有明确截断标记
+- `chat_safe` mode 下 `glob` / `grep` / `read_file` 不可见且不可执行
 
 ## Stage B: Deterministic File Mutation
 
@@ -120,15 +154,22 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 ### Required Boundaries
 
 - path 必须限制在 workspace 内
-- `write_file` 负责 create / replace
-- `edit_file` 负责局部编辑
-- `edit_file` 必须 fail-fast，不做模糊 patch
+- `write_file` 负责 create / explicit replace
+- `write_file` 默认 create-only；文件已存在时返回 `FILE_EXISTS`
+- `write_file` 只有在调用参数显式传入 `overwrite=true` 时才允许 replace
+- `edit_file` 采用 `old_text -> new_text` 精确字符串匹配
+- `edit_file` 要求 `old_text` 在目标文件中唯一匹配；0 次匹配或多次匹配都必须 fail-fast
+- `edit_file` 不做模糊 patch、不做 regex patch、不默认按行号替换
 
 ### Acceptance
 
 - agent 能在受限路径内创建或替换文件
 - agent 能在上下文匹配时做局部编辑
 - 上下文不匹配时，`edit_file` 会明确失败而不是 silent drift
+- `write_file` 在文件已存在且未传 `overwrite=true` 时明确失败
+- `edit_file` 在 0 次匹配和多次匹配时都明确失败
+- path escape / symlink escape 被正确拒绝
+- `chat_safe` mode 下 `write_file` / `edit_file` 不可见且不可执行
 
 ## Stage C: Guarded Shell
 
@@ -167,20 +208,26 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 
 ### Slice A. Coding Entry Freeze
 
-- 明确 coding mode 的进入方式
+- 新增或更新决策日志，明确开放 `coding` 的条件、交互提示与回退策略
+- 明确 coding mode 的进入方式：per-session、用户显式动作、模型不可自行切换
 - 明确 default path 仍是 `chat_safe`
+- 移除或条件化 `SessionManager.get_mode()` 的 M1.5 hard guardrail
+- 决定是否新增 `SessionManager.set_mode()` 与 WebSocket RPC / frontend UI 显式切换
+- 决定 `SESSION_DEFAULT_MODE` 是否继续只能为 `chat_safe`
+- 更新并补齐 mode 相关测试
 
 ### Slice B. Stage A Tools
 
 - `glob`
 - `grep`
 - 相关 schema / tests
+- 不默认改 `read_file.is_concurrency_safe`；若要改，必须同 slice 完成 async / 非阻塞读取改造和测试更新
 
 ### Slice C. Stage B Tools
 
 - `write_file`
 - `edit_file`
-- workspace boundary / fail-fast tests
+- workspace boundary / overwrite / fail-fast tests
 
 ### Slice D. Stage C Evaluation
 
@@ -194,7 +241,11 @@ doc_id_assigned_at: 2026-04-06T22:46:49+02:00
 
 - coding 路径下可用 `glob` / `grep` / `read_file`
 - coding 路径下可用 `write_file` / `edit_file`
-- `chat_safe` 默认不暴露这些高风险工具
+- `chat_safe` 默认不暴露 coding-only tools，且 hallucinated tool call 会被执行闸门拒绝
+- workspace boundary 覆盖 `glob` / `grep` / `read_file` / `write_file` / `edit_file`
+- `edit_file` 对 0 次匹配和多次匹配都有负向测试
+- `write_file` 对未显式 overwrite 的既有文件有负向测试
+- 若未重构 `read_file` 为 async / 非阻塞读取，则 `read_file.is_concurrency_safe` 保持 `False`
 
 ### Explicitly Not Required In First Round
 
