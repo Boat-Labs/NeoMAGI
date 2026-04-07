@@ -555,3 +555,16 @@ doc_id_assigned_at: 2026-04-07T09:55:53+02:00
 - Milestone totals: P2-M1a~M1c 实现 1503 tests → 用户验收修复 +157 → Post Works P1 +41 frontend tests; OI-01 作为已知设计缺口延后处理
 - Next: P2-M1 Post Works 剩余项 (P2 tool-concurrency-metadata / P3 atomic-coding-tools, 均 draft); 之后按 roadmap 进入 P2-M2
 - Risk: 无阻塞风险
+
+## 2026-04-07 (local) | P2-M1 Post Works P2: Tool Concurrency Metadata
+- Status: done
+- Done: BaseTool 增加 is_read_only + is_concurrency_safe 双标记元数据 (fail-closed 默认); runtime 自动将同 turn 连续只读并发安全工具组为 bounded parallel group (max 3, asyncio.TaskGroup); 保持 ToolCallInfo/transcript 确定性顺序; 2 轮 review 修复 3 个 findings (文件拆分/ToolCallInfo 时序/tool_index 偏移)
+- Detail:
+  - `src/agent/tool_concurrency.py`: 新模块, group builder + parallel executor + observability (274 行)
+  - `src/agent/message_flow.py`: 三阶段编排 (通知→执行→落盘), 从 960 行降至 710 行
+  - V1 标注: current_time, memory_search, soul_status → True+True; read_file → read_only only; 写入型工具保持 False+False
+  - 37 新增测试覆盖 metadata/grouping/parallel overlap/timing/failure signals/regression
+- Evidence: commit `ab51a69`; `dev_docs/logs/phase2/p2-m1-post-works-p2_acceptance_2026-04-07.md`; 1553 tests passed
+- Plan: `dev_docs/plans/phase2/p2-m1-post-works-p2_tool-concurrency-metadata_2026-04-06.md`
+- Next: P2-M1 Post Works P3 (atomic coding tools, draft); 之后按 roadmap 进入 P2-M2
+- Risk: 无
