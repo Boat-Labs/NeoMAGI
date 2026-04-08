@@ -602,3 +602,19 @@ doc_id_assigned_at: 2026-04-07T09:55:53+02:00
 - Plan: `dev_docs/plans/phase2/p2-m2a_procedure-runtime-core_2026-04-07.md`
 - Next: P2-M2a-post (procedure_spec governance adapter); 之后按 roadmap 进入 P2-M2b (multi-agent handoff)
 - Risk: procedure_spec 仍为 growth reserved kind，governance adapter 需要独立 follow-up
+
+## 2026-04-08 (local) | P2-M2b: Multi-Agent Runtime
+- Status: done
+- Done: 交付最小可用 Multi-Agent Runtime — AgentRole/RoleSpec 类型 + ProcedureActionDeps (TYPE_CHECKING guard) + ToolContext 扩展 (actor/procedure_deps) + BaseTool.is_procedure_only + HandoffPacket (32KB bounded) + WorkerExecutor (多 turn, 三重 tool 过滤: group + procedure_only + risk_level) + ReviewerExecutor/ReviewTool + DelegationTool + PublishTool (staging → publish → memory flush D9) + purposeful compact (task state extraction) + gateway 注册; 5 轮计划审阅修复 16 findings + 3 轮实现审阅修复 4 findings (worker 输出契约, failed delegation staging, guardrail bypass, high-risk tool exclusion)
+- Detail:
+  - `src/procedures/`: 8 个新模块 (roles, deps, handoff, worker, reviewer, delegation, publish, compact)
+  - `src/tools/`: context.py 扩展 (actor, procedure_deps), base.py 新增 is_procedure_only
+  - `src/procedures/runtime.py`: D7 is_procedure_only mode bypass
+  - `src/agent/tool_concurrency.py`: D8 ProcedureActionDeps 注入 + D9 publish flush 路由
+  - `src/agent/compaction.py` + `compaction_flow.py`: task_state_text 参数传递
+  - `src/gateway/app.py`: _register_procedure_tools() 注册 3 个 procedure-only tools
+  - 93 新增测试 (89 unit + 4 E2E multi-agent flow)
+- Evidence: `dev_docs/logs/phase2/p2-m2b_multi-agent-runtime_2026-04-08.md`; 1794 tests passed
+- Plan: `dev_docs/plans/phase2/p2-m2b_multi-agent-runtime_2026-04-07.md`
+- Next: P2-M2a-post (procedure_spec governance adapter); 之后按 roadmap 考虑 P2-M3 (身份认证/记忆质量)
+- Risk: worker 当前排除所有 high-risk tools，后续可能需要受控的 write 委托路径
