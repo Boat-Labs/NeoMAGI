@@ -245,7 +245,27 @@ def _build_procedure_runtime(db_session_factory, tool_registry):
     guard_registry = ProcedureGuardRegistry()
     spec_registry = ProcedureSpecRegistry(tool_registry, context_registry, guard_registry)
     store = ProcedureStore(db_session_factory)
+
+    # P2-M2b: register procedure-only tools (D7 — stateless shells)
+    _register_procedure_tools(tool_registry)
+
     return ProcedureRuntime(spec_registry, context_registry, guard_registry, store, tool_registry)
+
+
+def _register_procedure_tools(tool_registry):
+    """Register DelegationTool / ReviewTool / PublishTool (P2-M2b D7).
+
+    These are stateless shells with allowed_modes=frozenset() (not ambient).
+    They read deps from ProcedureActionDeps at execution time (D8).
+    """
+    from src.procedures.delegation import DelegationTool
+    from src.procedures.publish import PublishTool
+    from src.procedures.reviewer import ReviewTool
+
+    for tool_cls in (DelegationTool, ReviewTool, PublishTool):
+        tool = tool_cls(tool_registry) if tool_cls is DelegationTool else tool_cls()
+        if tool_registry.get(tool.name) is None:
+            tool_registry.register(tool)
 
 
 def _build_provider_registry(settings, session_manager, memory_searcher,

@@ -94,10 +94,11 @@ ProcedureActionGuard = Callable[
 
 
 class ProcedureExecutionMetadata(BaseModel):
-    """Execution context reserved for future multi-principal / shared-space.
+    """Execution context for actor / principal / shared-space tracking.
 
-    P2-M2a does NOT interpret these fields — they exist only to ensure
-    future extensions face validated, bounded data instead of arbitrary JSON.
+    P2-M2b uses ``actor`` (string value of AgentRole enum, e.g. "primary").
+    Convert with ``AgentRole(metadata.actor)`` or ``role.value``.
+    Other fields remain reserved for P2-M3+ shared-space extensions.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

@@ -21,8 +21,13 @@ async def try_compact(
     current_user_seq: int,
     lock_token: str,
     scope_key: str,
+    task_state_text: str | None = None,
 ) -> CompactionResult | None:
-    """Execute compaction with full error handling."""
+    """Execute compaction with full error handling.
+
+    If *task_state_text* is provided, it is passed through to CompactionEngine
+    to preserve task-critical info during active procedure compaction (D5).
+    """
     try:
         result = await _run_compaction(
             loop,
@@ -33,6 +38,7 @@ async def try_compact(
             last_compaction_seq=last_compaction_seq,
             compacted_context=compacted_context,
             current_user_seq=current_user_seq,
+            task_state_text=task_state_text,
         )
     except Exception:
         return await _recover_from_compaction_failure(
@@ -92,6 +98,7 @@ async def _run_compaction(
     last_compaction_seq: int | None,
     compacted_context: str | None,
     current_user_seq: int,
+    task_state_text: str | None = None,
 ) -> CompactionResult:
     all_messages = loop._session_manager.get_history_with_seq(session_id)
     return await loop._compaction_engine.compact(
@@ -104,6 +111,7 @@ async def _run_compaction(
         current_user_seq=current_user_seq,
         model=loop._model,
         session_id=session_id,
+        task_state_text=task_state_text,
     )
 
 

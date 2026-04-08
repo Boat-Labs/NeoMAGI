@@ -222,11 +222,14 @@ class ProcedureRuntime:
                 PROCEDURE_TOOL_UNAVAILABLE,
                 f"Underlying tool '{action.tool}' not found",
             )
-        if mode is not None and not self._tools.check_mode(action.tool, mode):
-            return _error(
-                PROCEDURE_ACTION_DENIED,
-                f"Tool '{action.tool}' not available in mode '{mode}'",
-            )
+        # D7: procedure-only tools (is_procedure_only=True) skip ambient mode check.
+        # Normal tools always get mode-checked, even inside procedures.
+        if mode is not None and not tool.is_procedure_only:
+            if not self._tools.check_mode(action.tool, mode):
+                return _error(
+                    PROCEDURE_ACTION_DENIED,
+                    f"Tool '{action.tool}' not available in mode '{mode}'",
+                )
 
         # 6. Existing mode / risk guard (before procedure guard)
         if guard_state is not None:

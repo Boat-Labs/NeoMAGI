@@ -89,6 +89,19 @@ class BaseTool(ABC):
         """
         return False
 
+    @property
+    def is_procedure_only(self) -> bool:
+        """Whether this tool is exclusively for procedure actions (D7).
+
+        Procedure-only tools are registered in ToolRegistry for static
+        validation but hidden from ambient/worker schemas. ProcedureRuntime
+        skips the ambient mode check for these tools.
+
+        Fail-closed default: False. Procedure-only tools must explicitly
+        override to return True.
+        """
+        return False
+
     @abstractmethod
     async def execute(self, arguments: dict, context: ToolContext | None = None) -> dict:
         """Execute the tool with given arguments and optional runtime context.

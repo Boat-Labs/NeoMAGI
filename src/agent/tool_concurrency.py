@@ -217,7 +217,14 @@ async def _run_procedure_action(
             "message": "No active procedure for this session",
         })
 
-    tool_context = ToolContext(scope_key=state.scope_key, session_id=state.session_id)
+    # D8: build ProcedureActionDeps and inject into ToolContext
+    procedure_deps = _build_procedure_deps(loop, state)
+    tool_context = ToolContext(
+        scope_key=state.scope_key,
+        session_id=state.session_id,
+        actor=_resolve_actor(),
+        procedure_deps=procedure_deps,
+    )
     result = await loop._procedure_runtime.apply_action(
         instance_id=active.instance_id,
         action_id=action_id,
@@ -230,6 +237,8 @@ async def _run_procedure_action(
 
     if isinstance(result, dict) and result.get("ok", False):
         await _refresh_procedure_state(loop, state)
+        # D9: check for publish flush signal
+        await _handle_publish_flush(loop, state, result)
 
     failure_signal: str | None = None
     if isinstance(result, dict) and not result.get("ok", True):
@@ -239,6 +248,54 @@ async def _run_procedure_action(
         else:
             failure_signal = f"tool_failure:{action_id}"
     return _ToolOutcome(tool_call=tool_call, result=result, failure_signal=failure_signal)
+
+
+def _build_procedure_deps(loop: Any, state: Any) -> Any:
+    """Build ProcedureActionDeps from AgentLoop state (D8)."""
+    from src.procedures.deps import ProcedureActionDeps
+
+    spec = None
+    if loop._procedure_runtime and state.active_procedure:
+        spec = loop._procedure_runtime._specs.get(state.active_procedure.spec_id)
+    return ProcedureActionDeps(
+        active_procedure=state.active_procedure,
+        spec=spec,
+        model_client=loop._model_client,
+        model=loop._model,
+    )
+
+
+def _resolve_actor() -> Any:
+    """Resolve the current actor role. V1: always primary (P1-2r3)."""
+    from src.procedures.roles import AgentRole
+
+    return AgentRole.primary
+
+
+async def _handle_publish_flush(loop: Any, state: Any, result: dict) -> None:
+    """D9: extract publish flush texts and persist via existing pipeline."""
+    flush_texts = result.get("_publish_flush_texts")
+    if not flush_texts:
+        return
+
+    from src.agent.memory_flush import MemoryFlushCandidate
+
+    candidates = [
+        MemoryFlushCandidate(
+            source_session_id=state.session_id,
+            candidate_text=text,
+            constraint_tags=["published_result"],
+            confidence=1.0,
+        )
+        for text in flush_texts
+        if text.strip()
+    ]
+    if candidates and hasattr(loop, "_persist_flush_candidates"):
+        await loop._persist_flush_candidates(
+            candidates,
+            state.session_id,
+            scope_key=state.scope_key,
+        )
 
 
 async def _refresh_procedure_state(loop: Any, state: Any) -> None:

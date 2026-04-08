@@ -140,8 +140,13 @@ class CompactionEngine:
         current_user_seq: int,
         model: str,
         session_id: str = "",
+        task_state_text: str | None = None,
     ) -> CompactionResult:
-        """Execute compaction pipeline: split → flush → summarise → anchor-check."""
+        """Execute compaction pipeline: split → flush → summarise → anchor-check.
+
+        If *task_state_text* is provided (active procedure exists), it is
+        appended to the compaction prompt to preserve task-critical info (D5).
+        """
         zones = self._identify_zones(messages, current_user_seq, last_compaction_seq)
         if zones is None:
             return self._noop(last_compaction_seq)
@@ -155,6 +160,7 @@ class CompactionEngine:
 
         summary_text, status = await self._run_summary(
             compressible_turns, previous_compacted_context, model, session_id,
+            task_state_text=task_state_text,
         )
         if status == "degraded_small_input":
             return self._build_result(
@@ -239,9 +245,13 @@ class CompactionEngine:
         previous_compacted_context: str | None,
         model: str,
         session_id: str,
+        *,
+        task_state_text: str | None = None,
     ) -> tuple[str | None, Literal["success", "degraded", "degraded_small_input"]]:
         """Generate rolling summary via LLM. Returns (text, status)."""
         conversation_text = self._turns_to_text(compressible_turns)
+        if task_state_text:
+            conversation_text += f"\n\nActive procedure task state:\n{task_state_text}"
         input_tokens = self._counter.count_text(conversation_text)
         max_summary_tokens = int(input_tokens * 0.3)
 
