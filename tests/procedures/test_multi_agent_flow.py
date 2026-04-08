@@ -97,7 +97,8 @@ class TestDelegationFlowHappyPath:
         reg = ToolRegistry()
         active = _make_active()
         client = _FakeModelClient(
-            worker_answer='{"answer": 42}',
+            # Prompt-compliant nested response: worker extracts inner "result"
+            worker_answer='{"result": {"answer": 42}, "evidence": ["computed"]}',
             review_answer='{"approved": true, "concerns": []}',
         )
         deps = _make_deps(active, client)
@@ -161,8 +162,13 @@ class TestDelegationFlowHappyPath:
 
 class TestDelegationFlowWorkerFailure:
     @pytest.mark.asyncio
-    async def test_worker_failure_stays_in_state(self):
-        """When worker fails, delegation result is ok=False but still stages."""
+    async def test_worker_failure_no_staging_model_retries(self):
+        """When worker fails, delegation returns ok=False without staging.
+
+        M2a's apply_action ignores context_patch on ok=False, so failed
+        results are not staged. The model sees the error and can re-invoke
+        the delegate action to retry.
+        """
         reg = ToolRegistry()
 
         class _FailModelClient:
@@ -181,11 +187,10 @@ class TestDelegationFlowWorkerFailure:
             {"task_brief": "compute something"},
             context=ctx,
         )
-        # Worker failed → delegation reports failure
+        # Worker failed → delegation reports failure, no staging
         assert d_result["ok"] is False
         assert d_result["error_code"] == "WORKER_MODEL_TIMEOUT"
-        # But handoff is still staged (for possible retry)
-        assert d_result["handoff_id"] in d_result["context_patch"]["_pending_handoffs"]
+        assert "context_patch" not in d_result  # no staging on failure
 
 
 # ---------------------------------------------------------------------------

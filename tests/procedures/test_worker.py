@@ -146,6 +146,7 @@ def _worker_role() -> RoleSpec:
 class TestWorkerExecutorNormalCompletion:
     @pytest.mark.asyncio
     async def test_final_answer_on_first_call(self):
+        """Worker extracts inner 'result' dict from prompt-compliant response."""
         client = _FakeModelClient([
             _FakeChatMessage(content='{"result": {"answer": 42}}'),
         ])
@@ -154,7 +155,20 @@ class TestWorkerExecutorNormalCompletion:
 
         assert result.ok is True
         assert result.iterations_used == 1
-        assert result.result.get("result", {}).get("answer") == 42
+        # Worker extracts inner "result" → result.result == {"answer": 42}
+        assert result.result.get("answer") == 42
+
+    @pytest.mark.asyncio
+    async def test_flat_answer_also_works(self):
+        """Worker handles flat JSON (no inner 'result' key)."""
+        client = _FakeModelClient([
+            _FakeChatMessage(content='{"answer": 42}'),
+        ])
+        executor = WorkerExecutor(client, _make_registry(), _worker_role(), model="test")
+        result = await executor.execute(_make_packet())
+
+        assert result.ok is True
+        assert result.result.get("answer") == 42
 
     @pytest.mark.asyncio
     async def test_tool_call_then_answer(self):
@@ -239,3 +253,55 @@ class TestWorkerExecutorModelError:
 
         assert result.ok is False
         assert result.error_code == "WORKER_MODEL_TIMEOUT"
+
+
+class TestWorkerToolContextInjection:
+    @pytest.mark.asyncio
+    async def test_tool_receives_context(self):
+        """Worker injects ToolContext with scope_key/session_id into tool calls."""
+        received_contexts: list = []
+
+        class _CtxCaptureTool(BaseTool):
+            @property
+            def name(self) -> str:
+                return "ctx_capture"
+
+            @property
+            def description(self) -> str:
+                return "Captures context"
+
+            @property
+            def parameters(self) -> dict:
+                return {"type": "object", "properties": {}}
+
+            @property
+            def group(self) -> ToolGroup:
+                return ToolGroup.code
+
+            @property
+            def allowed_modes(self) -> frozenset[ToolMode]:
+                return frozenset({ToolMode.coding})
+
+            async def execute(self, arguments: dict, context=None) -> dict:
+                received_contexts.append(context)
+                return {"ok": True}
+
+        client = _FakeModelClient([
+            _FakeChatMessage(
+                content="",
+                tool_calls=[{"id": "tc1", "name": "ctx_capture", "arguments": "{}"}],
+            ),
+            _FakeChatMessage(content='{"done": true}'),
+        ])
+        reg = _make_registry(_CtxCaptureTool())
+        executor = WorkerExecutor(
+            client, reg, _worker_role(), model="test",
+            scope_key="test-scope", session_id="test-sess",
+        )
+        await executor.execute(_make_packet())
+
+        assert len(received_contexts) == 1
+        ctx = received_contexts[0]
+        assert ctx is not None
+        assert ctx.scope_key == "test-scope"
+        assert ctx.session_id == "test-sess"

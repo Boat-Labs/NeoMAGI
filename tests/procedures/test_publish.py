@@ -69,6 +69,17 @@ class TestMergeWorkerResult:
         patch = merge_worker_result(raw, (), {})
         assert patch == {}
 
+    def test_prompt_compliant_worker_output(self):
+        """WorkerResult.model_dump() stores inner result after extraction.
+
+        Worker extracts the inner "result" dict, so staging has
+        {"ok": true, "result": {"answer": 42}, ...}
+        and merge_worker_result finds "answer" in raw["result"].
+        """
+        raw = {"ok": True, "result": {"answer": 42}, "evidence": [], "iterations_used": 1}
+        patch = merge_worker_result(raw, ("answer",), {})
+        assert patch == {"answer": 42}
+
 
 # ---------------------------------------------------------------------------
 # PublishTool

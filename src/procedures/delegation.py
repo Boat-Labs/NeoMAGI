@@ -154,6 +154,8 @@ class DelegationTool(BaseTool):
             tool_registry=registry if hasattr(registry, "list_tools") else registry,
             role_spec=worker_role,
             model=deps.model,
+            scope_key=context.scope_key if context else "main",
+            session_id=context.session_id if context else "main",
         )
 
         # Execute worker
@@ -166,15 +168,27 @@ class DelegationTool(BaseTool):
             iterations_used=worker_result.iterations_used,
         )
 
+        # Worker failure: don't stage, return error for model to retry.
+        # M2a's apply_action() ignores context_patch on ok=False anyway,
+        # so staging failed results would be a no-op in runtime.
+        if not worker_result.ok:
+            return {
+                "ok": False,
+                "handoff_id": packet.handoff_id,
+                "worker_ok": False,
+                "iterations_used": worker_result.iterations_used,
+                "error_code": worker_result.error_code or "DELEGATION_WORKER_FAILED",
+                "error_detail": worker_result.error_detail,
+            }
+
         # Read-modify-write _pending_handoffs (P2-5r2: full dict for shallow merge)
         current_handoffs = dict(deps.active_procedure.context.get("_pending_handoffs", {}))
         current_handoffs[packet.handoff_id] = worker_result.model_dump()
 
         return {
-            "ok": worker_result.ok,
+            "ok": True,
             "handoff_id": packet.handoff_id,
-            "worker_ok": worker_result.ok,
+            "worker_ok": True,
             "iterations_used": worker_result.iterations_used,
-            "error_code": worker_result.error_code or "",
             "context_patch": {"_pending_handoffs": current_handoffs},
         }

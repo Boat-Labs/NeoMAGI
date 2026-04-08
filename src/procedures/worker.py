@@ -67,11 +67,15 @@ class WorkerExecutor:
         tool_registry: ToolRegistry,
         role_spec: RoleSpec,
         model: str = "gpt-4o-mini",
+        scope_key: str = "main",
+        session_id: str = "main",
     ) -> None:
         self._model_client = model_client
         self._tool_registry = tool_registry
         self._role_spec = role_spec
         self._model = model
+        self._scope_key = scope_key
+        self._session_id = session_id
 
     async def execute(self, packet: HandoffPacket) -> WorkerResult:
         """Execute a delegated task within bounded iterations."""
@@ -115,9 +119,14 @@ class WorkerExecutor:
                 # Final answer — extract from content
                 content = response.content or ""
                 result_dict = _try_parse_json(content)
+                # Extract inner "result" dict if model followed prompt convention
+                # {"result": {...}, "evidence": [...], "open_questions": [...]}
+                inner_result = result_dict.get("result", result_dict)
+                if not isinstance(inner_result, dict):
+                    inner_result = result_dict
                 return WorkerResult(
                     ok=True,
-                    result=result_dict,
+                    result=inner_result,
                     iterations_used=iterations_used,
                     evidence=tuple(result_dict.get("evidence", collected_evidence)),
                     open_questions=tuple(
@@ -155,7 +164,13 @@ class WorkerExecutor:
                     args = {}
 
                 try:
-                    result = await tool.execute(args)
+                    from src.tools.context import ToolContext as _TC
+
+                    worker_ctx = _TC(
+                        scope_key=self._scope_key,
+                        session_id=self._session_id,
+                    )
+                    result = await tool.execute(args, worker_ctx)
                     result_str = json.dumps(result, ensure_ascii=False, default=str)
                 except Exception as exc:
                     logger.warning(
