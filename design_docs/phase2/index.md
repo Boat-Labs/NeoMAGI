@@ -22,10 +22,13 @@ doc_id_assigned_at: 2026-03-21T11:30:15+01:00
 4. `design_docs/phase2/p2_m2_architecture.md`
    - `P2-M2`：Procedure Runtime、多 agent runtime、handoff / steering / resume。
 
-5. `design_docs/phase2/p2_m3_architecture.md`
+5. `design_docs/phase2/p2_m2_self_evolution_demo.md`
+   - `P2` 首个重要 demo 方案：在 `P2-M2b` 之后，用 CLI + beads + git worktree 驱动受治理的自我演进闭环。
+
+6. `design_docs/phase2/p2_m3_architecture.md`
    - `P2-M3`：身份认证、用户连续性、Shared Companion / relationship shared space、记忆质量与 memory applications。
 
-6. `design_docs/phase2/p2_m4_architecture.md`
+7. `design_docs/phase2/p2_m4_architecture.md`
    - `P2-M4`：外部协作表面、Slack、浏览器/外部平台读写边界。
 
 ## 2. 跨阶段设计（按需）
