@@ -69,6 +69,7 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0058 | Coding mode open conditions | accepted | 2026-04-07 | `decisions/0058-coding-mode-open-conditions.md` |
 | 0059 | Shared Companion relationship-space boundary | accepted | 2026-04-07 | `decisions/0059-shared-companion-relationship-space-boundary.md` |
 | 0060 | Memory source ledger: DB truth with workspace projections | accepted | 2026-04-11 | `decisions/0060-memory-source-ledger-db-with-workspace-projections.md` |
+| 0061 | Phase 2 scope collapse and P3 self-evolution | accepted | 2026-04-11 | `decisions/0061-phase2-scope-collapse-and-p3-self-evolution.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。

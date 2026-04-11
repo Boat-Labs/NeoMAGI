@@ -7,6 +7,7 @@ doc_id_assigned_at: 2026-03-05T23:51:27+01:00
 
 - Status: accepted
 - Date: 2026-03-05
+- Amended by: ADR 0061
 
 ## 选了什么
 - 将 NeoMAGI 的多 agent 定义固定为：在**同一个用户利益**与**同一个 SOUL / principal**约束下的多个受治理执行单元，而不是默认的“多自我 / 多人格”系统。
@@ -49,4 +50,4 @@ doc_id_assigned_at: 2026-03-05T23:51:27+01:00
 - agent 间默认不共享整段原始上下文，应优先交换 task brief、constraints、intermediate results、evidence 与 open questions。
 - 高风险动作仍应通过主 agent 或显式 procedure checkpoint 触发，不因引入多 agent 而分散最终责任。
 - 若未来实现多视角接口，应视为同一 SOUL 下的 stance / perspective 扩展层；可由用户自定义，但不默认进入核心 prompt 身份结构。
-- Slack / 群聊若进入后续路线图，应作为 `P2-M4` 的可选交互表面，服务协作与审批，而不是作为“多人格讨论场”的默认实现。
+- Slack / 群聊暂不进入已规划 milestone；若未来进入路线图，也应作为可选协作 / 审批 / 通知表面，而不是作为“多人格讨论场”的默认实现。

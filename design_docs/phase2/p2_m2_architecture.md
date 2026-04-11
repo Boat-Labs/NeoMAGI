@@ -81,7 +81,7 @@ doc_id_assigned_at: 2026-03-07T17:15:06+01:00
   - `reviewer / critic agent`
 - 所有角色共享同一用户利益与同一 `SOUL / principal`。
 - 子 agent 默认不拥有独立长期记忆与独立长期身份。
-- 这里的 `principal` 仍是当前执行所代表的用户利益轴；未来 Shared Companion 场景中的多 principal / shared space 不应通过多 SOUL 或多长期人格来表达，而应通过 `P2-M3` 的 membership 与 memory visibility policy 表达。
+- 这里的 `principal` 仍是当前执行所代表的用户利益轴；未来 Shared Companion 场景中的多 principal / shared space 不应通过多 SOUL 或多长期人格来表达，而应先通过 `P2-M3` 的 principal / visibility / deny-by-default shared-space skeleton 留出安全地基。
 
 ### 4.3 Handoff / Exchange Plane
 
@@ -115,7 +115,7 @@ doc_id_assigned_at: 2026-03-07T17:15:06+01:00
   - last valid result
   - pending approvals
 - 该层既服务长任务恢复，也服务 multi-agent handoff。
-- compacted task state 不应混入未授权私有记忆；若未来被发布到 shared space，必须经 `P2-M3` 的 consent / visibility policy 过滤。
+- compacted task state 不应混入未授权私有记忆；若未来被发布到 shared space，必须经 `P2-M3` 的 visibility guard 和后续完整 consent policy 过滤。
 
 ### 4.6 Shared Companion Reserve
 

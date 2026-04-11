@@ -3,11 +3,11 @@ doc_id: 019d6c2c-f782-74fe-84e7-da09b8248d66
 doc_id_format: uuidv7
 doc_id_assigned_at: 2026-04-08T08:19:39+00:00
 ---
-# P2 Self-Evolution 分阶段计划（提案）
+# P2-M2 Post / P3 Self-Evolution 分阶段计划（提案）
 
-> 状态：proposed  
-> 当前结论：完整 `Self-Evolution CLI Demo V1` 不再排在 `P2-M3` 前；`P2-M3` 前只补两个窄前置：`P2-M2c` 与 `P2-M2d`。  
-> 完整 demo 建议排期：`P2-M5 Governed Self-Evolution Workflow`
+> 状态：proposed
+> 当前结论：完整 `Self-Evolution CLI Demo V1` 不再排在 `P2-M3` 前；`P2-M3` 前只补两个窄前置：`P2-M2c` 与 `P2-M2d`。
+> 完整 workflow 迁移到 Phase 3 候选方向，不再作为 P2 milestone。
 
 ## 1. 结论先行
 
@@ -22,15 +22,14 @@ doc_id_assigned_at: 2026-04-08T08:19:39+00:00
 P2-M2c: ProcedureSpec Governance Adapter
 P2-M2d: Memory Source Ledger Prep for P2-M3
 P2-M3: Identity / Principal / Visibility / Memory Policy
-P2-M4: External Collaboration / Approval / Action Surfaces
-P2-M5: Governed Self-Evolution Workflow
+P3: Governed Self-Evolution Workflow
 ```
 
 因此：
 
 - `P2-M2c` 只让 NeoMAGI 获得“安全修改流程定义”的能力。
 - `P2-M2d` 只按 ADR 0060 为 `P2-M3` 准备最薄的 DB memory source ledger 写入地基。
-- 完整 `Self-Evolution CLI Demo V1` 推迟到 `P2-M5`，作为正式 milestone，而不是插在 `P2-M2` 和 `P2-M3` 之间的 demo。
+- 完整 `Self-Evolution CLI Demo V1` 移出 P2，作为 Phase 3 候选工作流方向，而不是插在 `P2-M2` 和 `P2-M3` 之间的 demo。
 
 ## 2. 为什么拆分
 
@@ -49,7 +48,7 @@ P2-M5: Governed Self-Evolution Workflow
 - terminal 后无 completion signal，当前只靠请求级写工具断路器止血。
 - 外部 CLI wrapper 的错误模式远复杂于单 turn `BaseTool.execute()`。
 
-拆分后，`P2-M2c` 和 `P2-M2d` 各自保持可验收的小边界，完整 workflow 等 `P2-M3` / `P2-M4` 的 identity、visibility、approval、external action surface 稳定后再做。
+拆分后，`P2-M2c` 和 `P2-M2d` 各自保持可验收的小边界，完整 workflow 等 `P2-M3` 的 principal、visibility、memory ledger 边界稳定后，再进入 Phase 3 评估。
 
 ## 3. P2-M2c：ProcedureSpec Governance Adapter
 
@@ -109,7 +108,7 @@ proposal -> eval -> apply -> rollback / veto -> audit
 
 ### 目标
 
-按 ADR 0060 先完成最薄的 DB ledger 写入预备，降低 `P2-M3` identity / visibility / shared-space memory 的迁移风险。
+按 ADR 0060 先完成最薄的 DB ledger 写入预备，降低 `P2-M3` identity / visibility / shared-space safety skeleton 的迁移风险。
 
 它回答的问题是：
 
@@ -147,29 +146,28 @@ proposal -> eval -> apply -> rollback / veto -> audit
 - parity check 能报告双写不一致。
 - 所有现有 memory recall / search 行为保持兼容。
 
-## 5. P2-M3 与 P2-M4 的前置关系
+## 5. P2-M3 与 Phase 3 的前置关系
 
 `P2-M3` 承接 identity、principal、visibility 与 memory policy：
 
 - `principal_id` / binding / verified identity
 - per-user continuity
-- private / shareable summary / shared-space visibility
-- relationship shared-space membership
-- memory application 入口
+- private / shareable summary / shared-space deny-by-default visibility
+- relationship shared-space metadata skeleton
 - DB ledger current view / reindex 切换
 
-`P2-M4` 承接 external collaboration 与 action surface：
+完整 self-evolution workflow 进入 Phase 3 后，仍不得假设已有通用外部动作面。首轮应收窄为：
 
-- Slack / 群聊 / approval surface
-- external read / draft / write action classification
-- 外部写动作的审批、审计、停用 / 回滚
-- channel / thread 到已授权 shared space 的映射
+- local repo / local git worktree
+- explicit human gates
+- runner contract / fixture 或最多一个真实 runner
+- 不接 Slack、浏览器或外部平台写动作
 
-完整 self-evolution workflow 依赖这两层，否则 human gate 与外部 CLI action 会缺少稳定 principal、approval 与 audit 语义。
+也就是说，Phase 3 可以重新评估受治理自我演进工作流，但不把 Slack / 群聊 / 外部平台动作作为默认前置。
 
-## 6. P2-M5：Governed Self-Evolution Workflow
+## 6. Phase 3：Governed Self-Evolution Workflow
 
-`P2-M5` 才承载完整 `Self-Evolution CLI Demo V1`。
+完整 `Self-Evolution CLI Demo V1` 迁移到 Phase 3 候选方向。
 
 目标叙述：
 
@@ -179,10 +177,9 @@ proposal -> eval -> apply -> rollback / veto -> audit
 
 - beads issue 驱动的 sub-milestone execution ledger。
 - fresh branch / worktree 隔离。
-- Claude Code CLI planner / implementer runner。
-- Codex CLI reviewer runner。
-- 计划审阅循环，最多 3-5 轮。
-- 实现审阅循环，最多 3-5 轮。
+- runner contract / fixture 或一个真实 coding agent runner。
+- 计划审阅循环，首轮可限制为 1 轮。
+- 实现审阅循环，首轮可限制为 1 轮或仅做 dry-run rehearsal。
 - scope gate / plan gate / UAT gate。
 - closeout artifacts：
   - approved plan
@@ -197,7 +194,7 @@ proposal -> eval -> apply -> rollback / veto -> audit
 
 - 不自动 merge 到 `main`。
 - 不自动判定 UAT 通过。
-- 不绕过人类审批执行外部写动作。
+- 不接 Slack / 群聊 / 浏览器 / 外部平台写动作，除非未来另行规划 external action surface。
 - 不把单次成功 demo 宣称为无边界自治自改能力。
 
 ### 验收口径
@@ -215,6 +212,7 @@ proposal -> eval -> apply -> rollback / veto -> audit
 - 原 `P2-M2b` 后立即做完整 CLI demo：撤回。
 - 原首选 scope `procedure_spec governance adapter`：保留，并提升为 `P2-M2c`。
 - ADR 0060 的最小 schema / writer 预备：新增为 `P2-M2d`。
-- 完整 CLI workflow：推迟到 `P2-M5`。
+- 原 `P2-M5`：移出 P2，迁移为 Phase 3 候选方向。
+- Slack / 群聊 / 外部协作表面：暂不规划。
 
 这样保留“受治理自我演进”的长期方向，同时避免在 P2-M2 hotfix 后立刻引入 external CLI、human gate、memory migration 和 worktree orchestration 的混合风险。

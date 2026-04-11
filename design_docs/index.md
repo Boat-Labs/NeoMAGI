@@ -12,6 +12,7 @@ doc_id_assigned_at: 2026-04-06T21:49:14+02:00
 
 - Phase 1 milestone 设计文档已整体归档到 `design_docs/phase1/`。
 - Phase 2 文档已开始进入 `design_docs/phase2/`。
+- Phase 3 当前仅有候选方向入口 `design_docs/phase3/`，不作为 active roadmap。
 - 根目录当前只保留跨阶段文档与当前 phase 的高层入口，目的是减少默认上下文负担。
 - 为避免跨 phase 歧义，跨阶段文档中的 milestone 编号默认采用 `P1-M*` / `P2-M*` 形式。
 - 若任务明确需要历史 milestone 细节、旧验收口径或回归考古，再进入 `design_docs/phase1/`。
@@ -22,7 +23,7 @@ doc_id_assigned_at: 2026-04-06T21:49:14+02:00
    - 当前生效中的 Phase 2 产品路线图草案。
 
 2. `design_docs/phase2/index.md`
-   - Phase 2 技术架构索引：`P2-M1 ~ P2-M4` 的 architecture 文档入口。
+   - Phase 2 技术架构索引：当前范围收敛为 `P2-M1 ~ P2-M3`，并保留 `P2-M2c` / `P2-M2d` 后置地基。
 
 3. `design_docs/GLOSSARY.md`
    - 轻量级 Domain Ontology：核心术语、别名、定义与关系。
@@ -34,7 +35,7 @@ doc_id_assigned_at: 2026-04-06T21:49:14+02:00
    - 运行时 prompt 文件加载顺序、优先级与 workspace context 分层。
 
 6. `design_docs/memory_architecture_v2.md`
-   - 长期 memory 原则：workspace 真源、retrieval plane、kernel / applications 分层。
+   - 长期 memory 原则：DB append-only source ledger、workspace projection / export、retrieval plane、kernel / applications 分层。
 
 7. `design_docs/procedure_runtime.md`
    - Phase 2 方向的 deterministic procedure / runtime control 正式设计文档。
@@ -50,6 +51,9 @@ doc_id_assigned_at: 2026-04-06T21:49:14+02:00
 
 11. `design_docs/phase1/index.md`
    - 只有在需要 Phase 1 历史设计细节时再进入。
+
+12. `design_docs/phase3/index.md`
+   - 只有在需要 Phase 3 候选方向时再进入；当前不作为 active implementation plan。
 
 ## 3. 当前默认激活文档
 
