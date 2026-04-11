@@ -38,10 +38,10 @@ _KIND_POLICIES: dict[GrowthObjectKind, GrowthKindPolicy] = {
     ),
     GrowthObjectKind.procedure_spec: GrowthKindPolicy(
         kind=GrowthObjectKind.procedure_spec,
-        onboarding_state=GrowthOnboardingState.reserved,
+        onboarding_state=GrowthOnboardingState.onboarded,
         requires_explicit_approval=True,
-        adapter_name=None,
-        notes="Reserved for P2-M2. Stateful/multi-turn runtime deferred.",
+        adapter_name="procedure_spec",
+        notes="Onboarded in P2-M2c. Stateful/multi-turn governed procedure.",
     ),
     GrowthObjectKind.memory_application_spec: GrowthKindPolicy(
         kind=GrowthObjectKind.memory_application_spec,

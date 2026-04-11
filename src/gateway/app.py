@@ -125,7 +125,16 @@ async def _run_startup_preflight(app, settings, engine):
         )
 
 
-def _build_governance_engine(db_session_factory, evolution_engine, skill_store, tool_registry):
+def _build_governance_engine(
+    db_session_factory,
+    evolution_engine,
+    skill_store,
+    tool_registry,
+    *,
+    procedure_registries=None,
+    procedure_governance_store=None,
+    procedure_store=None,
+):
     """Build governance engine with all onboarded adapters.
 
     Returns ``(engine, wrapper_tool_store)`` so the caller can restore
@@ -145,13 +154,29 @@ def _build_governance_engine(db_session_factory, evolution_engine, skill_store, 
     wrapper_tool_adapter = WrapperToolGovernedObjectAdapter(
         wrapper_tool_store, tool_registry
     )
+
+    adapters: dict = {
+        GrowthObjectKind.soul: soul_adapter,
+        GrowthObjectKind.skill_spec: skill_adapter,
+        GrowthObjectKind.wrapper_tool: wrapper_tool_adapter,
+    }
+
+    if procedure_registries and procedure_governance_store and procedure_store:
+        from src.growth.adapters.procedure_spec import ProcedureSpecGovernedObjectAdapter
+
+        procedure_spec_adapter = ProcedureSpecGovernedObjectAdapter(
+            governance_store=procedure_governance_store,
+            spec_registry=procedure_registries.spec_registry,
+            tool_registry=tool_registry,
+            context_registry=procedure_registries.context_registry,
+            guard_registry=procedure_registries.guard_registry,
+            procedure_store=procedure_store,
+        )
+        adapters[GrowthObjectKind.procedure_spec] = procedure_spec_adapter
+
     policy_registry = PolicyRegistry()
     engine = GrowthGovernanceEngine(
-        adapters={
-            GrowthObjectKind.soul: soul_adapter,
-            GrowthObjectKind.skill_spec: skill_adapter,
-            GrowthObjectKind.wrapper_tool: wrapper_tool_adapter,
-        },
+        adapters=adapters,
         policy_registry=policy_registry,
     )
     return engine, wrapper_tool_store
@@ -209,14 +234,40 @@ async def _build_memory_and_tools(settings, db_session_factory):
     skill_resolver = SkillResolver(registry=skill_store)
     skill_projector = SkillProjector()
 
+    # 1. Construct procedure registries (shared bundle)
+    procedure_registries = _build_procedure_registries(tool_registry)
+
+    # 2. Register procedure-only tools (BEFORE restore — restore needs tool validation)
+    _register_procedure_tools(tool_registry)
+
+    # 3. Construct procedure governance store + procedure store
+    from src.procedures.governance_store import ProcedureSpecGovernanceStore
+    from src.procedures.store import ProcedureStore
+
+    procedure_governance_store = ProcedureSpecGovernanceStore(db_session_factory)
+    procedure_store = ProcedureStore(db_session_factory)
+
+    # 4. Build governance engine (with full procedure bundle)
     governance_engine, wrapper_tool_store = _build_governance_engine(
-        db_session_factory, evolution_engine, skill_store, tool_registry
+        db_session_factory, evolution_engine, skill_store, tool_registry,
+        procedure_registries=procedure_registries,
+        procedure_governance_store=procedure_governance_store,
+        procedure_store=procedure_store,
     )
     skill_learner = SkillLearner(skill_store, governance_engine)
 
+    # 5. Restore active wrappers
     await _restore_active_wrappers(wrapper_tool_store, tool_registry)
 
-    procedure_runtime = _build_procedure_runtime(db_session_factory, tool_registry)
+    # 6. Restore active procedure specs (from governance store → spec_registry)
+    await _restore_active_procedure_specs(
+        procedure_governance_store, procedure_registries.spec_registry,
+    )
+
+    # 7. Construct procedure runtime (using already-restored registries)
+    procedure_runtime = _build_procedure_runtime_from_registries(
+        procedure_registries, db_session_factory, tool_registry, procedure_store,
+    )
 
     return (
         memory_searcher, evolution_engine, tool_registry,
@@ -225,31 +276,73 @@ async def _build_memory_and_tools(settings, db_session_factory):
     )
 
 
-def _build_procedure_runtime(db_session_factory, tool_registry):
-    """Build ProcedureRuntime with empty registries.
+_ProcedureRegistries = None  # populated lazily
 
-    Specs, context models, and guards are registered by callers or at
-    startup.  V1 ships with no built-in specs; the runtime is wired so
-    that ``AgentLoop._procedure_runtime`` is not None and can load/resume
-    active procedures from the DB.
-    """
+
+def _build_procedure_registries(tool_registry):
+    """Build shared procedure registries as a named bundle."""
+    from collections import namedtuple
+
     from src.procedures.registry import (
         ProcedureContextRegistry,
         ProcedureGuardRegistry,
         ProcedureSpecRegistry,
     )
-    from src.procedures.runtime import ProcedureRuntime
-    from src.procedures.store import ProcedureStore
+
+    global _ProcedureRegistries  # noqa: PLW0603
+    if _ProcedureRegistries is None:
+        _ProcedureRegistries = namedtuple(
+            "ProcedureRegistries", ["spec_registry", "context_registry", "guard_registry"]
+        )
 
     context_registry = ProcedureContextRegistry()
     guard_registry = ProcedureGuardRegistry()
     spec_registry = ProcedureSpecRegistry(tool_registry, context_registry, guard_registry)
-    store = ProcedureStore(db_session_factory)
+    return _ProcedureRegistries(spec_registry, context_registry, guard_registry)
 
-    # P2-M2b: register procedure-only tools (D7 — stateless shells)
-    _register_procedure_tools(tool_registry)
 
-    return ProcedureRuntime(spec_registry, context_registry, guard_registry, store, tool_registry)
+async def _restore_active_procedure_specs(governance_store, spec_registry) -> int:
+    """Restore active procedure specs from DB into ProcedureSpecRegistry at startup.
+
+    Returns the number of specs restored.
+    """
+    from src.procedures.types import ProcedureSpec
+
+    payloads = await governance_store.list_active()
+    restored = 0
+    for payload in payloads:
+        try:
+            spec = ProcedureSpec.model_validate(payload)
+            if spec_registry.get(spec.id) is None:
+                spec_registry.register(spec)
+            restored += 1
+        except Exception:
+            spec_id = payload.get("id", "<unknown>")
+            logger.exception("procedure_spec_restore_failed", procedure_spec_id=spec_id)
+    if restored:
+        logger.info("procedure_specs_restored", count=restored, total=len(payloads))
+    return restored
+
+
+def _build_procedure_runtime_from_registries(
+    registries, db_session_factory, tool_registry, procedure_store=None,
+):
+    """Build ProcedureRuntime using pre-constructed registries.
+
+    The registries are shared with the governance adapter so that
+    apply/rollback mutations are visible to the runtime.
+    """
+    from src.procedures.runtime import ProcedureRuntime
+    from src.procedures.store import ProcedureStore
+
+    store = procedure_store or ProcedureStore(db_session_factory)
+    return ProcedureRuntime(
+        registries.spec_registry,
+        registries.context_registry,
+        registries.guard_registry,
+        store,
+        tool_registry,
+    )
 
 
 def _register_procedure_tools(tool_registry):

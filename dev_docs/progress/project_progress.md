@@ -637,3 +637,23 @@ doc_id_assigned_at: 2026-04-07T09:55:53+02:00
 - Hotfix plan: `dev_docs/plans/phase2/p2-m2_hotfix_2026-04-11.md`
 - Next: P2-M2-post (procedure_spec governance adapter); 之后按 roadmap 进入 P2-M3
 - Risk: compaction 后 handoff_id/available_keys 可能丢失 (OI-M2-02 剩余); worker max_iterations=5 对复杂任务偏紧
+
+## 2026-04-11 (local) | P2-M2c: ProcedureSpec Governance Adapter
+- Status: done
+- Done: procedure_spec 从 reserved 进入正式治理路径 (propose → evaluate → apply → rollback / veto → audit)
+- Scope:
+  - ProcedureSpecGovernanceStore (current-state + governance ledger, 2 PG tables, partial unique index)
+  - ProcedureSpecGovernedObjectAdapter (7 协议方法, DB-first + compensating semantics)
+  - PROCEDURE_SPEC_EVAL_CONTRACT_V1 (5 deterministic checks, 覆盖 validate_procedure_spec 全部规则)
+  - Composition root 重构: shared ProcedureRegistries bundle, governance store 注入, startup restore
+  - PolicyRegistry: procedure_spec reserved → onboarded
+- Review Findings (1 P1 + 4 P2, all fixed):
+  - P1: proposal.object_id vs spec.id 绑定 — propose/apply 双重校验
+  - P2: JSONB 归一化 — propose() 入口 model_dump(mode="json")
+  - P2: eval 静态校验覆盖 — 新增 entry_policy + ambient tool collision
+  - P2: applied_at 审计 — status-aware (proposed→NULL, rolled_back→preserve, active→write)
+  - P2: compensate 路径 — proposed 强制清空 applied_at
+- Evidence: `dev_docs/logs/phase2/p2-m2c_procedure-spec-governance-adapter_2026-04-11.md`
+- Tests: 66 新增 (58 unit + 8 integration); 1860 total passed
+- Next: 按 roadmap 进入 P2-M3 (Memory Source Ledger)
+- Risk: eval checks 是重复实现而非直接调用 validate_procedure_spec()，后续若 registry 校验规则变更需同步

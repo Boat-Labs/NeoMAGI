@@ -87,7 +87,6 @@ class TestGetKindPolicyWrapperTool:
 
 class TestGetKindPolicyReserved:
     _RESERVED_KINDS = [
-        GrowthObjectKind.procedure_spec,
         GrowthObjectKind.memory_application_spec,
     ]
 

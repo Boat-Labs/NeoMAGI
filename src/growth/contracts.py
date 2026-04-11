@@ -215,7 +215,7 @@ WRAPPER_TOOL_EVAL_CONTRACT_V1 = GrowthEvalContract(
     budget_limits=(),
 )
 
-# ── procedure_spec: contract skeleton (WP4, implement in P2-M2) ──
+# ── procedure_spec: contract skeleton (WP4, historical — superseded by V1) ──
 
 PROCEDURE_SPEC_EVAL_CONTRACT_SKELETON = GrowthEvalContract(
     contract_id="procedure_spec_skeleton_v1",
@@ -257,6 +257,57 @@ PROCEDURE_SPEC_EVAL_CONTRACT_SKELETON = GrowthEvalContract(
     rollback_preconditions=(
         "previous_version_exists",
         "no_active_instances_running",
+    ),
+    budget_limits=(),
+)
+
+# ── procedure_spec: first formal contract profile (WP4, P2-M2c) ──
+
+PROCEDURE_SPEC_EVAL_CONTRACT_V1 = GrowthEvalContract(
+    contract_id="procedure_spec_v1",
+    object_kind=GrowthObjectKind.procedure_spec,
+    version=1,
+    mutable_surface=(
+        "procedure spec",
+        "state/guard/transition definitions",
+        "context_model binding",
+        "allowed_modes declaration",
+    ),
+    immutable_harness=(
+        "deterministic transition checks",
+        "guard completeness checks",
+        "interrupt/resume safety checks",
+        "checkpoint recoverability checks",
+        "scope claim consistency checks",
+    ),
+    required_checks=(
+        # Boundary gates — deterministic hard checks
+        "transition_determinism",
+        "guard_completeness",
+        "interrupt_resume_safety",
+        # Effect evidence
+        "checkpoint_recoverability",
+        # Scope claim
+        "scope_claim_consistency",
+    ),
+    required_artifacts=(
+        "intent",
+        "risk_notes",
+        "diff_summary",
+        "transition_table",
+        "checkpoint_strategy",
+    ),
+    pass_rule_kind=PassRuleKind.all_required,
+    pass_rule_params=(),
+    veto_conditions=(
+        "non_deterministic_transition",
+        "unrecoverable_checkpoint",
+        "guard_gap",
+        "scope_claim_contradicts_allowed_modes",
+    ),
+    rollback_preconditions=(
+        "no_active_instances_running",
+        "disable_possible",
     ),
     budget_limits=(),
 )
@@ -303,7 +354,7 @@ _CONTRACTS: dict[GrowthObjectKind, GrowthEvalContract] = {
     GrowthObjectKind.soul: SOUL_EVAL_CONTRACT_V1,
     GrowthObjectKind.skill_spec: SKILL_SPEC_EVAL_CONTRACT_V1,
     GrowthObjectKind.wrapper_tool: WRAPPER_TOOL_EVAL_CONTRACT_V1,
-    GrowthObjectKind.procedure_spec: PROCEDURE_SPEC_EVAL_CONTRACT_SKELETON,
+    GrowthObjectKind.procedure_spec: PROCEDURE_SPEC_EVAL_CONTRACT_V1,
     GrowthObjectKind.memory_application_spec: MEMORY_APP_SPEC_EVAL_CONTRACT_SKELETON,
 }
 

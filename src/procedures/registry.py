@@ -112,6 +112,13 @@ class ProcedureSpecRegistry:
         self._specs[spec.id] = spec
         logger.info("procedure_spec_registered", spec_id=spec.id, version=spec.version)
 
+    def unregister(self, spec_id: str) -> None:
+        """Remove a spec by id. Raises KeyError if not registered."""
+        if spec_id not in self._specs:
+            raise KeyError(f"ProcedureSpec not registered: {spec_id}")
+        del self._specs[spec_id]
+        logger.info("procedure_spec_unregistered", spec_id=spec_id)
+
     def get(self, spec_id: str) -> ProcedureSpec | None:
         return self._specs.get(spec_id)
 

@@ -44,6 +44,7 @@ async def ensure_schema(engine: AsyncEngine, schema: str = DB_SCHEMA) -> None:
         await _create_search_trigger(conn, schema)
         await _create_skill_tables(conn, schema)
         await _create_procedure_tables(conn, schema)
+        await _create_procedure_spec_governance_tables(conn, schema)
 
     logger.info("db_schema_ensured", schema=schema)
 
@@ -199,6 +200,48 @@ def _procedure_table_ddl(schema: str) -> list[str]:
             WHERE completed_at IS NULL""",
         f"""CREATE INDEX IF NOT EXISTS idx_active_procedures_session_id
             ON {schema}.active_procedures (session_id)""",
+    ]
+
+
+async def _create_procedure_spec_governance_tables(conn, schema: str) -> None:
+    """Create procedure spec governance tables (IF NOT EXISTS) for fresh-DB startup path.
+
+    Normally created by Alembic migration d1e2f3a4b5c6.
+    """
+    for ddl in _procedure_spec_governance_ddl(schema):
+        await conn.execute(text(ddl))
+
+
+def _procedure_spec_governance_ddl(schema: str) -> list[str]:
+    """Return idempotent DDL for procedure spec governance tables."""
+    return [
+        f"""CREATE TABLE IF NOT EXISTS {schema}.procedure_spec_definitions (
+            id TEXT PRIMARY KEY,
+            version INTEGER NOT NULL,
+            payload JSONB NOT NULL,
+            disabled BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        f"""CREATE TABLE IF NOT EXISTS {schema}.procedure_spec_governance (
+            governance_version BIGSERIAL PRIMARY KEY,
+            procedure_spec_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'proposed',
+            proposal JSONB NOT NULL,
+            eval_result JSONB,
+            created_by TEXT NOT NULL DEFAULT 'agent',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            applied_at TIMESTAMPTZ,
+            rolled_back_from BIGINT
+                REFERENCES {schema}.procedure_spec_governance(governance_version)
+        )""",
+        f"""CREATE UNIQUE INDEX IF NOT EXISTS uq_procedure_spec_governance_single_active
+            ON {schema}.procedure_spec_governance (procedure_spec_id)
+            WHERE status = 'active'""",
+        f"""CREATE INDEX IF NOT EXISTS idx_procedure_spec_governance_spec_id
+            ON {schema}.procedure_spec_governance (procedure_spec_id)""",
+        f"""CREATE INDEX IF NOT EXISTS idx_procedure_spec_governance_status
+            ON {schema}.procedure_spec_governance (status)""",
     ]
 
 

@@ -191,6 +191,16 @@ class ProcedureStore:
                 actual_revision=actual,
             )
 
+    async def has_active_for_spec(self, spec_id: str) -> bool:
+        """Return True if any non-completed procedure instance exists for *spec_id*."""
+        sql = text(
+            f"SELECT 1 FROM {DB_SCHEMA}.active_procedures "
+            "WHERE spec_id = :spec_id AND completed_at IS NULL LIMIT 1"
+        )
+        async with self._db_factory() as db:
+            result = await db.execute(sql, {"spec_id": spec_id})
+            return result.first() is not None
+
     async def _read_current_revision(
         self, db: AsyncSession, instance_id: str,
     ) -> int | None:
