@@ -134,33 +134,23 @@ class ProcedureStore:
         context: dict[str, Any],
         completed_at: bool = False,
     ) -> ActiveProcedure | CasConflict:
-        """CAS update: only succeeds if current revision matches expected.
-
-        Sets ``completed_at = now()`` when *completed_at* is True.
-        Returns the updated ``ActiveProcedure`` on success, or a
-        ``CasConflict`` if the revision has changed.
-        """
+        """CAS update: only succeeds if current revision matches expected."""
         completed_expr = "now()" if completed_at else "NULL"
         sql = jsonb_text(
             f"""
             UPDATE {DB_SCHEMA}.active_procedures SET
-                state = :state,
-                context = :context,
-                revision = :expected_revision + 1,
-                updated_at = now(),
+                state = :state, context = :context,
+                revision = :expected_revision + 1, updated_at = now(),
                 completed_at = {completed_expr}
             WHERE instance_id = :instance_id
-              AND revision = :expected_revision
-              AND completed_at IS NULL
+              AND revision = :expected_revision AND completed_at IS NULL
             RETURNING {_COLS}
             """,
             "context",
         )
         params = {
-            "instance_id": instance_id,
-            "expected_revision": expected_revision,
-            "state": state,
-            "context": context,
+            "instance_id": instance_id, "expected_revision": expected_revision,
+            "state": state, "context": context,
         }
         async with self._db_factory() as db:
             result = await db.execute(sql, params)
@@ -169,27 +159,27 @@ class ProcedureStore:
                 await db.commit()
                 updated = _row_to_active(row)
                 logger.info(
-                    "procedure_cas_updated",
-                    instance_id=instance_id,
-                    new_state=state,
-                    new_revision=updated.revision,
+                    "procedure_cas_updated", instance_id=instance_id,
+                    new_state=state, new_revision=updated.revision,
                     completed=completed_at,
                 )
                 return updated
-            # CAS failed — read current revision for diagnostics
-            await db.rollback()
-            actual = await self._read_current_revision(db, instance_id)
-            logger.warning(
-                "procedure_cas_conflict",
-                instance_id=instance_id,
-                expected_revision=expected_revision,
-                actual_revision=actual,
-            )
-            return CasConflict(
-                instance_id=instance_id,
-                expected_revision=expected_revision,
-                actual_revision=actual,
-            )
+            return await self._handle_cas_conflict(db, instance_id, expected_revision)
+
+    async def _handle_cas_conflict(
+        self, db: AsyncSession, instance_id: str, expected_revision: int,
+    ) -> CasConflict:
+        """Handle CAS failure: rollback, read actual revision, return conflict."""
+        await db.rollback()
+        actual = await self._read_current_revision(db, instance_id)
+        logger.warning(
+            "procedure_cas_conflict", instance_id=instance_id,
+            expected_revision=expected_revision, actual_revision=actual,
+        )
+        return CasConflict(
+            instance_id=instance_id, expected_revision=expected_revision,
+            actual_revision=actual,
+        )
 
     async def has_active_for_spec(self, spec_id: str) -> bool:
         """Return True if any non-completed procedure instance exists for *spec_id*."""

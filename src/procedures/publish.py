@@ -96,7 +96,6 @@ class PublishTool(BaseTool):
         if context is None or context.procedure_deps is None:
             return {"ok": False, "error_code": "PUBLISH_NO_PROCEDURE_DEPS"}
 
-        # Role guard: only primary can publish (D4)
         role_check = require_role(context.actor, AgentRole.primary)
         if not role_check.allowed:
             return {
@@ -105,32 +104,52 @@ class PublishTool(BaseTool):
                 "detail": role_check.detail,
             }
 
-        deps = context.procedure_deps
-        proc_ctx = deps.active_procedure.context
+        proc_ctx = context.procedure_deps.active_procedure.context
         handoff_id = arguments.get("handoff_id", "")
         merge_keys = tuple(arguments.get("merge_keys", ()))
 
-        # Read from staging
-        pending = dict(proc_ctx.get("_pending_handoffs", {}))
-        worker_data = pending.get(handoff_id)
-        if worker_data is None:
+        err = self._resolve_handoff(proc_ctx, handoff_id)
+        if err is not None:
+            return err
+
+        worker_data: dict[str, Any] = proc_ctx["_pending_handoffs"][handoff_id]
+        err = self._validate_and_merge(worker_data, merge_keys, handoff_id)
+        if err is not None:
+            return err
+
+        visible_patch = merge_worker_result(worker_data, merge_keys, proc_ctx)
+        return self._build_success_result(proc_ctx, handoff_id, merge_keys, visible_patch)
+
+    # -- private helpers (pure logic, no async needed) -------------------------
+
+    def _resolve_handoff(
+        self, proc_ctx: dict[str, Any], handoff_id: str
+    ) -> dict[str, Any] | None:
+        """Validate handoff exists and review (if any) is approved. Returns error dict or None."""
+        pending = proc_ctx.get("_pending_handoffs", {})
+        if handoff_id not in pending:
             return {
                 "ok": False,
                 "error_code": "PUBLISH_HANDOFF_NOT_FOUND",
                 "detail": f"No pending handoff with id '{handoff_id}'",
             }
 
-        # Optional review check
-        reviews = proc_ctx.get("_review_results", {})
-        review = reviews.get(handoff_id)
+        review = proc_ctx.get("_review_results", {}).get(handoff_id)
         if review is not None and not review.get("approved", False):
             return {
                 "ok": False,
                 "error_code": "PUBLISH_REVIEW_REJECTED",
                 "detail": f"Review for handoff '{handoff_id}' not approved",
             }
+        return None
 
-        # Fail-closed: empty merge_keys or zero matches → reject, preserve staging
+    def _validate_and_merge(
+        self,
+        worker_data: dict[str, Any],
+        merge_keys: tuple[str, ...],
+        handoff_id: str,
+    ) -> dict[str, Any] | None:
+        """Check merge_keys are non-empty and at least one matches. Returns error dict or None."""
         source = worker_data.get("result", worker_data)
         available_keys = list(source.keys()) if isinstance(source, dict) else []
 
@@ -143,9 +162,9 @@ class PublishTool(BaseTool):
                 "handoff_id": handoff_id,
             }
 
-        visible_patch = merge_worker_result(worker_data, merge_keys, proc_ctx)
-
-        if not visible_patch:
+        # Check that at least one key will match before committing to merge
+        has_match = any(k in source for k in merge_keys) if isinstance(source, dict) else False
+        if not has_match:
             return {
                 "ok": False,
                 "error_code": "PUBLISH_NO_KEYS_MATCHED",
@@ -153,26 +172,30 @@ class PublishTool(BaseTool):
                 "available_keys": available_keys,
                 "handoff_id": handoff_id,
             }
+        return None
 
-        # Remove published handoff from staging (read-modify-write)
+    def _build_success_result(
+        self,
+        proc_ctx: dict[str, Any],
+        handoff_id: str,
+        merge_keys: tuple[str, ...],
+        visible_patch: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Clean staging, build context_patch, and format the success response."""
+        pending = dict(proc_ctx.get("_pending_handoffs", {}))
         del pending[handoff_id]
 
-        # Also clean review if present
         current_reviews = dict(proc_ctx.get("_review_results", {}))
         current_reviews.pop(handoff_id, None)
 
-        # Build context_patch: visible keys + cleaned staging
         context_patch: dict[str, Any] = {
             **visible_patch,
             "_pending_handoffs": pending,
             "_review_results": current_reviews,
         }
 
-        # Build flush texts for D9 signal
-        flush_texts: list[str] = []
-        if visible_patch:
-            summary = json.dumps(visible_patch, ensure_ascii=False, default=str)
-            flush_texts.append(f"Published worker result: {summary[:1000]}")
+        summary = json.dumps(visible_patch, ensure_ascii=False, default=str)
+        flush_texts = [f"Published worker result: {summary[:1000]}"]
 
         logger.info(
             "publish_executed",

@@ -161,74 +161,71 @@ def _mode_denial(
     return denied, result
 
 
+def _check_write_limit(loop, state, tool_call) -> _ToolOutcome | None:
+    """Return a breaker outcome if the tool hit the per-request write limit."""
+    tool_name = tool_call["name"]
+    tool_obj = loop._tool_registry.get(tool_name) if loop._tool_registry else None
+    if tool_obj is None or tool_obj.is_read_only:
+        return None
+    count = state.write_tool_counts.get(tool_name, 0)
+    if count >= WRITE_TOOL_REQUEST_LIMIT:
+        logger.info(
+            "write_tool_request_limit", tool_name=tool_name,
+            count=count, limit=WRITE_TOOL_REQUEST_LIMIT,
+            session_id=state.session_id,
+        )
+        return _ToolOutcome(
+            tool_call=tool_call,
+            result={
+                "ok": False, "error_code": "WRITE_TOOL_REQUEST_LIMIT",
+                "detail": (
+                    f"Tool '{tool_name}' already executed "
+                    f"{WRITE_TOOL_REQUEST_LIMIT} times in this request. "
+                    "Stop and respond to the user in text."
+                ),
+            },
+            failure_signal=f"tool_failure:{tool_name}",
+        )
+    state.write_tool_counts[tool_name] = count + 1
+    return None
+
+
+def _classify_failure(result, tool_call) -> str | None:
+    """Return a failure signal string, or None if the result is OK."""
+    if isinstance(result, dict) and not result.get("ok", True):
+        code = result.get("error_code", "")
+        name = tool_call["name"]
+        return f"guard_denied:{name}" if code in _GUARD_DENY_CODES else f"tool_failure:{name}"
+    return None
+
+
 async def _run_single_tool(
-    loop: Any,
-    state: Any,
-    tool_call: dict[str, str],
+    loop: Any, state: Any, tool_call: dict[str, str],
     guard_state: GuardCheckResult,
 ) -> _ToolOutcome:
     """Execute one tool call and return an outcome without side effects."""
-    # ── Procedure action routing (P2-M2a) ──
     if state.procedure_action_map and tool_call["name"] in state.procedure_action_map:
         return await _run_procedure_action(loop, state, tool_call, guard_state)
 
-    # ── Write tool circuit breaker (OI-M2-04 hotfix) ──
-    tool_name = tool_call["name"]
-    tool_obj = loop._tool_registry.get(tool_name) if loop._tool_registry else None
-    if tool_obj is not None and not tool_obj.is_read_only:
-        count = state.write_tool_counts.get(tool_name, 0)
-        if count >= WRITE_TOOL_REQUEST_LIMIT:
-            logger.info(
-                "write_tool_request_limit",
-                tool_name=tool_name,
-                count=count,
-                limit=WRITE_TOOL_REQUEST_LIMIT,
-                session_id=state.session_id,
-            )
-            return _ToolOutcome(
-                tool_call=tool_call,
-                result={
-                    "ok": False,
-                    "error_code": "WRITE_TOOL_REQUEST_LIMIT",
-                    "detail": (
-                        f"Tool '{tool_name}' already executed "
-                        f"{WRITE_TOOL_REQUEST_LIMIT} times in this request. "
-                        "Stop and respond to the user in text."
-                    ),
-                },
-                failure_signal=f"tool_failure:{tool_name}",
-            )
-        state.write_tool_counts[tool_name] = count + 1
+    breaker = _check_write_limit(loop, state, tool_call)
+    if breaker is not None:
+        return breaker
 
-    denial = _mode_denial(
-        loop._tool_registry, state.mode, state.session_id, tool_call,
-    )
+    denial = _mode_denial(loop._tool_registry, state.mode, state.session_id, tool_call)
     if denial is not None:
         denied_event, result = denial
         return _ToolOutcome(
-            tool_call=tool_call,
-            result=result,
-            denied_event=denied_event,
+            tool_call=tool_call, result=result, denied_event=denied_event,
             failure_signal=f"guard_denied:{tool_call['name']}",
         )
     result = await loop._execute_tool(
-        tool_call["name"],
-        tool_call["arguments"],
-        scope_key=state.scope_key,
-        session_id=state.session_id,
+        tool_call["name"], tool_call["arguments"],
+        scope_key=state.scope_key, session_id=state.session_id,
         guard_state=guard_state,
     )
-    failure_signal: str | None = None
-    if isinstance(result, dict) and not result.get("ok", True):
-        error_code = result.get("error_code", "")
-        if error_code in _GUARD_DENY_CODES:
-            failure_signal = f"guard_denied:{tool_call['name']}"
-        else:
-            failure_signal = f"tool_failure:{tool_call['name']}"
     return _ToolOutcome(
-        tool_call=tool_call,
-        result=result,
-        failure_signal=failure_signal,
+        tool_call=tool_call, result=result,
+        failure_signal=_classify_failure(result, tool_call),
     )
 
 

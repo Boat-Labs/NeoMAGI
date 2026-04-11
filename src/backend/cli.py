@@ -162,24 +162,33 @@ def _run_alembic_upgrade_head() -> None:
 
 async def _run_reset_user_db(confirm: bool) -> int:
     """Drop the user schema and rebuild it from migrations."""
-    from sqlalchemy import text
-
     from src.config.settings import DatabaseSettings
-    from src.session.database import create_db_engine, ensure_schema
 
     db = DatabaseSettings()
     target = f"{db.host}:{db.port}/{db.name} schema={db.schema_}"
-
     if not confirm:
-        print(  # noqa: T201
-            "reset-user-db refused: this will permanently delete all data in "
-            f"{target}."
-        )
+        print(f"reset-user-db refused: this will permanently delete all data in {target}.")  # noqa: T201
         print("Rerun with --yes to confirm.")  # noqa: T201
         return 1
 
     logger.warning("reset_user_db_started", database=db.name, schema=db.schema_, host=db.host)
     print(f"reset-user-db: dropping schema on {target}")  # noqa: T201
+
+    await _drop_schema(db)
+    rc = await _rebuild_schema(db)
+    if rc != 0:
+        return rc
+
+    logger.info("reset_user_db_done", database=db.name, schema=db.schema_)
+    print(f"reset-user-db complete: rebuilt {target} from a blank schema")  # noqa: T201
+    return 0
+
+
+async def _drop_schema(db) -> None:
+    """Drop the user schema."""
+    from sqlalchemy import text
+
+    from src.session.database import create_db_engine
 
     engine = await create_db_engine(db)
     try:
@@ -188,31 +197,26 @@ async def _run_reset_user_db(confirm: bool) -> int:
     finally:
         await engine.dispose()
 
+
+async def _rebuild_schema(db) -> int:
+    """Run Alembic upgrade + ensure_schema. Returns 0 on success, 1 on failure."""
+    from src.session.database import create_db_engine, ensure_schema
+
     try:
         _run_alembic_upgrade_head()
     except Exception:
         logger.exception("reset_user_db_alembic_failed", database=db.name, schema=db.schema_)
-        print(  # noqa: T201
-            "reset-user-db failed during Alembic rebuild -- see logs for details",
-            file=sys.stderr,
-        )
+        print("reset-user-db failed during Alembic rebuild -- see logs", file=sys.stderr)  # noqa: T201
         return 1
-
     engine = await create_db_engine(db)
     try:
         await ensure_schema(engine, db.schema_)
     except Exception:
         logger.exception("reset_user_db_ensure_schema_failed", database=db.name, schema=db.schema_)
-        print(  # noqa: T201
-            "reset-user-db failed during schema verification -- see logs for details",
-            file=sys.stderr,
-        )
+        print("reset-user-db failed during schema verification -- see logs", file=sys.stderr)  # noqa: T201
         return 1
     finally:
         await engine.dispose()
-
-    logger.info("reset_user_db_done", database=db.name, schema=db.schema_)
-    print(f"reset-user-db complete: rebuilt {target} from a blank schema")  # noqa: T201
     return 0
 
 

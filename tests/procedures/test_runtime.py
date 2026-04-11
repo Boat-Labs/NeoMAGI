@@ -145,71 +145,58 @@ class _MockStore:
         return updated
 
 
-def _build_runtime(
-    tool_result: dict | None = None,
-    tool_raises: bool = False,
-    enter_guard_allows: bool = True,
-    action_guard_allows: bool = True,
-    with_enter_guard: bool = False,
-    with_action_guard: bool = False,
-) -> tuple[ProcedureRuntime, _MockStore, _FakeAsyncTool]:
-    """Build a minimal ProcedureRuntime with test fixtures."""
-    tool = _FakeAsyncTool(result=tool_result, raise_error=tool_raises)
-    tool_reg = ToolRegistry()
-    tool_reg.register(tool)
-
-    ctx_reg = ProcedureContextRegistry()
-    ctx_reg.register("CheckpointCtx", _CheckpointContext)
-
-    guard_reg = ProcedureGuardRegistry()
-
-    def _enter_guard(ctx, tc=None):
-        return GuardDecision(
-            allowed=enter_guard_allows,
-            code="" if enter_guard_allows else "ENTRY_DENIED",
-            detail="" if enter_guard_allows else "Entry denied by guard",
-        )
-
-    def _action_guard(active, args, tc=None):
-        return GuardDecision(
-            allowed=action_guard_allows,
-            code="" if action_guard_allows else "ACTION_DENIED",
-            detail="" if action_guard_allows else "Action denied by guard",
-        )
-
-    guard_reg.register("entry_check", _enter_guard)
-    guard_reg.register("action_check", _action_guard)
-
-    spec = ProcedureSpec(
-        id="test.checkpoint",
-        version=1,
-        summary="Test checkpoint procedure",
-        entry_policy="explicit",
-        allowed_modes=frozenset({ToolMode.coding}),
-        context_model="CheckpointCtx",
-        initial_state="draft",
+def _make_test_spec(*, with_enter_guard=False, with_action_guard=False) -> ProcedureSpec:
+    return ProcedureSpec(
+        id="test.checkpoint", version=1, summary="Test checkpoint procedure",
+        entry_policy="explicit", allowed_modes=frozenset({ToolMode.coding}),
+        context_model="CheckpointCtx", initial_state="draft",
         states={
-            "draft": StateSpec(actions={
-                "submit": ActionSpec(
-                    tool="fake_tool",
-                    to="review",
-                    guard="action_check" if with_action_guard else None,
-                ),
-            }),
-            "review": StateSpec(actions={
-                "confirm": ActionSpec(tool="fake_tool", to="done"),
-            }),
+            "draft": StateSpec(actions={"submit": ActionSpec(
+                tool="fake_tool", to="review",
+                guard="action_check" if with_action_guard else None,
+            )}),
+            "review": StateSpec(actions={"confirm": ActionSpec(tool="fake_tool", to="done")}),
             "done": StateSpec(),
         },
         enter_guard="entry_check" if with_enter_guard else None,
     )
 
+
+def _build_registries(tool, *, enter_guard_allows=True, action_guard_allows=True):
+    tool_reg = ToolRegistry()
+    tool_reg.register(tool)
+    ctx_reg = ProcedureContextRegistry()
+    ctx_reg.register("CheckpointCtx", _CheckpointContext)
+    guard_reg = ProcedureGuardRegistry()
+    guard_reg.register("entry_check", lambda ctx, tc=None: GuardDecision(
+        allowed=enter_guard_allows,
+        code="" if enter_guard_allows else "ENTRY_DENIED",
+        detail="" if enter_guard_allows else "Entry denied by guard",
+    ))
+    guard_reg.register("action_check", lambda active, args, tc=None: GuardDecision(
+        allowed=action_guard_allows,
+        code="" if action_guard_allows else "ACTION_DENIED",
+        detail="" if action_guard_allows else "Action denied by guard",
+    ))
+    return tool_reg, ctx_reg, guard_reg
+
+
+def _build_runtime(
+    tool_result: dict | None = None, tool_raises: bool = False,
+    enter_guard_allows: bool = True, action_guard_allows: bool = True,
+    with_enter_guard: bool = False, with_action_guard: bool = False,
+) -> tuple[ProcedureRuntime, _MockStore, _FakeAsyncTool]:
+    """Build a minimal ProcedureRuntime with test fixtures."""
+    tool = _FakeAsyncTool(result=tool_result, raise_error=tool_raises)
+    tool_reg, ctx_reg, guard_reg = _build_registries(
+        tool, enter_guard_allows=enter_guard_allows,
+        action_guard_allows=action_guard_allows,
+    )
+    spec = _make_test_spec(with_enter_guard=with_enter_guard, with_action_guard=with_action_guard)
     spec_reg = ProcedureSpecRegistry()
     spec_reg.register(spec)
-
     store = _MockStore()
-    runtime = ProcedureRuntime(spec_reg, ctx_reg, guard_reg, store, tool_reg)
-    return runtime, store, tool
+    return ProcedureRuntime(spec_reg, ctx_reg, guard_reg, store, tool_reg), store, tool
 
 
 # ---------------------------------------------------------------------------

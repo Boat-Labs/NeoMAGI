@@ -142,11 +142,7 @@ class CompactionEngine:
         session_id: str = "",
         task_state_text: str | None = None,
     ) -> CompactionResult:
-        """Execute compaction pipeline: split → flush → summarise → anchor-check.
-
-        If *task_state_text* is provided (active procedure exists), it is
-        appended to the compaction prompt to preserve task-critical info (D5).
-        """
+        """Execute compaction pipeline: split → flush → summarise → anchor-check."""
         zones = self._identify_zones(messages, current_user_seq, last_compaction_seq)
         if zones is None:
             return self._noop(last_compaction_seq)
@@ -164,11 +160,10 @@ class CompactionEngine:
         )
         if status == "degraded_small_input":
             return self._build_result(
-                "degraded", previous_compacted_context, new_seq,
-                flush_candidates, preserved_msgs, preserved_turns,
-                compressible_turns, flush_skipped=flush_skipped,
+                "degraded", previous_compacted_context, new_seq, flush_candidates,
+                preserved_msgs, preserved_turns, compressible_turns,
+                flush_skipped=flush_skipped,
             )
-
         anchor_passed, anchor_retry_used, summary_text, status = (
             await self._run_anchor_validation(
                 summary_text, status, system_prompt, preserved_turns,

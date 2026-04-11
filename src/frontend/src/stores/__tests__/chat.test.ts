@@ -10,7 +10,6 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { useChatStore, createSessionViewState } from "../chat"
 import type { ChatState } from "../chat"
 import type { RPCRequest } from "@/types/rpc"
-
 // Mock sonner toast
 vi.mock("sonner", () => ({
   toast: {
@@ -19,7 +18,6 @@ vi.mock("sonner", () => ({
     success: vi.fn(),
   },
 }))
-
 // Mock localStorage (Node.js 22+ built-in localStorage lacks standard Storage API)
 const _storage = new Map<string, string>()
 vi.stubGlobal("localStorage", {
@@ -30,19 +28,16 @@ vi.stubGlobal("localStorage", {
   get length() { return _storage.size },
   key: (index: number) => [..._storage.keys()][index] ?? null,
 })
-
 // Controllable mock for WebSocketClient
 let mockIsConnected = false
 const mockSend = vi.fn()
 const mockClose = vi.fn()
 const mockConnect = vi.fn()
-
 const mockCallbacks: {
   onMessage?: (msg: unknown) => void
   onStatusChange?: (status: string) => void
   onConnected?: () => void
 } = {}
-
 vi.mock("@/lib/websocket", () => {
   return {
     WebSocketClient: class MockWebSocketClient {
@@ -64,9 +59,7 @@ vi.mock("@/lib/websocket", () => {
     },
   }
 })
-
 // --- Helpers ---
-
 function resetStore() {
   useChatStore.setState({
     activeSessionId: "main",
@@ -81,7 +74,6 @@ function resetStore() {
   mockConnect.mockClear()
   _storage.clear()
 }
-
 function connectStore() {
   const store = useChatStore.getState()
   store.connect("ws://test")
@@ -89,25 +81,21 @@ function connectStore() {
   mockCallbacks.onStatusChange?.("connected")
   mockCallbacks.onConnected?.()
 }
-
 function getSession(sessionId: string) {
   return useChatStore.getState().sessionsById[sessionId]
 }
-
 function getLastHistoryRequestId(): string {
   const lastCall = mockSend.mock.calls[mockSend.mock.calls.length - 1]
   const request = lastCall[0] as RPCRequest
   expect(request.method).toBe("chat.history")
   return request.id
 }
-
 function getLastSendRequestId(): string {
   const lastCall = mockSend.mock.calls[mockSend.mock.calls.length - 1]
   const request = lastCall[0] as RPCRequest
   expect(request.method).toBe("chat.send")
   return request.id
 }
-
 // --- Guard Recovery (per-session) ---
 
 describe("per-session history guard recovery", () => {
@@ -117,13 +105,11 @@ describe("per-session history guard recovery", () => {
     connectStore()
     const requestId = getLastHistoryRequestId()
     expect(getSession("main")!.isHistoryLoading).toBe(true)
-
     useChatStore.getState()._handleServerMessage({
       type: "error",
       id: requestId,
       error: { code: "INTERNAL_ERROR", message: "something failed" },
     })
-
     expect(getSession("main")!.isHistoryLoading).toBe(false)
     expect(getSession("main")!.pendingHistoryId).toBeNull()
   })
@@ -145,9 +131,7 @@ describe("per-session history guard recovery", () => {
         },
       },
     })
-
     useChatStore.getState()._setConnectionStatus("disconnected")
-
     expect(getSession("main")!.isHistoryLoading).toBe(false)
     expect(getSession("main")!.pendingHistoryId).toBeNull()
     expect(getSession("thread-2")!.isHistoryLoading).toBe(false)
@@ -164,9 +148,7 @@ describe("per-session history guard recovery", () => {
         },
       },
     })
-
     useChatStore.getState()._setConnectionStatus("reconnecting")
-
     expect(getSession("main")!.isHistoryLoading).toBe(false)
     expect(getSession("main")!.pendingHistoryId).toBeNull()
   })
@@ -188,14 +170,12 @@ describe("per-session history guard recovery", () => {
     try {
       connectStore()
       const requestId = getLastHistoryRequestId()
-
       useChatStore.getState()._handleServerMessage({
         type: "response",
         id: requestId,
         data: { messages: [] },
       })
       expect(getSession("main")!.isHistoryLoading).toBe(false)
-
       vi.advanceTimersByTime(10_000)
       expect(getSession("main")!.isHistoryLoading).toBe(false)
     } finally {
@@ -203,7 +183,6 @@ describe("per-session history guard recovery", () => {
     }
   })
 })
-
 // --- Send message ---
 
 describe("sendMessage (per-session)", () => {
@@ -230,14 +209,11 @@ describe("sendMessage (per-session)", () => {
       id: historyId,
       data: { messages: [] },
     })
-
     // Create a second thread
     useChatStore.getState().createThread()
     const secondId = useChatStore.getState().activeSessionId
-
     const sent = useChatStore.getState().sendMessage("hello from thread 2")
     expect(sent).toBe(true)
-
     // Messages added to active (second) session
     expect(getSession(secondId)!.messages).toHaveLength(2)
     // Main session unchanged
@@ -252,7 +228,6 @@ describe("sendMessage (per-session)", () => {
       id: historyId,
       data: { messages: [] },
     })
-
     useChatStore.getState().sendMessage("hello")
     const requestId = getLastSendRequestId()
     expect(useChatStore.getState().requestToSession[requestId]).toBe("main")
@@ -266,7 +241,6 @@ describe("sendMessage (per-session)", () => {
       id: historyId,
       data: { messages: [] },
     })
-
     useChatStore.getState().sendMessage("What is the weather today?")
     expect(getSession("main")!.title).toBe("What is the weather today?")
   })
@@ -279,7 +253,6 @@ describe("sendMessage (per-session)", () => {
       id: historyId,
       data: { messages: [] },
     })
-
     const longMessage = "A".repeat(50)
     useChatStore.getState().sendMessage(longMessage)
     expect(getSession("main")!.title).toBe("A".repeat(30) + "\u2026")
@@ -293,18 +266,14 @@ describe("sendMessage (per-session)", () => {
       id: historyId,
       data: { messages: [] },
     })
-
     const beforeSend = getSession("main")!.lastActivityAt
-
     // Small delay to guarantee timestamp difference
     useChatStore.getState().sendMessage("hello")
-
     expect(getSession("main")!.lastActivityAt).toBeGreaterThanOrEqual(
       beforeSend,
     )
   })
 })
-
 // --- Stream chunk routing ---
 
 describe("stream_chunk event routing", () => {
@@ -330,7 +299,6 @@ describe("stream_chunk event routing", () => {
       },
       requestToSession: { [requestId]: "main" },
     })
-
     useChatStore.getState()._handleServerMessage({
       type: "stream_chunk",
       id: requestId,
@@ -341,7 +309,6 @@ describe("stream_chunk event routing", () => {
       id: requestId,
       data: { content: "world!", done: false },
     })
-
     expect(getSession("main")!.messages[0].content).toBe("Hello world!")
   })
 
@@ -365,13 +332,11 @@ describe("stream_chunk event routing", () => {
       },
       requestToSession: { [requestId]: "main" },
     })
-
     useChatStore.getState()._handleServerMessage({
       type: "stream_chunk",
       id: requestId,
       data: { content: "", done: true },
     })
-
     expect(useChatStore.getState().requestToSession[requestId]).toBeUndefined()
     expect(getSession("main")!.isStreaming).toBe(false)
     expect(getSession("main")!.messages[0].status).toBe("complete")
@@ -413,19 +378,16 @@ describe("stream_chunk event routing", () => {
       },
       requestToSession: { [reqA]: "main", [reqB]: "thread-2" },
     })
-
     // Chunk for thread-2 should NOT affect main
     useChatStore.getState()._handleServerMessage({
       type: "stream_chunk",
       id: reqB,
       data: { content: "for thread 2", done: false },
     })
-
     expect(getSession("main")!.messages[0].content).toBe("")
     expect(getSession("thread-2")!.messages[0].content).toBe("for thread 2")
   })
 })
-
 // --- Background completion ---
 
 describe("background completion signals", () => {
@@ -454,13 +416,11 @@ describe("background completion signals", () => {
       },
       requestToSession: { [reqB]: "thread-2" },
     })
-
     useChatStore.getState()._handleServerMessage({
       type: "stream_chunk",
       id: reqB,
       data: { content: "", done: true },
     })
-
     expect(getSession("thread-2")!.hasUnreadCompletion).toBe(true)
     expect(getSession("thread-2")!.isStreaming).toBe(false)
   })
@@ -486,13 +446,11 @@ describe("background completion signals", () => {
       },
       requestToSession: { [reqA]: "main" },
     })
-
     useChatStore.getState()._handleServerMessage({
       type: "stream_chunk",
       id: reqA,
       data: { content: "", done: true },
     })
-
     expect(getSession("main")!.hasUnreadCompletion).toBe(false)
   })
 
@@ -517,13 +475,10 @@ describe("background completion signals", () => {
         },
       },
     })
-
     useChatStore.getState().switchThread("thread-2")
-
     expect(getSession("thread-2")!.hasUnreadCompletion).toBe(false)
   })
 })
-
 // --- Error routing ---
 
 describe("error event routing", () => {
@@ -549,13 +504,11 @@ describe("error event routing", () => {
       },
       requestToSession: { [reqA]: "main" },
     })
-
     useChatStore.getState()._handleServerMessage({
       type: "error",
       id: reqA,
       error: { code: "LLM_ERROR", message: "model error" },
     })
-
     expect(getSession("main")!.isStreaming).toBe(false)
     expect(getSession("main")!.messages[0].status).toBe("error")
     expect(getSession("main")!.lastError).toBe("model error")
@@ -572,18 +525,15 @@ describe("error event routing", () => {
         },
       },
     })
-
     useChatStore.getState()._handleServerMessage({
       type: "error",
       id: "hist-1",
       error: { code: "INTERNAL_ERROR", message: "db error" },
     })
-
     expect(getSession("main")!.isHistoryLoading).toBe(false)
     expect(getSession("main")!.pendingHistoryId).toBeNull()
   })
 })
-
 // --- Tool call routing ---
 
 describe("tool_call / tool_denied routing", () => {
@@ -615,7 +565,6 @@ describe("tool_call / tool_denied routing", () => {
       },
       requestToSession: { [reqA]: "main" },
     })
-
     useChatStore.getState()._handleServerMessage({
       type: "tool_call",
       id: reqA,
@@ -625,7 +574,6 @@ describe("tool_call / tool_denied routing", () => {
         call_id: "call-1",
       },
     })
-
     expect(getSession("main")!.messages[0].toolCalls).toHaveLength(1)
     expect(getSession("main")!.messages[0].toolCalls![0].toolName).toBe(
       "read_file",
@@ -662,7 +610,6 @@ describe("tool_call / tool_denied routing", () => {
       },
       requestToSession: { [reqA]: "main" },
     })
-
     useChatStore.getState()._handleServerMessage({
       type: "tool_denied",
       id: reqA,
@@ -895,7 +842,6 @@ describe("thread management", () => {
     const sendCountBefore = mockSend.mock.calls.length
     useChatStore.getState().switchThread(newId)
     const sendCountAfter = mockSend.mock.calls.length
-
     expect(sendCountAfter).toBe(sendCountBefore + 1)
     const lastReq = mockSend.mock.calls[mockSend.mock.calls.length - 1][0] as RPCRequest
     expect(lastReq.method).toBe("chat.history")
@@ -1156,7 +1102,6 @@ describe("connection loss recovers in-flight requests", () => {
     })
 
     useChatStore.getState()._setConnectionStatus("disconnected")
-
     const main = getSession("main")!
     expect(main.isStreaming).toBe(false)
     expect(useChatStore.getState().requestToSession).toEqual({})

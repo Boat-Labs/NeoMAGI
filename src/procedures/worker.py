@@ -87,117 +87,159 @@ class WorkerExecutor:
             {"role": "user", "content": packet.task_brief},
         ]
 
-        iterations_used = 0
         collected_evidence: list[str] = list(packet.evidence)
         collected_questions: list[str] = list(packet.open_questions)
 
         for iteration in range(self._role_spec.max_iterations):
             iterations_used = iteration + 1
-            try:
-                response = await self._model_client.chat_completion(
-                    messages,
-                    self._model,
-                    tools=tools_schema or None,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "worker_model_timeout",
-                    handoff_id=packet.handoff_id,
-                    iteration=iterations_used,
-                    error=str(exc),
-                )
-                return WorkerResult(
-                    ok=False,
-                    error_code="WORKER_MODEL_TIMEOUT",
-                    error_detail=str(exc),
-                    iterations_used=iterations_used,
-                    evidence=tuple(collected_evidence),
-                    open_questions=tuple(collected_questions),
-                )
+
+            response, err = await self._call_model(
+                messages, tools_schema, packet.handoff_id, iterations_used,
+                collected_evidence, collected_questions,
+            )
+            if err is not None:
+                return err
 
             if not response.tool_calls:
-                # Final answer — extract from content
-                content = response.content or ""
-                result_dict = _try_parse_json(content)
-                # Extract inner "result" dict if model followed prompt convention
-                # {"result": {...}, "evidence": [...], "open_questions": [...]}
-                inner_result = result_dict.get("result", result_dict)
-                if not isinstance(inner_result, dict):
-                    inner_result = result_dict
-                return WorkerResult(
-                    ok=True,
-                    result=inner_result,
-                    iterations_used=iterations_used,
-                    evidence=tuple(result_dict.get("evidence", collected_evidence)),
-                    open_questions=tuple(
-                        result_dict.get("open_questions", collected_questions)
-                    ),
+                return self._extract_final_result(
+                    response, iterations_used, collected_evidence, collected_questions,
                 )
 
-            # Process tool calls — normalize SDK objects to dicts first
             normalized_calls = _normalize_tool_calls(response.tool_calls)
             messages.append(_assistant_message_from_calls(response.content, normalized_calls))
+            await self._process_tool_calls(
+                normalized_calls, allowed_tools, messages,
+                packet.handoff_id, collected_evidence,
+            )
 
-            for tc in normalized_calls:
-                tool_name = tc["name"]
-                tool_args_str = tc["arguments"]
-                tool = allowed_tools.get(tool_name)
-
-                if tool is None:
-                    logger.info(
-                        "worker_tool_rejected",
-                        tool_name=tool_name,
-                        reason="not_in_allowed_set",
-                        handoff_id=packet.handoff_id,
-                    )
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.get("id", ""),
-                        "content": json.dumps({
-                            "error": f"Tool '{tool_name}' not available for worker",
-                        }),
-                    })
-                    continue
-
-                try:
-                    args = json.loads(tool_args_str) if tool_args_str else {}
-                except json.JSONDecodeError:
-                    args = {}
-
-                try:
-                    from src.tools.context import ToolContext as _TC
-
-                    worker_ctx = _TC(
-                        scope_key=self._scope_key,
-                        session_id=self._session_id,
-                    )
-                    result = await tool.execute(args, worker_ctx)
-                    result_str = json.dumps(result, ensure_ascii=False, default=str)
-                except Exception as exc:
-                    logger.warning(
-                        "worker_tool_failed",
-                        tool_name=tool_name,
-                        handoff_id=packet.handoff_id,
-                        error=str(exc),
-                    )
-                    result_str = json.dumps({"error": str(exc)})
-                    collected_evidence.append(f"tool_failure:{tool_name}:{exc}")
-
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.get("id", ""),
-                    "content": result_str,
-                })
-
-        # Iteration limit reached
         return WorkerResult(
             ok=False,
             error_code="WORKER_ITERATION_LIMIT",
             error_detail=f"Reached max iterations ({self._role_spec.max_iterations})",
-            iterations_used=iterations_used,
+            iterations_used=self._role_spec.max_iterations,
             evidence=tuple(collected_evidence),
             open_questions=tuple(collected_questions),
         )
+
+    # -----------------------------------------------------------------------
+    # Execute helpers
+    # -----------------------------------------------------------------------
+
+    async def _call_model(
+        self,
+        messages: list[dict[str, Any]],
+        tools_schema: list[dict],
+        handoff_id: str,
+        iterations_used: int,
+        collected_evidence: list[str],
+        collected_questions: list[str],
+    ) -> tuple[Any, WorkerResult | None]:
+        """Call the model, returning (response, None) or (None, error_result)."""
+        try:
+            response = await self._model_client.chat_completion(
+                messages,
+                self._model,
+                tools=tools_schema or None,
+            )
+        except Exception as exc:
+            logger.warning(
+                "worker_model_timeout",
+                handoff_id=handoff_id,
+                iteration=iterations_used,
+                error=str(exc),
+            )
+            return None, WorkerResult(
+                ok=False,
+                error_code="WORKER_MODEL_TIMEOUT",
+                error_detail=str(exc),
+                iterations_used=iterations_used,
+                evidence=tuple(collected_evidence),
+                open_questions=tuple(collected_questions),
+            )
+        return response, None
+
+    def _extract_final_result(
+        self,
+        response: Any,
+        iterations_used: int,
+        collected_evidence: list[str],
+        collected_questions: list[str],
+    ) -> WorkerResult:
+        """Parse the model's final text response into a WorkerResult."""
+        content = response.content or ""
+        result_dict = _try_parse_json(content)
+        inner_result = result_dict.get("result", result_dict)
+        if not isinstance(inner_result, dict):
+            inner_result = result_dict
+        return WorkerResult(
+            ok=True,
+            result=inner_result,
+            iterations_used=iterations_used,
+            evidence=tuple(result_dict.get("evidence", collected_evidence)),
+            open_questions=tuple(result_dict.get("open_questions", collected_questions)),
+        )
+
+    async def _process_tool_calls(
+        self,
+        normalized_calls: list[dict[str, str]],
+        allowed_tools: dict[str, BaseTool],
+        messages: list[dict[str, Any]],
+        handoff_id: str,
+        collected_evidence: list[str],
+    ) -> None:
+        """Execute each tool call and append results to messages."""
+        for tc in normalized_calls:
+            tool_name = tc["name"]
+            tool = allowed_tools.get(tool_name)
+
+            if tool is None:
+                messages.append(_rejected_tool_message(tc, tool_name))
+                logger.info(
+                    "worker_tool_rejected",
+                    tool_name=tool_name,
+                    reason="not_in_allowed_set",
+                    handoff_id=handoff_id,
+                )
+                continue
+
+            result_str = await self._run_tool(
+                tool, tc["arguments"], handoff_id, tool_name, collected_evidence,
+            )
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id", ""),
+                "content": result_str,
+            })
+
+    async def _run_tool(
+        self,
+        tool: BaseTool,
+        tool_args_str: str,
+        handoff_id: str,
+        tool_name: str,
+        collected_evidence: list[str],
+    ) -> str:
+        """Execute a single tool, returning JSON result string."""
+        try:
+            args = json.loads(tool_args_str) if tool_args_str else {}
+        except json.JSONDecodeError:
+            args = {}
+
+        try:
+            from src.tools.context import ToolContext as _TC
+
+            worker_ctx = _TC(scope_key=self._scope_key, session_id=self._session_id)
+            result = await tool.execute(args, worker_ctx)
+            return json.dumps(result, ensure_ascii=False, default=str)
+        except Exception as exc:
+            logger.warning(
+                "worker_tool_failed",
+                tool_name=tool_name,
+                handoff_id=handoff_id,
+                error=str(exc),
+            )
+            collected_evidence.append(f"tool_failure:{tool_name}:{exc}")
+            return json.dumps({"error": str(exc)})
 
     # -----------------------------------------------------------------------
     # Internals
@@ -213,19 +255,13 @@ class WorkerExecutor:
            check_pre_tool_guard path, so high-risk tools must be excluded
            at schema level to prevent unguarded writes
         """
-        from src.tools.base import RiskLevel, ToolMode
-
-        result: dict[str, BaseTool] = {}
-        for group in self._role_spec.allowed_tool_groups:
-            for mode in ("chat_safe", "coding"):
-                for tool in self._tool_registry.list_tools(ToolMode(mode)):
-                    if (
-                        tool.group == group
-                        and not tool.is_procedure_only
-                        and tool.risk_level != RiskLevel.high
-                    ):
-                        result[tool.name] = tool
-        return result
+        candidates = _collect_candidate_tools(self._tool_registry)
+        return {
+            tool.name: tool
+            for tool in candidates
+            if tool.group in self._role_spec.allowed_tool_groups
+            and _is_worker_eligible(tool)
+        }
 
     def _build_tools_schema(self, allowed_tools: dict[str, BaseTool]) -> list[dict]:
         """Build OpenAI function calling schema for allowed tools."""
@@ -254,6 +290,33 @@ class WorkerExecutor:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _collect_candidate_tools(registry: ToolRegistry) -> list[BaseTool]:
+    """Gather all tools from chat_safe and coding modes, deduplicated."""
+    from src.tools.base import ToolMode
+
+    seen: dict[str, BaseTool] = {}
+    for mode in (ToolMode.chat_safe, ToolMode.coding):
+        for tool in registry.list_tools(mode):
+            seen[tool.name] = tool
+    return list(seen.values())
+
+
+def _is_worker_eligible(tool: BaseTool) -> bool:
+    """Check whether a tool passes the worker filter (excludes procedure-only and high-risk)."""
+    from src.tools.base import RiskLevel
+
+    return not tool.is_procedure_only and tool.risk_level != RiskLevel.high
+
+
+def _rejected_tool_message(tc: dict[str, str], tool_name: str) -> dict[str, Any]:
+    """Build a tool-role message for a rejected (unavailable) tool call."""
+    return {
+        "role": "tool",
+        "tool_call_id": tc.get("id", ""),
+        "content": json.dumps({"error": f"Tool '{tool_name}' not available for worker"}),
+    }
 
 
 def _normalize_tool_calls(raw_calls: Any) -> list[dict[str, str]]:

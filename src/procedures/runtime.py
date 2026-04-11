@@ -29,6 +29,8 @@ if TYPE_CHECKING:
     from src.agent.guardrail import GuardCheckResult
     from src.procedures.registry import ProcedureSpecRegistry
     from src.procedures.store import ProcedureStore
+    from src.procedures.types import ActionSpec, ProcedureSpec
+    from src.tools.base import BaseTool
     from src.tools.registry import ToolRegistry
 
 logger = structlog.get_logger(__name__)
@@ -93,74 +95,24 @@ class ProcedureRuntime:
         if spec is None:
             return _error(PROCEDURE_UNKNOWN, f"Unknown procedure spec: {spec_id}")
 
-        # 1. Mode check
-        if mode is not None and mode not in spec.allowed_modes:
-            return _error(
-                PROCEDURE_ACTION_DENIED,
-                f"Mode '{mode}' not allowed for procedure '{spec_id}'",
-            )
+        if err := self._check_enter_mode(spec, mode):
+            return err
 
-        # 2. Single-active check
-        existing = await self._store.get_active(session_id)
-        if existing is not None:
-            return _error(
-                PROCEDURE_CONFLICT,
-                f"Session '{session_id}' already has active procedure "
-                f"'{existing.spec_id}' (instance {existing.instance_id})",
-            )
+        if err := await self._check_single_active(session_id):
+            return err
 
-        # 3. Resolve context model
         ctx_model = self._contexts.resolve(spec.context_model)
         if ctx_model is None:
-            return _error(
-                PROCEDURE_UNKNOWN,
-                f"Context model '{spec.context_model}' not found",
-            )
+            return _error(PROCEDURE_UNKNOWN, f"Context model '{spec.context_model}' not found")
 
-        # 4. Validate initial context
         ctx = initial_context or {}
-        validation_error = _validate_context(ctx_model, ctx)
-        if validation_error is not None:
+        if validation_error := _validate_context(ctx_model, ctx):
             return _error(PROCEDURE_INVALID_PATCH, validation_error)
 
-        # 5. Enter guard
-        if spec.enter_guard:
-            guard_fn = self._guards.resolve(spec.enter_guard)
-            if guard_fn is None:
-                return _error(PROCEDURE_UNKNOWN, f"Enter guard '{spec.enter_guard}' not found")
-            tool_context = ToolContext(session_id=session_id)
-            decision = await _run_guard(guard_fn, ctx, tool_context)
-            if not decision.allowed:
-                logger.info(
-                    "procedure_enter_denied",
-                    spec_id=spec_id,
-                    guard=spec.enter_guard,
-                    code=decision.code,
-                    detail=decision.detail,
-                )
-                return _error(PROCEDURE_ACTION_DENIED, decision.detail, code=decision.code)
+        if err := await self._check_enter_guard(spec, ctx, session_id):
+            return err
 
-        # 6. Create instance
-        meta = execution_metadata or ProcedureExecutionMetadata()
-        active = ActiveProcedure(
-            instance_id=f"proc_{uuid4().hex}",
-            session_id=session_id,
-            spec_id=spec_id,
-            spec_version=spec.version,
-            state=spec.initial_state,
-            context=ctx,
-            execution_metadata=meta,
-            revision=0,
-        )
-        created = await self._store.create(active)
-        logger.info(
-            "procedure_entered",
-            instance_id=created.instance_id,
-            session_id=session_id,
-            spec_id=spec_id,
-            state=spec.initial_state,
-        )
-        return created
+        return await self._create_instance(session_id, spec, ctx, execution_metadata)
 
     # -----------------------------------------------------------------
     # Apply action
@@ -177,196 +129,45 @@ class ProcedureRuntime:
         guard_state: GuardCheckResult | None = None,
         mode: ToolMode | None = None,
     ) -> dict[str, Any]:
-        """Execute a procedure action.
+        """Execute a procedure action, returning a structured result dict."""
+        active, spec, action, err = await self._resolve_action_context(
+            instance_id,
+            action_id,
+            expected_revision,
+        )
+        if err is not None:
+            return err
 
-        Returns a structured result dict suitable for inclusion in the
-        model transcript. On success, state transitions and revision bumps.
-        """
-        # 1. Load instance and spec
-        active = await self._store.get(instance_id)
-        if active is None:
-            return _error(PROCEDURE_UNKNOWN, f"Procedure instance '{instance_id}' not found")
-
-        spec = self._specs.get(active.spec_id)
-        if spec is None:
-            return _error(PROCEDURE_UNKNOWN, f"Procedure spec '{active.spec_id}' not found")
-
-        # 2. Revision check
-        if active.revision != expected_revision:
-            logger.warning(
-                "procedure_cas_conflict",
-                instance_id=instance_id,
-                expected=expected_revision,
-                actual=active.revision,
-            )
-            return _cas_conflict_result(instance_id, expected_revision, active.revision)
-
-        # 3. Action validity in current state
-        current_state = spec.states.get(active.state)
-        if current_state is None or action_id not in current_state.actions:
-            return _error(
-                PROCEDURE_ACTION_DENIED,
-                f"Action '{action_id}' not allowed in state '{active.state}'",
-            )
-        action = current_state.actions[action_id]
-
-        # 4. Parse args (fail-closed, matching ambient tool runner)
         args_dict, parse_error = _parse_args(args_json)
         if parse_error is not None:
             return _error(PROCEDURE_INVALID_ARGS, parse_error)
 
-        # 5. Underlying tool exists and mode allows
-        tool = self._tools.get(action.tool)
-        if tool is None:
-            return _error(
-                PROCEDURE_TOOL_UNAVAILABLE,
-                f"Underlying tool '{action.tool}' not found",
-            )
-        # D7: procedure-only tools (is_procedure_only=True) skip ambient mode check.
-        # Normal tools always get mode-checked, even inside procedures.
-        if mode is not None and not tool.is_procedure_only:
-            if not self._tools.check_mode(action.tool, mode):
-                return _error(
-                    PROCEDURE_ACTION_DENIED,
-                    f"Tool '{action.tool}' not available in mode '{mode}'",
-                )
+        tool, err = self._check_tool_availability(action, mode)
+        if err is not None:
+            return err
 
-        # 6. Existing mode / risk guard (before procedure guard)
-        if guard_state is not None:
-            from src.agent.guardrail import check_pre_tool_guard
+        if err := self._check_mode_risk_guard(guard_state, action, tool, instance_id, action_id):
+            return err
 
-            blocked = check_pre_tool_guard(guard_state, action.tool, tool.risk_level)
-            if blocked is not None:
-                logger.info(
-                    "procedure_action_denied",
-                    instance_id=instance_id,
-                    action_id=action_id,
-                    reason="mode_risk_guard",
-                    error_code=blocked.error_code,
-                )
-                return _error(PROCEDURE_ACTION_DENIED, blocked.detail)
+        if err := await self._check_action_guard(
+            action, active, args_dict, tool_context, instance_id, action_id
+        ):
+            return err
 
-        # 7. Procedure action guard
-        if action.guard:
-            guard_fn = self._guards.resolve(action.guard)
-            if guard_fn is None:
-                return _error(PROCEDURE_UNKNOWN, f"Action guard '{action.guard}' not found")
-            decision = await _run_guard(guard_fn, active, args_dict, tool_context)
-            if not decision.allowed:
-                logger.info(
-                    "procedure_action_denied",
-                    instance_id=instance_id,
-                    action_id=action_id,
-                    guard=action.guard,
-                    code=decision.code,
-                )
-                return _error(PROCEDURE_ACTION_DENIED, decision.detail, code=decision.code)
+        raw_result, err = await self._execute_tool(
+            tool, args_dict, tool_context, instance_id, action_id, action.tool
+        )
+        if err is not None:
+            return err
 
-        # 8. Execute underlying tool
-        try:
-            raw_result = await tool.execute(args_dict, tool_context)
-        except Exception:
-            logger.exception(
-                "procedure_action_failed",
-                instance_id=instance_id,
-                action_id=action_id,
-                tool=action.tool,
-            )
-            return _error(
-                PROCEDURE_TOOL_UNAVAILABLE,
-                f"Tool '{action.tool}' execution failed",
-            )
-
-        # 9. Normalize result
-        try:
-            result = normalize_tool_result(raw_result)
-        except Exception as exc:
-            logger.warning(
-                "procedure_normalize_failed",
-                instance_id=instance_id,
-                action_id=action_id,
-                error=str(exc),
-            )
-            return _error(PROCEDURE_INVALID_PATCH, f"Tool result normalization failed: {exc}")
-
-        # 10. If tool reports failure, stay in current state
-        if not result.ok:
-            logger.info(
-                "procedure_action_failed",
-                instance_id=instance_id,
-                action_id=action_id,
-                tool=action.tool,
-                ok=False,
-            )
-            return {
-                "ok": False,
-                "error_code": "PROCEDURE_TOOL_FAILURE",
-                "instance_id": instance_id,
-                "state": active.state,
-                "revision": active.revision,
-                **result.data,
-            }
-
-        # 11. Shallow-merge context_patch
-        new_context = {**active.context, **result.context_patch}
-
-        # 12. Validate merged context
-        ctx_model = self._contexts.resolve(spec.context_model)
-        if ctx_model is not None:
-            validation_error = _validate_context(ctx_model, new_context)
-            if validation_error is not None:
-                logger.warning(
-                    "procedure_invalid_patch",
-                    instance_id=instance_id,
-                    action_id=action_id,
-                    error=validation_error,
-                )
-                return _error(PROCEDURE_INVALID_PATCH, validation_error)
-
-        # 12. CAS write: transition state + bump revision
-        target_state = action.to
-        target_state_spec = spec.states.get(target_state)
-        is_terminal = target_state_spec is not None and not target_state_spec.actions
-
-        cas_result = await self._store.cas_update(
-            instance_id,
+        return await self._apply_transition(
+            raw_result,
+            active,
+            spec,
+            action,
+            action_id,
             expected_revision,
-            state=target_state,
-            context=new_context,
-            completed_at=is_terminal,
         )
-
-        if isinstance(cas_result, CasConflict):
-            logger.warning(
-                "procedure_cas_conflict",
-                instance_id=instance_id,
-                expected=expected_revision,
-                actual=cas_result.actual_revision,
-            )
-            return _cas_conflict_result(
-                instance_id, expected_revision, cas_result.actual_revision,
-            )
-
-        # Success
-        log_event = "procedure_completed" if is_terminal else "procedure_action_transitioned"
-        logger.info(
-            log_event,
-            instance_id=instance_id,
-            action_id=action_id,
-            from_state=active.state,
-            to_state=target_state,
-            revision=cas_result.revision,
-        )
-        return {
-            "ok": True,
-            "instance_id": instance_id,
-            "action_id": action_id,
-            "from_state": active.state,
-            "to_state": target_state,
-            "revision": cas_result.revision,
-            "completed": is_terminal,
-            **result.data,
-        }
 
     # -----------------------------------------------------------------
     # Helpers
@@ -375,6 +176,362 @@ class ProcedureRuntime:
     async def load_active(self, session_id: str) -> ActiveProcedure | None:
         """Load the active procedure for a session (used by AgentLoop)."""
         return await self._store.get_active(session_id)
+
+    # -----------------------------------------------------------------
+    # enter_procedure helpers
+    # -----------------------------------------------------------------
+
+    def _check_enter_mode(
+        self,
+        spec: ProcedureSpec,
+        mode: ToolMode | None,
+    ) -> dict[str, Any] | None:
+        """Return error if mode is not allowed for the spec."""
+        if mode is not None and mode not in spec.allowed_modes:
+            return _error(
+                PROCEDURE_ACTION_DENIED,
+                f"Mode '{mode}' not allowed for procedure '{spec.id}'",
+            )
+        return None
+
+    async def _check_single_active(
+        self,
+        session_id: str,
+    ) -> dict[str, Any] | None:
+        """Return error if session already has an active procedure."""
+        existing = await self._store.get_active(session_id)
+        if existing is not None:
+            return _error(
+                PROCEDURE_CONFLICT,
+                f"Session '{session_id}' already has active procedure "
+                f"'{existing.spec_id}' (instance {existing.instance_id})",
+            )
+        return None
+
+    async def _check_enter_guard(
+        self,
+        spec: ProcedureSpec,
+        ctx: dict[str, Any],
+        session_id: str,
+    ) -> dict[str, Any] | None:
+        """Run the enter guard if configured. Return error on denial."""
+        if not spec.enter_guard:
+            return None
+        guard_fn = self._guards.resolve(spec.enter_guard)
+        if guard_fn is None:
+            return _error(PROCEDURE_UNKNOWN, f"Enter guard '{spec.enter_guard}' not found")
+        tool_context = ToolContext(session_id=session_id)
+        decision = await _run_guard(guard_fn, ctx, tool_context)
+        if not decision.allowed:
+            logger.info(
+                "procedure_enter_denied",
+                spec_id=spec.id,
+                guard=spec.enter_guard,
+                code=decision.code,
+                detail=decision.detail,
+            )
+            return _error(PROCEDURE_ACTION_DENIED, decision.detail, code=decision.code)
+        return None
+
+    async def _create_instance(
+        self,
+        session_id: str,
+        spec: ProcedureSpec,
+        ctx: dict[str, Any],
+        execution_metadata: ProcedureExecutionMetadata | None,
+    ) -> ActiveProcedure:
+        """Create and persist the ActiveProcedure instance."""
+        meta = execution_metadata or ProcedureExecutionMetadata()
+        active = ActiveProcedure(
+            instance_id=f"proc_{uuid4().hex}",
+            session_id=session_id,
+            spec_id=spec.id,
+            spec_version=spec.version,
+            state=spec.initial_state,
+            context=ctx,
+            execution_metadata=meta,
+            revision=0,
+        )
+        created = await self._store.create(active)
+        logger.info(
+            "procedure_entered",
+            instance_id=created.instance_id,
+            session_id=session_id,
+            spec_id=spec.id,
+            state=spec.initial_state,
+        )
+        return created
+
+    # -----------------------------------------------------------------
+    # apply_action helpers
+    # -----------------------------------------------------------------
+
+    async def _resolve_action_context(
+        self,
+        instance_id: str,
+        action_id: str,
+        expected_revision: int,
+    ) -> (
+        tuple[ActiveProcedure, ProcedureSpec, ActionSpec, None]
+        | tuple[None, None, None, dict[str, Any]]
+    ):
+        """Load instance+spec, check revision, resolve action. Error tuple on failure."""
+        _fail = None, None, None  # prefix for error returns
+
+        active = await self._store.get(instance_id)
+        if active is None:
+            return *_fail, _error(
+                PROCEDURE_UNKNOWN, f"Procedure instance '{instance_id}' not found"
+            )
+        spec = self._specs.get(active.spec_id)
+        if spec is None:
+            return *_fail, _error(PROCEDURE_UNKNOWN, f"Procedure spec '{active.spec_id}' not found")
+        if active.revision != expected_revision:
+            logger.warning(
+                "procedure_cas_conflict",
+                instance_id=instance_id,
+                expected=expected_revision,
+                actual=active.revision,
+            )
+            return *_fail, _cas_conflict_result(instance_id, expected_revision, active.revision)
+        current_state = spec.states.get(active.state)
+        if current_state is None or action_id not in current_state.actions:
+            msg = f"Action '{action_id}' not allowed in state '{active.state}'"
+            return *_fail, _error(PROCEDURE_ACTION_DENIED, msg)
+        return active, spec, current_state.actions[action_id], None
+
+    def _check_tool_availability(
+        self,
+        action: ActionSpec,
+        mode: ToolMode | None,
+    ) -> tuple[BaseTool, None] | tuple[None, dict[str, Any]]:
+        """Check that the underlying tool exists and is allowed in mode."""
+        tool = self._tools.get(action.tool)
+        if tool is None:
+            return None, _error(
+                PROCEDURE_TOOL_UNAVAILABLE,
+                f"Underlying tool '{action.tool}' not found",
+            )
+        # D7: procedure-only tools (is_procedure_only=True) skip ambient mode check.
+        # Normal tools always get mode-checked, even inside procedures.
+        if mode is not None and not tool.is_procedure_only:
+            if not self._tools.check_mode(action.tool, mode):
+                return None, _error(
+                    PROCEDURE_ACTION_DENIED,
+                    f"Tool '{action.tool}' not available in mode '{mode}'",
+                )
+        return tool, None
+
+    def _check_mode_risk_guard(
+        self,
+        guard_state: GuardCheckResult | None,
+        action: ActionSpec,
+        tool: BaseTool,
+        instance_id: str,
+        action_id: str,
+    ) -> dict[str, Any] | None:
+        """Check existing mode/risk guard before procedure guard."""
+        if guard_state is None:
+            return None
+        from src.agent.guardrail import check_pre_tool_guard
+
+        blocked = check_pre_tool_guard(guard_state, action.tool, tool.risk_level)
+        if blocked is not None:
+            logger.info(
+                "procedure_action_denied",
+                instance_id=instance_id,
+                action_id=action_id,
+                reason="mode_risk_guard",
+                error_code=blocked.error_code,
+            )
+            return _error(PROCEDURE_ACTION_DENIED, blocked.detail)
+        return None
+
+    async def _check_action_guard(
+        self,
+        action: ActionSpec,
+        active: ActiveProcedure,
+        args_dict: dict[str, Any],
+        tool_context: ToolContext | None,
+        instance_id: str,
+        action_id: str,
+    ) -> dict[str, Any] | None:
+        """Run the action guard if configured. Return error on denial."""
+        if not action.guard:
+            return None
+        guard_fn = self._guards.resolve(action.guard)
+        if guard_fn is None:
+            return _error(PROCEDURE_UNKNOWN, f"Action guard '{action.guard}' not found")
+        decision = await _run_guard(guard_fn, active, args_dict, tool_context)
+        if not decision.allowed:
+            logger.info(
+                "procedure_action_denied",
+                instance_id=instance_id,
+                action_id=action_id,
+                guard=action.guard,
+                code=decision.code,
+            )
+            return _error(PROCEDURE_ACTION_DENIED, decision.detail, code=decision.code)
+        return None
+
+    async def _execute_tool(
+        self,
+        tool: BaseTool,
+        args_dict: dict[str, Any],
+        tool_context: ToolContext | None,
+        instance_id: str,
+        action_id: str,
+        tool_name: str,
+    ) -> tuple[dict[str, Any], None] | tuple[None, dict[str, Any]]:
+        """Execute the underlying tool. Return raw result or error."""
+        try:
+            raw_result = await tool.execute(args_dict, tool_context)
+        except Exception:
+            logger.exception(
+                "procedure_action_failed",
+                instance_id=instance_id,
+                action_id=action_id,
+                tool=tool_name,
+            )
+            return None, _error(
+                PROCEDURE_TOOL_UNAVAILABLE,
+                f"Tool '{tool_name}' execution failed",
+            )
+        return raw_result, None
+
+    async def _apply_transition(
+        self,
+        raw_result: dict[str, Any],
+        active: ActiveProcedure,
+        spec: ProcedureSpec,
+        action: ActionSpec,
+        action_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """Normalize result, validate context, CAS-write, and build response."""
+        iid = active.instance_id
+        try:
+            result = normalize_tool_result(raw_result)
+        except Exception as exc:
+            logger.warning(
+                "procedure_normalize_failed",
+                instance_id=iid,
+                action_id=action_id,
+                error=str(exc),
+            )
+            return _error(PROCEDURE_INVALID_PATCH, f"Tool result normalization failed: {exc}")
+
+        if not result.ok:
+            return self._tool_failure_result(active, action_id, action.tool, result)
+
+        new_context = {**active.context, **result.context_patch}
+        if err := self._validate_merged_context(spec, new_context, iid, action_id):
+            return err
+
+        return await self._cas_write_and_respond(
+            spec,
+            active,
+            action,
+            new_context,
+            result,
+            action_id,
+            expected_revision,
+        )
+
+    def _tool_failure_result(
+        self,
+        active: ActiveProcedure,
+        action_id: str,
+        tool_name: str,
+        result: Any,
+    ) -> dict[str, Any]:
+        """Build result when the tool reports failure (ok=False)."""
+        logger.info(
+            "procedure_action_failed",
+            instance_id=active.instance_id,
+            action_id=action_id,
+            tool=tool_name,
+            ok=False,
+        )
+        return {
+            "ok": False,
+            "error_code": "PROCEDURE_TOOL_FAILURE",
+            "instance_id": active.instance_id,
+            "state": active.state,
+            "revision": active.revision,
+            **result.data,
+        }
+
+    def _validate_merged_context(
+        self,
+        spec: ProcedureSpec,
+        new_context: dict[str, Any],
+        instance_id: str,
+        action_id: str,
+    ) -> dict[str, Any] | None:
+        """Validate merged context against the spec's context model."""
+        ctx_model = self._contexts.resolve(spec.context_model)
+        if ctx_model is None:
+            return None
+        validation_error = _validate_context(ctx_model, new_context)
+        if validation_error is not None:
+            logger.warning(
+                "procedure_invalid_patch",
+                instance_id=instance_id,
+                action_id=action_id,
+                error=validation_error,
+            )
+            return _error(PROCEDURE_INVALID_PATCH, validation_error)
+        return None
+
+    async def _cas_write_and_respond(
+        self,
+        spec: ProcedureSpec,
+        active: ActiveProcedure,
+        action: ActionSpec,
+        new_context: dict[str, Any],
+        result: Any,
+        action_id: str,
+        expected_revision: int,
+    ) -> dict[str, Any]:
+        """CAS-write the transition and build the success/conflict response."""
+        iid = active.instance_id
+        target_state_spec = spec.states.get(action.to)
+        is_terminal = target_state_spec is not None and not target_state_spec.actions
+        cas_result = await self._store.cas_update(
+            iid,
+            expected_revision,
+            state=action.to,
+            context=new_context,
+            completed_at=is_terminal,
+        )
+        if isinstance(cas_result, CasConflict):
+            logger.warning(
+                "procedure_cas_conflict",
+                instance_id=iid,
+                expected=expected_revision,
+                actual=cas_result.actual_revision,
+            )
+            return _cas_conflict_result(iid, expected_revision, cas_result.actual_revision)
+        log_event = "procedure_completed" if is_terminal else "procedure_action_transitioned"
+        logger.info(
+            log_event,
+            instance_id=iid,
+            action_id=action_id,
+            from_state=active.state,
+            to_state=action.to,
+            revision=cas_result.revision,
+        )
+        return {
+            "ok": True,
+            "instance_id": iid,
+            "action_id": action_id,
+            "from_state": active.state,
+            "to_state": action.to,
+            "revision": cas_result.revision,
+            "completed": is_terminal,
+            **result.data,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -423,15 +580,14 @@ def _error(error_code: str, message: str, *, code: str = "") -> dict[str, Any]:
 
 
 def _cas_conflict_result(
-    instance_id: str, expected: int, actual: int | None,
+    instance_id: str,
+    expected: int,
+    actual: int | None,
 ) -> dict[str, Any]:
     return {
         "ok": False,
         "error_code": PROCEDURE_CAS_CONFLICT,
-        "message": (
-            f"CAS conflict: expected revision {expected}, "
-            f"actual {actual}"
-        ),
+        "message": (f"CAS conflict: expected revision {expected}, actual {actual}"),
         "instance_id": instance_id,
         "expected_revision": expected,
         "actual_revision": actual,

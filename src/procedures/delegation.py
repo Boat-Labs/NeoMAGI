@@ -110,86 +110,73 @@ class DelegationTool(BaseTool):
             return {"ok": False, "error_code": "DELEGATION_NO_PROCEDURE_DEPS"}
 
         deps = context.procedure_deps
-        task_brief = arguments.get("task_brief", "")
-        constraints = tuple(arguments.get("constraints", ()))
-        include_keys = tuple(arguments.get("include_keys", ()))
-        evidence = tuple(arguments.get("evidence", ()))
-        open_questions = tuple(arguments.get("open_questions", ()))
+        packet = self._build_packet(arguments, deps)
+        if isinstance(packet, dict):
+            return packet  # error response
 
-        # Build handoff packet
-        builder = HandoffPacketBuilder(include_keys=include_keys)
+        logger.info(
+            "delegation_started", handoff_id=packet.handoff_id,
+            target_role=packet.target_role, task_brief_len=len(arguments.get("task_brief", "")),
+        )
+
+        worker = self._create_worker(deps, context)
+        worker_result: WorkerResult = await worker.execute(packet)
+
+        logger.info(
+            "delegation_completed", handoff_id=packet.handoff_id,
+            ok=worker_result.ok, iterations_used=worker_result.iterations_used,
+        )
+        return self._format_result(worker_result, packet, deps)
+
+    def _build_packet(self, arguments: dict, deps):
+        """Build handoff packet from arguments. Returns dict on error."""
+        builder = HandoffPacketBuilder(
+            include_keys=tuple(arguments.get("include_keys", ())),
+        )
         try:
-            packet = builder.build(
-                active=deps.active_procedure,
-                spec=deps.spec,
+            return builder.build(
+                active=deps.active_procedure, spec=deps.spec,
                 target_role=AgentRole.worker,
-                task_brief=task_brief,
-                constraints=constraints,
-                evidence=evidence,
-                open_questions=open_questions,
+                task_brief=arguments.get("task_brief", ""),
+                constraints=tuple(arguments.get("constraints", ())),
+                evidence=tuple(arguments.get("evidence", ())),
+                open_questions=tuple(arguments.get("open_questions", ())),
             )
         except ValueError as exc:
             return {"ok": False, "error_code": "DELEGATION_PACKET_ERROR", "detail": str(exc)}
 
-        logger.info(
-            "delegation_started",
-            handoff_id=packet.handoff_id,
-            target_role=packet.target_role,
-            task_brief_len=len(task_brief),
-        )
-
-        # Create worker executor on-the-fly (D8)
+    def _create_worker(self, deps, context):
+        """Create a WorkerExecutor for the delegation."""
         worker_role = DEFAULT_ROLE_SPECS.get(AgentRole.worker, RoleSpec(
-            role=AgentRole.worker,
-            allowed_tool_groups=frozenset(),
+            role=AgentRole.worker, allowed_tool_groups=frozenset(),
         ))
-        registry = self._tool_registry or deps.model_client  # fallback: unused in test
-        if self._tool_registry is None:
-            # Minimal fallback for tests — real usage gets registry from __init__
+        registry = self._tool_registry
+        if registry is None:
             from src.tools.registry import ToolRegistry
             registry = ToolRegistry()
-
-        worker = WorkerExecutor(
+        return WorkerExecutor(
             model_client=deps.model_client,
-            tool_registry=registry if hasattr(registry, "list_tools") else registry,
-            role_spec=worker_role,
-            model=deps.model,
+            tool_registry=registry,
+            role_spec=worker_role, model=deps.model,
             scope_key=context.scope_key if context else "main",
             session_id=context.session_id if context else "main",
         )
 
-        # Execute worker
-        worker_result: WorkerResult = await worker.execute(packet)
-
-        logger.info(
-            "delegation_completed",
-            handoff_id=packet.handoff_id,
-            ok=worker_result.ok,
-            iterations_used=worker_result.iterations_used,
-        )
-
-        # Worker failure: don't stage, return error for model to retry.
-        # M2a's apply_action() ignores context_patch on ok=False anyway,
-        # so staging failed results would be a no-op in runtime.
+    @staticmethod
+    def _format_result(worker_result: WorkerResult, packet, deps) -> dict:
+        """Format worker result into tool response dict."""
         if not worker_result.ok:
             return {
-                "ok": False,
-                "handoff_id": packet.handoff_id,
-                "worker_ok": False,
-                "iterations_used": worker_result.iterations_used,
+                "ok": False, "handoff_id": packet.handoff_id,
+                "worker_ok": False, "iterations_used": worker_result.iterations_used,
                 "error_code": worker_result.error_code or "DELEGATION_WORKER_FAILED",
                 "error_detail": worker_result.error_detail,
             }
-
-        # Read-modify-write _pending_handoffs (P2-5r2: full dict for shallow merge)
         current_handoffs = dict(deps.active_procedure.context.get("_pending_handoffs", {}))
         current_handoffs[packet.handoff_id] = worker_result.model_dump()
-
         return {
-            "ok": True,
-            "handoff_id": packet.handoff_id,
-            "worker_ok": True,
-            "iterations_used": worker_result.iterations_used,
+            "ok": True, "handoff_id": packet.handoff_id,
+            "worker_ok": True, "iterations_used": worker_result.iterations_used,
             "available_keys": list(worker_result.result.keys()),
             "context_patch": {"_pending_handoffs": current_handoffs},
         }

@@ -90,6 +90,14 @@ def _primary_ctx(deps: ProcedureActionDeps) -> ToolContext:
 # ---------------------------------------------------------------------------
 
 
+def _advance_context(active, patch, new_state, revision):
+    """Simulate ProcedureRuntime shallow merge + state transition."""
+    updated = {**active.context, **patch}
+    return ActiveProcedure(
+        **{**active.model_dump(), "context": updated, "state": new_state, "revision": revision}
+    )
+
+
 class TestDelegationFlowHappyPath:
     @pytest.mark.asyncio
     async def test_full_flow(self):
@@ -97,61 +105,38 @@ class TestDelegationFlowHappyPath:
         reg = ToolRegistry()
         active = _make_active()
         client = _FakeModelClient(
-            # Prompt-compliant nested response: worker extracts inner "result"
             worker_answer='{"result": {"answer": 42}, "evidence": ["computed"]}',
             review_answer='{"approved": true, "concerns": []}',
         )
         deps = _make_deps(active, client)
-        ctx = _primary_ctx(deps)
 
         # 1. Delegate
-        delegation_tool = DelegationTool(tool_registry=reg)
-        d_result = await delegation_tool.execute(
+        d_result = await DelegationTool(tool_registry=reg).execute(
             {"task_brief": "compute the answer", "include_keys": ["key_a"]},
-            context=ctx,
+            context=_primary_ctx(deps),
         )
         assert d_result["ok"] is True
         handoff_id = d_result["handoff_id"]
-        staging = d_result["context_patch"]["_pending_handoffs"]
-        assert handoff_id in staging
+        assert handoff_id in d_result["context_patch"]["_pending_handoffs"]
 
-        # 2. Simulate context update (ProcedureRuntime would do shallow merge)
-        updated_ctx = {**active.context, **d_result["context_patch"]}
-        active_after_delegate = ActiveProcedure(
-            **{**active.model_dump(), "context": updated_ctx, "state": "delegated", "revision": 1}
-        )
-        deps2 = _make_deps(active_after_delegate, client)
-        ctx2 = _primary_ctx(deps2)
-
-        # 3. Review
-        review_tool = ReviewTool()
-        r_result = await review_tool.execute(
+        # 2. Review
+        active2 = _advance_context(active, d_result["context_patch"], "delegated", 1)
+        r_result = await ReviewTool().execute(
             {"handoff_id": handoff_id, "criteria": ["correctness"]},
-            context=ctx2,
+            context=_primary_ctx(_make_deps(active2, client)),
         )
-        assert r_result["ok"] is True
-        assert r_result["approved"] is True
+        assert r_result["ok"] is True and r_result["approved"] is True
 
-        # 4. Simulate context update again
-        updated_ctx2 = {**active_after_delegate.context, **r_result["context_patch"]}
-        active_after_review = ActiveProcedure(
-            **{**active_after_delegate.model_dump(), "context": updated_ctx2, "state": "reviewed", "revision": 2}
-        )
-        deps3 = _make_deps(active_after_review, client)
-        ctx3 = _primary_ctx(deps3)
-
-        # 5. Publish
-        publish_tool = PublishTool()
-        p_result = await publish_tool.execute(
+        # 3. Publish
+        active3 = _advance_context(active2, r_result["context_patch"], "reviewed", 2)
+        p_result = await PublishTool().execute(
             {"handoff_id": handoff_id, "merge_keys": ["answer"]},
-            context=ctx3,
+            context=_primary_ctx(_make_deps(active3, client)),
         )
         assert p_result["ok"] is True
         assert p_result["published_keys"] == ["answer"]
         assert p_result["context_patch"]["answer"] == 42
-        # Staging cleaned
         assert handoff_id not in p_result["context_patch"]["_pending_handoffs"]
-        # D9: flush signal
         assert len(p_result.get("_publish_flush_texts", [])) > 0
 
 
