@@ -167,6 +167,8 @@ planning → (cancel) → cancelled (terminal)
 
 后续 A 层所有测试都基于此脚本的输出。
 
+**设计说明**：A 层使用一个确定性 `noop_echo` tool 做 state transition，不依赖 LLM 调用（DelegationTool 需要 `ToolContext.procedure_deps`，在脱离 AgentLoop 的 CLI 脚本中无法正确构造）。Delegation/publish 的真实验证留在 B/C 层。
+
 ```bash
 uv run python - <<'PY'
 import asyncio
@@ -182,8 +184,32 @@ from src.procedures.runtime import ProcedureRuntime
 from src.procedures.store import ProcedureStore
 from src.procedures.types import ActionSpec, ProcedureSpec, StateSpec
 from src.session.database import create_db_engine, make_session_factory
-from src.tools.base import ToolMode
+from src.tools.base import BaseTool, ToolMode
 from src.tools.registry import ToolRegistry
+
+
+# --- Noop echo tool: 确定性返回 ok + context_patch，不依赖 LLM ---
+class NoopEchoTool(BaseTool):
+    """A层专用: 返回 ok 并透传 arguments 作为 context_patch。"""
+
+    @property
+    def name(self) -> str:
+        return "noop_echo"
+
+    @property
+    def description(self) -> str:
+        return "Echo arguments as context_patch (test only)"
+
+    @property
+    def parameters(self) -> dict:
+        return {"type": "object", "properties": {}, "additionalProperties": True}
+
+    @property
+    def allowed_modes(self) -> frozenset[ToolMode]:
+        return frozenset({ToolMode.chat_safe, ToolMode.coding})
+
+    async def execute(self, arguments: dict, context=None) -> dict:
+        return {"ok": True, "data": arguments, "context_patch": arguments}
 
 
 class TestCtx(BaseModel):
@@ -201,18 +227,17 @@ TEST_SPEC = ProcedureSpec(
     initial_state="planning",
     states={
         "planning": StateSpec(actions={
-            "delegate_work": ActionSpec(tool="procedure_delegate", to="delegated"),
-            "cancel": ActionSpec(tool="procedure_delegate", to="cancelled"),
+            "submit": ActionSpec(tool="noop_echo", to="delegated"),
+            "cancel": ActionSpec(tool="noop_echo", to="cancelled"),
         }),
         "delegated": StateSpec(actions={
-            "publish_result": ActionSpec(tool="procedure_publish", to="done"),
+            "finish": ActionSpec(tool="noop_echo", to="done"),
         }),
         "done": StateSpec(),
         "cancelled": StateSpec(),
     },
     soft_policies=(
-        "Always provide a clear task_brief when delegating.",
-        "Only publish after reviewing worker output.",
+        "Submit to delegate work, cancel to abort.",
     ),
 )
 
@@ -223,13 +248,7 @@ async def build_test_runtime():
     session_factory = make_session_factory(engine)
 
     tool_registry = ToolRegistry()
-    # Register procedure-only tools
-    from src.procedures.delegation import DelegationTool
-    from src.procedures.publish import PublishTool
-    from src.procedures.reviewer import ReviewTool
-    for tool_cls in (DelegationTool, ReviewTool, PublishTool):
-        tool = tool_cls(tool_registry) if tool_cls is DelegationTool else tool_cls()
-        tool_registry.register(tool)
+    tool_registry.register(NoopEchoTool())
 
     ctx_registry = ProcedureContextRegistry()
     guard_registry = ProcedureGuardRegistry()
@@ -247,7 +266,7 @@ async def main():
     runtime, engine = await build_test_runtime()
     print("✓ Test runtime created with spec 'test.research'")
     print(f"  States: planning → delegated → done | planning → cancelled")
-    print(f"  Actions: delegate_work, cancel, publish_result")
+    print(f"  Actions: submit, cancel, finish (all via noop_echo tool)")
 
     # --- T01: Enter procedure ---
     result = await runtime.enter_procedure(
@@ -280,7 +299,7 @@ async def main():
     # --- T03: Invalid action in current state ---
     bad_action = await runtime.apply_action(
         instance_id=instance_id,
-        action_id="publish_result",  # not allowed in "planning" state
+        action_id="finish",  # not allowed in "planning" state
         args_json="{}",
         expected_revision=0,
     )
@@ -293,7 +312,7 @@ async def main():
     cas_result = await runtime.apply_action(
         instance_id=instance_id,
         action_id="cancel",
-        args_json='{"task_brief": "test"}',
+        args_json="{}",
         expected_revision=999,  # wrong revision
     )
     if cas_result.get("error_code") == "PROCEDURE_CAS_CONFLICT":
@@ -302,11 +321,11 @@ async def main():
         print(f"\n[T04] ✗ CAS conflict NOT detected: {cas_result}")
 
     # --- T05: Valid action → state transition ---
-    # cancel: planning → cancelled (terminal)
+    # cancel: planning → cancelled (terminal), uses noop_echo tool
     cancel_result = await runtime.apply_action(
         instance_id=instance_id,
         action_id="cancel",
-        args_json='{"task_brief": "Cancellation test — no real delegation needed"}',
+        args_json='{"reason": "user abort"}',
         expected_revision=0,
     )
     if cancel_result.get("ok"):
@@ -316,8 +335,6 @@ async def main():
         print(f"  completed: {cancel_result.get('completed')}")
     else:
         print(f"\n[T05] ✗ cancel action failed: {cancel_result}")
-        # 注意: cancel 使用 procedure_delegate tool，worker 可能报错
-        # 这是预期中可能暴露的问题 — 见 C 层 T14
 
     # --- T06: Terminal state → single-active released ---
     reenter = await runtime.enter_procedure(
@@ -343,8 +360,8 @@ PY
 所有 `T01`~`T06` 应显示 `✓`。
 
 注意事项：
-- `T05` 中 `cancel` 绑定了 `procedure_delegate` tool。DelegationTool 会尝试创建 WorkerExecutor 并调用 LLM。如果 cancel 语义只是取消流程而非真正委派工作，这里可能暴露出**"取消"动作不应走 delegation 路径**的设计问题——这正是 user testing 要发现的。
-- 如果 `T05` 因 Worker LLM 调用失败而 `ok=False`，这**不一定是 runtime bug**，而是 test spec 设计问题。记录下来作为观察点。
+- A 层使用 `noop_echo` tool，确保确定性通过（不依赖 LLM、不依赖 `ToolContext.procedure_deps`）。
+- 如果任何测试显示 `✗`，说明 ProcedureRuntime / ProcedureStore 核心有回归，应阻塞 B 层。
 
 ### Operator 辅助脚本：查看 `active_procedures` 表
 
@@ -390,18 +407,21 @@ PY
 ```python
     # --- BEGIN P2-M2 USER TEST PATCH ---
     from pydantic import BaseModel as _BM, ConfigDict as _CD
-    from src.procedures.types import ActionSpec as _AS, StateSpec as _SS
+    from src.procedures.types import (
+        ActionSpec as _AS, ProcedureSpec as _PS, StateSpec as _SS,
+    )
+    from src.tools.base import ToolMode as _TM
 
     class _TestCtx(_BM):
         model_config = _CD(extra="allow")
         topic: str = ""
 
-    _test_spec = ProcedureSpec(
+    _test_spec = _PS(
         id="test.research",
         version=1,
         summary="P2-M2 user test: delegate research to worker, then publish",
         entry_policy="explicit",
-        allowed_modes=frozenset({ToolMode.chat_safe, ToolMode.coding}),
+        allowed_modes=frozenset({_TM.chat_safe, _TM.coding}),
         context_model="_TestCtx",
         initial_state="planning",
         states={
@@ -418,8 +438,6 @@ PY
             "After delegation, review the staged result before publishing.",
         ),
     )
-
-    from src.procedures.types import ProcedureSpec  # noqa: already imported above
 
     context_registry.register("_TestCtx", _TestCtx)
     spec_registry.register(_test_spec)
@@ -455,17 +473,17 @@ async def main():
     engine = await create_db_engine(settings.database)
     async with engine.connect() as conn:
         rows = (await conn.execute(text(
-            f"SELECT session_id, scope_key, mode FROM {schema}.sessions ORDER BY created_at DESC LIMIT 3"
+            f"SELECT id, mode, created_at FROM {schema}.sessions ORDER BY created_at DESC LIMIT 3"
         ))).fetchall()
         for r in rows:
-            print({"session_id": r.session_id, "scope_key": r.scope_key, "mode": r.mode})
+            print({"session_id": r.id, "mode": r.mode, "created_at": str(r.created_at)})
     await engine.dispose()
 
 asyncio.run(main())
 PY
 ```
 
-记下 `session_id`。
+记下 `session_id`（即 `id` 列值）。默认 WebChat 首个 session 通常是 `main`；新建 thread 的 ID 也可从前端 localStorage 的 `activeSessionId` 获取。
 
 **步骤 2**：为该 session 进入 procedure
 
@@ -765,17 +783,18 @@ except ValueError as e:
 PY
 ```
 
-### T15 Cancel 动作与 delegation 工具的语义错配
+### T15 ActionSpec 缺乏 noop/direct transition 能力
 
-- 目标：验证将"取消"语义的 action 绑定到 `procedure_delegate` tool 时会发生什么
-- 背景：在 A 层 T05 的测试 spec 中，`cancel` action 绑定了 `procedure_delegate` tool。这意味着执行 cancel 会触发一次 worker delegation——这在语义上是错误的
-- 方法：检查 A 层 T05 的结果：
-  - 如果 `ok=True`：delegation 成功但产生了无用的 worker result → 语义浪费
-  - 如果 `ok=False` 且 `error_code=PROCEDURE_TOOL_FAILURE`：worker 失败，state 未转换 → cancel 被 delegation 失败阻塞
-  - 无论哪种：**这暴露了 ProcedureSpec 缺乏"无工具动作"（noop/direct transition）的能力**
-
-- 结论：当前 `ActionSpec` 强制绑定 `tool`，没有 `tool=None` 的直接转换路径。如果 P2-M2 要支持"取消"或"跳过"类语义，需要增加 noop tool 或允许 `tool` 为 optional。
-  记入 open issues。
+- 目标：确认当前 `ActionSpec` 强制绑定 `tool` 字段的局限性
+- 背景：A 层 T05 中，"cancel" 语义的 action 必须绑定一个 tool。我们通过 `noop_echo` 规避了这个问题，但真实 production spec 不应需要注册一个专用 noop tool 来实现"取消"或"跳过"
+- 观察：
+  - `ActionSpec.tool` 是必填 `str`，没有 `None` 选项
+  - 如果绑定 `procedure_delegate` 来做 cancel，会触发不必要的 worker LLM 调用
+  - 如果绑定 `procedure_publish` 来做 cancel，会因 `_pending_handoffs` 为空而报错
+- 结论：**P2-M2 缺少 "direct state transition without tool execution" 的原生支持**。后续 P2-M3+ 应考虑：
+  - 允许 `ActionSpec(tool=None, to="cancelled")` 直接转换
+  - 或在 runtime 中内置 `procedure_noop` tool
+  - 记入 open issues
 
 ### T16 Procedure + Skill 交互
 
@@ -835,7 +854,7 @@ PY
 | Staging 不可见性 | | | T12 |
 | Compaction 后 handoff_id 丢失 | | | T13 |
 | HandoffPacket 超限拒绝 | | | T14 |
-| Cancel/noop 语义错配 | | | T15 |
+| Noop/direct transition 缺失 | | | T15 |
 | Procedure + Skill 交互 | | | T16 |
 | 孤儿 procedure 重启行为 | | | T17 |
 
@@ -843,7 +862,7 @@ PY
 
 | 层 | 标准 |
 |----|------|
-| A 层 | T01~T06 全部 `✓`。T05 如因 worker LLM 报错而非 runtime 错误，标记为 `PARTIAL`，不阻塞 B 层 |
+| A 层 | T01~T06 全部 `✓`（使用 noop_echo tool，确定性通过）。任何失败均视为 runtime 回归 |
 | B 层 | T07~T10 全链路至少一次走通。如果 publish 因 handoff_id 丢失而失败，标记为 `KNOWN_ISSUE`，不阻塞 C 层 |
 | C 层 | 所有发现按严重度分级记入 open issues。无 P0（系统 crash/数据损坏）级发现 |
 
