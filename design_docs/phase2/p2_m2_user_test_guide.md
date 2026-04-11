@@ -552,25 +552,30 @@ PY
 - Worker 没有 memory 访问、没有 session 持久化——如果 task_brief 不够清楚，worker 可能返回空结果
 - 观察 `iterations_used`：如果 worker 用满了 `max_iterations=5`，说明任务可能过于复杂或 prompt 不够好
 - Worker tool 隔离：worker 只能访问 `code` 和 `world` group 的工具，且排除 `is_procedure_only` 和 `RiskLevel.high`
+- **Hotfix 新增**：delegation 成功返回中包含 `available_keys` 字段，列出 worker result 的实际 key。model 应在后续 publish 时使用这些 key 作为 `merge_keys`
 
 ### T09 用户触发 publish
 
 - 前置：T08 成功完成，state 已转到 `delegated`
 - 用户步骤：
-  - `请查看 worker 的结果，如果合理就 publish_result。`
+  - `请查看 worker 的结果，如果合理就 publish_result。使用 delegation 返回的 available_keys 作为 merge_keys。`
 - 预期（理想路径）：
-  - model 调用 `publish_result` virtual action，提供 `handoff_id` 和 `merge_keys`
-  - 后端日志出现 `publish_executed`
+  - model 调用 `publish_result` virtual action，提供 `handoff_id` 和正确的 `merge_keys`（来自 T08 delegation 返回的 `available_keys`）
+  - 后端日志出现 `publish_executed`，`flush_candidate_count > 0`
   - state 转到 `done`（terminal）
   - 后端日志出现 `procedure_completed`
-- 预期（可能失败路径）：
-  - model 不知道 `handoff_id` 是什么 → ProcedureView 中没有把 staging 区信息暴露给 model
-  - 这是**预期中可能暴露的架构缝隙**：model 需要从上一轮 delegation 的返回结果中记住 `handoff_id`，但 compaction 或 prompt 截断可能丢失这个信息
+- 预期（fail-closed 路径 — hotfix 后新增）：
+  - 如果 model 传了 `merge_keys=[]` → 返回 `PUBLISH_EMPTY_MERGE_KEYS` + `available_keys`，state **不转换**，staging **不清除**
+  - 如果 model 猜错了 merge_keys → 返回 `PUBLISH_NO_KEYS_MATCHED` + `available_keys`，state **不转换**，staging **不清除**
+  - 以上两种情况 model 可以用返回的 `available_keys` 重新调用 publish
+- 预期（handoff_id 丢失路径）：
+  - model 不知道 `handoff_id` → 需要从上一轮 delegation 的返回结果中提取
+  - 如果 compaction 丢失了 handoff_id → Workaround 见 10.3
 
 **关键观察点**：
 - `handoff_id` 是 delegation 返回的 UUID，model 必须在后续轮次中引用它
 - 如果会话中间发生了 compaction，`handoff_id` 可能丢失 → **这是 C 层 T12 的前置发现**
-- PublishTool 需要 `context.actor == AgentRole.primary` 的 role guard — 如果 `ToolContext.actor` 未正确设置，publish 会被拒绝
+- **Hotfix 后**：publish 对空/错误 merge_keys 是 fail-closed 的，不会再出现"state 转换但数据丢失"的情况（OI-M2-05 已修复）
 
 ### T10 Terminal 后验证
 
@@ -579,10 +584,12 @@ PY
   - `当前还有 procedure 在运行吗？`
 - 预期：
   - model 应报告没有 active procedure
+  - model **不应**陷入 `memory_append` 循环（**Hotfix 后**：写工具断路器在同一请求内第 4 次调用同一写工具时截断，后端日志出现 `write_tool_request_limit`）
   - 查看 `active_procedures` 表，`completed_at` 应已填充
 - operator 验证：
   - 运行"查看 `active_procedures` 表"脚本
   - 最近记录应显示 `state=done`, `completed=True`
+  - 检查后端日志：如果出现 `write_tool_request_limit` → 说明断路器生效，model 仍然尝试了循环但被截断（OI-M2-04 的确定性修复）
 
 ## 7. C 层：架构缝隙探测
 
@@ -842,9 +849,11 @@ PY
 |------|------|------|
 | ProcedureView prompt 注入 | PASS/FAIL | model 能否描述 procedure state |
 | virtual action schema 可用 | PASS/FAIL | model 能否调用 delegate_work |
-| delegation 完成 + state transition | PASS/FAIL | |
-| publish 完成 + terminal | PASS/FAIL | |
+| delegation 完成 + state transition | PASS/FAIL | 返回应包含 `available_keys` |
+| publish fail-closed on bad keys | PASS/FAIL | 空/错误 merge_keys → ok=False |
+| publish 完成 + terminal | PASS/FAIL | 使用正确 merge_keys 后成功 |
 | state refresh 后 model 看到新 state | PASS/FAIL | |
+| 写工具断路器生效 | PASS/FAIL | T10 后 memory_append 循环被截断 |
 
 ### 8.3 架构缝隙
 
@@ -863,7 +872,7 @@ PY
 | 层 | 标准 |
 |----|------|
 | A 层 | T01~T06 全部 `✓`（使用 noop_echo tool，确定性通过）。任何失败均视为 runtime 回归 |
-| B 层 | T07~T10 全链路至少一次走通。如果 publish 因 handoff_id 丢失而失败，标记为 `KNOWN_ISSUE`，不阻塞 C 层 |
+| B 层 | T07~T10 全链路至少一次走通。publish 首次因 merge_keys 错误被 fail-closed 拒绝是正常行为（model 应用 available_keys 重试）。如果 publish 因 handoff_id 丢失而失败，标记为 `KNOWN_ISSUE`，不阻塞 C 层 |
 | C 层 | 所有发现按严重度分级记入 open issues。无 P0（系统 crash/数据损坏）级发现 |
 
 总体通过条件：
@@ -887,12 +896,16 @@ PY
 - 检查后端日志中 `worker_model_timeout` 或 `worker_tool_failed`
 - Worker 默认使用 `gpt-4o-mini`；如果 key 只支持特定模型，可能需要调整
 
-### 10.3 B 层 T09：model 不知道 handoff_id
+### 10.3 B 层 T09：publish 被拒绝
 
-- 这是**预期中最可能暴露的架构问题**
-- `handoff_id` 存在于前轮的 tool result 中，model 需要从上下文中提取
-- 如果上下文过长触发了 compaction → handoff_id 丢失
-- Workaround：检查 `active_procedures.context._pending_handoffs` 的 key，手动告诉 model
+- 如果返回 `PUBLISH_EMPTY_MERGE_KEYS` 或 `PUBLISH_NO_KEYS_MATCHED`：这是 hotfix 后的**正常 fail-closed 行为**
+  - 检查返回的 `available_keys` 字段
+  - 提示 model 使用正确的 merge_keys 重新调用 publish
+  - 或在用户消息中明确指出要用哪些 key
+- 如果 model 不知道 `handoff_id`：
+  - `handoff_id` 存在于前轮 delegation 的 tool result 中
+  - 如果上下文过长触发了 compaction → handoff_id 丢失
+  - Workaround：检查 `active_procedures.context._pending_handoffs` 的 key，手动告诉 model
 
 ### 10.4 C 层 T17：撤销 patch 后系统 crash
 
