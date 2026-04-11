@@ -496,7 +496,7 @@ from src.procedures.types import ActiveProcedure
 from src.session.database import create_db_engine, make_session_factory
 from uuid import uuid4
 
-SESSION_ID = "<粘贴上一步得到的 session_id>"
+SESSION_ID = "web:3ac05ab5-2073-486d-bcde-e5ef29e5ff71"
 
 async def main():
     settings = get_settings()
@@ -540,7 +540,7 @@ PY
 
 - 前置：T07 确认 model 已知 procedure 存在
 - 用户步骤：
-  - `请执行 delegate_work，让 worker 调研 NeoMAGI 的 memory 架构设计有哪些关键取舍，task_brief 写清楚。`
+  - `请执行 delegate_work，task_brief 写："请总结 memory 架构设计中读写分离和向量搜索的关键取舍，直接用你已有的知识回答，不需要调用工具。"`
 - 预期：
   - model 应调用 `delegate_work` virtual action
   - 后端日志应出现 `delegation_started` 和 `delegation_completed`
@@ -779,7 +779,7 @@ try:
         active=ActiveProcedure(
             instance_id="test", session_id="test", spec_id="test",
             spec_version=1, state="planning",
-            context={"topic": "x" * 30000},
+            context={"topic": "x" * 35000},
         ),
         spec=spec, target_role=AgentRole.worker,
         task_brief="research task",

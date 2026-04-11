@@ -39,11 +39,8 @@ doc_id_assigned_at: 2026-04-11T10:47:42+02:00
   - ProcedureView 只暴露 `allowed_actions` 和 `soft_policies`，不暴露 `_pending_handoffs` 的内容或结构
   - delegation 返回结果中只告知 `handoff_id` 和 `worker_ok`，不告知 worker result 的可用 key
   - model 需要从前轮 delegation 的上下文中"记住"worker 返回了什么，但如果发生 compaction，这些信息会丢失（与 test guide C层 T13 预测一致）
-- 可选修复方向：
-  - A. DelegationTool 返回中增加 `available_keys: list[str]`，告知 model worker result 有哪些 key
-  - B. ProcedureView 中暴露 `_pending_handoffs` 的 key 列表（不暴露内容）
-  - C. PublishTool 在 `merge_keys` 为空或全部未命中时，fallback 合并整个 `result` dict
-  - D. Worker system prompt 强制要求 JSON 输出包含固定 key（如 `findings`, `summary`），并在 ProcedureSpec 的 soft_policies 中告知 model 这些 key
+- **部分修复**：`6c01835` — DelegationTool 成功返回中增加 `available_keys` 字段；hotfix 后用户测试确认 model 能正确使用 `available_keys` 作为 `merge_keys`
+- 剩余风险：compaction 后 `available_keys` 信息仍可能丢失（ProcedureView 不暴露 staging 结构）
 
 ## OI-M2-03 ActionSpec 缺乏 noop/direct transition 支持
 
@@ -79,11 +76,9 @@ doc_id_assigned_at: 2026-04-11T10:47:42+02:00
   - daily notes（`workspace/memory/2026-04-11.md`）被大量重复、无信息量的条目污染
   - 每次循环消耗 ~9 轮 LLM 调用（token 浪费）
   - 用户体验：页面显示一长串 memory_append 展开卡片，真实回复被淹没
-- 可选修复方向：
-  - A. **Procedure completion signal**：procedure 到 terminal 时，在下一轮 prompt 中注入一条显式提示（如"Procedure 'test.research' has completed. No procedure actions are available."），帮助 model 理解上下文变化
-  - B. **memory_append rate limiting**：同一请求内对同一 tool 的连续调用施加阈值（如 ≤3 次），超过后返回提示而非继续执行
-  - C. **tool iteration 退化检测**：如果连续 N 轮都调用同一个非 procedure tool 且无用户消息介入，AgentLoop 主动截断并返回文本提示
-  - D. **更强模型**：gpt-4o-mini 在边界场景下的工具使用判断较弱；gpt-4o 或更强模型可能直接文本回复而非循环调用
+- **修复**：`213b3db` — 请求级写工具断路器（`WRITE_TOOL_REQUEST_LIMIT=3`，第 4 次拒绝），落点在 `tool_concurrency._run_single_tool()`，使用 `BaseTool.is_read_only` 区分读写工具
+- hotfix 后用户测试确认：procedure terminal 后 model 仍可能调用 memory_append，但断路器在第 4 次截断，不再出现 9 轮循环
+- 剩余风险：model 仍然会尝试 1~3 次无意义写入（prompt 中无 completion signal，`RequestState` 不跨请求无法实现）
 
 ## OI-M2-05 Publish merge_keys 为空时仍允许 state transition
 
@@ -97,6 +92,4 @@ doc_id_assigned_at: 2026-04-11T10:47:42+02:00
   - `merge_worker_result()` 在 `merge_keys=[]` 时直接返回空 `patch`
   - state transition 由 ProcedureRuntime 的 CAS 写入完成，不依赖 publish 的实际合并结果
 - 与 OI-M2-02 的关系：OI-M2-02 是 model 猜错了 key；OI-M2-05 是 model 直接传了空 key。两者根源相同（model 不知道正确的 key），但 OI-M2-05 暴露了 PublishTool 缺少 "至少合并一个 key" 的 guard
-- 可选修复方向：
-  - A. PublishTool 在 `merge_keys` 为空或全部未命中时返回 `ok=False`（fail-closed），阻止无意义的 state transition
-  - B. 结合 OI-M2-02-C：fallback 合并整个 `result` dict
+- **修复**：`6c01835` — PublishTool 对空 `merge_keys` 返回 `PUBLISH_EMPTY_MERGE_KEYS`，对全部未命中返回 `PUBLISH_NO_KEYS_MATCHED`，均 `ok=False`，staging 保持不变，返回 `available_keys` 供 model 重试
