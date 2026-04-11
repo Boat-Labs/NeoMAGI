@@ -134,10 +134,11 @@ class WorkerExecutor:
                     ),
                 )
 
-            # Process tool calls
-            messages.append(_assistant_message(response))
+            # Process tool calls — normalize SDK objects to dicts first
+            normalized_calls = _normalize_tool_calls(response.tool_calls)
+            messages.append(_assistant_message_from_calls(response.content, normalized_calls))
 
-            for tc in response.tool_calls:
+            for tc in normalized_calls:
                 tool_name = tc["name"]
                 tool_args_str = tc["arguments"]
                 tool = allowed_tools.get(tool_name)
@@ -255,17 +256,40 @@ class WorkerExecutor:
 # ---------------------------------------------------------------------------
 
 
-def _assistant_message(response: Any) -> dict[str, Any]:
-    """Build an assistant message dict from a ChatCompletionMessage."""
-    msg: dict[str, Any] = {"role": "assistant", "content": response.content or ""}
-    if response.tool_calls:
+def _normalize_tool_calls(raw_calls: Any) -> list[dict[str, str]]:
+    """Normalize OpenAI SDK tool call objects or dicts to plain dicts.
+
+    ``chat_completion()`` returns ``ChatCompletionMessageToolCall`` Pydantic
+    objects whereas the streaming accumulator yields plain dicts.  This
+    helper accepts both and always returns ``[{"id", "name", "arguments"}]``.
+    """
+    result: list[dict[str, str]] = []
+    for tc in raw_calls:
+        if isinstance(tc, dict):
+            result.append(tc)
+        else:
+            # Pydantic SDK object: attributes id, function.name, function.arguments
+            result.append({
+                "id": getattr(tc, "id", "") or "",
+                "name": getattr(tc.function, "name", "") if hasattr(tc, "function") else "",
+                "arguments": getattr(tc.function, "arguments", "") if hasattr(tc, "function") else "",
+            })
+    return result
+
+
+def _assistant_message_from_calls(
+    content: str | None, normalized_calls: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Build an assistant message dict from content + normalized tool calls."""
+    msg: dict[str, Any] = {"role": "assistant", "content": content or ""}
+    if normalized_calls:
         msg["tool_calls"] = [
             {
                 "id": tc.get("id", ""),
                 "type": "function",
                 "function": {"name": tc["name"], "arguments": tc["arguments"]},
             }
-            for tc in response.tool_calls
+            for tc in normalized_calls
         ]
     return msg
 
