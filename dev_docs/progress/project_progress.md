@@ -618,3 +618,22 @@ doc_id_assigned_at: 2026-04-07T09:55:53+02:00
 - Plan: `dev_docs/plans/phase2/p2-m2b_multi-agent-runtime_2026-04-07.md`
 - Next: P2-M2a-post (procedure_spec governance adapter); 之后按 roadmap 考虑 P2-M3 (身份认证/记忆质量)
 - Risk: worker 当前排除所有 high-risk tools，后续可能需要受控的 write 委托路径
+
+## 2026-04-11 (local) | P2-M2: User Acceptance Testing + Hotfix
+- Status: done
+- Done: 完成 P2-M2 用户验收测试（A/B/C 三层），发现 5 个 open issues，修复 3 个，部分修复 1 个，延期 1 个
+- Findings:
+  - OI-M2-01 (P1, fixed `44296c3`): WorkerExecutor 未归一化 OpenAI SDK tool call 对象 — `chat_completion()` 返回 Pydantic 对象，worker 按 dict 访问 AttributeError
+  - OI-M2-02 (P2, partial `6c01835`): Publish merge_keys 对 model 不透明 — delegation 现已返回 available_keys，用户测试确认 model 能正确使用
+  - OI-M2-03 (P2, deferred): ActionSpec 缺乏 noop/direct transition — 已知限制，有 workaround
+  - OI-M2-04 (P1, fixed `213b3db`): Procedure terminal 后 model 陷入 memory_append 循环 — 新增请求级写工具断路器 (WRITE_TOOL_REQUEST_LIMIT=3)
+  - OI-M2-05 (P2, fixed `6c01835`): Publish 空 merge_keys 仍允许 state transition — PublishTool 改为 fail-closed
+- Hotfix:
+  - Slice B (`6c01835`): PublishTool fail-closed (PUBLISH_EMPTY_MERGE_KEYS / PUBLISH_NO_KEYS_MATCHED) + DelegationTool 返回 available_keys
+  - Slice A (`213b3db`): 请求级写工具断路器，落点 `tool_concurrency._run_single_tool()`，使用 `BaseTool.is_read_only`
+  - 8 新增测试 (3 publish + 1 delegation + 4 circuit breaker); 1802 tests passed
+- Evidence: `dev_docs/logs/phase2/p2-m2_user_acceptance.md`; `design_docs/phase2/p2_m2_open_issues.md`
+- Test guide: `design_docs/phase2/p2_m2_user_test_guide.md`
+- Hotfix plan: `dev_docs/plans/phase2/p2-m2_hotfix_2026-04-11.md`
+- Next: P2-M2-post (procedure_spec governance adapter); 之后按 roadmap 进入 P2-M3
+- Risk: compaction 后 handoff_id/available_keys 可能丢失 (OI-M2-02 剩余); worker max_iterations=5 对复杂任务偏紧
