@@ -401,6 +401,14 @@ async def _add_principal_visibility_to_memory(conn, schema: str) -> None:
         f" ADD COLUMN IF NOT EXISTS visibility VARCHAR(32) NOT NULL"
         f" DEFAULT 'private_to_principal'"
     ))
+    await conn.execute(text(
+        f"CREATE INDEX IF NOT EXISTS idx_memory_entries_principal"
+        f" ON {schema}.memory_entries (principal_id)"
+    ))
+    await conn.execute(text(
+        f"CREATE INDEX IF NOT EXISTS idx_memory_entries_visibility"
+        f" ON {schema}.memory_entries (visibility)"
+    ))
 
 
 def make_session_factory(engine: AsyncEngine) -> async_sessionmaker:

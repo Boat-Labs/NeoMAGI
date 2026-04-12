@@ -238,10 +238,10 @@ async def _reindex_memory_entries(
     indexer = MemoryIndexer(session_factory, memory_settings)
     ledger = MemoryLedgerWriter(session_factory)
 
-    # Prefer ledger-based reindex; fallback to workspace if ledger is empty
+    # Prefer ledger-based reindex (all scopes); fallback to workspace if ledger is empty
     ledger_count = await ledger.count()
     if ledger_count > 0:
-        entry_count = await indexer.reindex_all(ledger=ledger)
+        entry_count = await indexer.reindex_all(scope_key=None, ledger=ledger)
         results.append(("7. reindex_all", f"OK ({entry_count} entries, ledger-based)"))
     else:
         entry_count = await indexer.reindex_all()

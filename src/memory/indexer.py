@@ -102,33 +102,38 @@ class MemoryIndexer:
         return len(sections)
 
     async def reindex_all(
-        self, *, scope_key: str = "main", ledger: object | None = None,
+        self, *, scope_key: str | None = "main", ledger: object | None = None,
     ) -> int:
         """Full reindex: daily_note from ledger or workspace, curated from files.
 
         P2-M3b: when ledger is provided, daily_note entries are rebuilt from
         the DB ledger current view (with principal_id + visibility).
         Curated memory (MEMORY.md) always reindexes from workspace files.
+
+        scope_key=None with ledger: rebuilds all scopes from ledger (used by restore).
+        scope_key=None without ledger: rebuilds all workspace files (no scope filter).
         """
         total = 0
         workspace = self._settings.workspace_path
 
         if ledger is not None:
-            # Ledger-based reindex for daily_note entries
+            # Ledger-based reindex for daily_note entries (scope_key=None → all scopes)
             count = await self.reindex_from_ledger(ledger, scope_key=scope_key)
             total += count
         else:
             # Workspace-based fallback for daily_note entries
             memory_dir = workspace / "memory"
             if memory_dir.is_dir():
+                ws_scope = scope_key or "main"
                 for filepath in sorted(memory_dir.glob("*.md")):
-                    count = await self.index_daily_note(filepath, scope_key=scope_key)
+                    count = await self.index_daily_note(filepath, scope_key=ws_scope)
                     total += count
 
         # Curated memory always from workspace files
+        curated_scope = scope_key or "main"
         memory_md = workspace / "MEMORY.md"
         if memory_md.is_file():
-            count = await self.index_curated_memory(memory_md, scope_key=scope_key)
+            count = await self.index_curated_memory(memory_md, scope_key=curated_scope)
             total += count
 
         logger.info("reindex_complete", total_entries=total, scope_key=scope_key,
@@ -233,6 +238,8 @@ class MemoryIndexer:
                 "scope_key": meta["scope"], "source_type": "daily_note",
                 "source_path": rel_path, "source_date": source_date,
                 "source_session_id": meta["source_session_id"],
+                "principal_id": meta.get("principal"),
+                "visibility": meta.get("visibility", "private_to_principal"),
                 "title": "", "content": entry_text, "tags": [], "confidence": None,
             })
         return rows
