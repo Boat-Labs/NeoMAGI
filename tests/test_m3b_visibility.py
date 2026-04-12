@@ -12,10 +12,8 @@ Covers the missing test coverage identified in post-review:
 
 from __future__ import annotations
 
-import re
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -29,7 +27,6 @@ from src.memory.writer import MemoryWriter
 from src.tools.builtins.memory_append import MemoryAppendTool
 from src.tools.builtins.memory_search import MemorySearchTool
 from src.tools.context import ToolContext
-
 
 # ---------------------------------------------------------------------------
 # Helpers

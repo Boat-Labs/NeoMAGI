@@ -223,6 +223,58 @@ class TestReindexCli:
         assert code == 0
         assert execution_log == ["truncate", "reindex_all"]
 
+    @pytest.mark.asyncio
+    async def test_ledger_mode_rebuilds_all_scopes(self) -> None:
+        """When ledger has data, reindex must use scope_key=None (all scopes)."""
+        from src.backend.cli import _run_reindex
+
+        reindex_kwargs: list[dict] = []
+
+        mock_settings = MagicMock()
+        mock_settings.database = MagicMock()
+        mock_settings.memory = MagicMock()
+
+        mock_conn = AsyncMock()
+
+        async def track_execute(stmt):
+            stmt_str = str(stmt) if not hasattr(stmt, "text") else str(stmt.text)
+            if "COUNT" in stmt_str:
+                return MagicMock(scalar=lambda: 5)
+            return MagicMock()
+
+        mock_conn.execute = track_execute
+
+        mock_engine = MagicMock()
+        mock_engine.begin = MagicMock(return_value=_make_async_cm(mock_conn))
+        mock_engine.dispose = AsyncMock()
+
+        mock_indexer = AsyncMock()
+
+        async def track_reindex(**kw):
+            reindex_kwargs.append(kw)
+            return 10
+
+        mock_indexer.reindex_all = track_reindex
+
+        mock_ledger = AsyncMock()
+        mock_ledger.count = AsyncMock(return_value=42)  # non-empty ledger
+
+        with (
+            patch("src.config.settings.get_settings", return_value=mock_settings),
+            patch("src.session.database.create_db_engine", return_value=mock_engine),
+            patch("src.session.database.make_session_factory", return_value=MagicMock()),
+            patch("src.memory.indexer.MemoryIndexer", return_value=mock_indexer),
+            patch("src.memory.ledger.MemoryLedgerWriter", return_value=mock_ledger),
+        ):
+            code = await _run_reindex("main")
+
+        assert code == 0
+        assert len(reindex_kwargs) == 1
+        assert reindex_kwargs[0]["scope_key"] is None, (
+            "ledger-mode reindex after TRUNCATE must rebuild all scopes"
+        )
+        assert reindex_kwargs[0]["ledger"] is mock_ledger
+
 
 class TestResetUserDbCli:
     @pytest.mark.asyncio

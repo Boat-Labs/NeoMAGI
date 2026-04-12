@@ -116,13 +116,14 @@ async def _run_reindex(scope_key: str) -> int:
             await conn.execute(text(f"TRUNCATE {DB_SCHEMA}.memory_entries"))
         logger.info("reindex_truncated", cleared=old_count)
 
-        # Reindex: prefer ledger-based, fallback to workspace
+        # Reindex: prefer ledger-based (all scopes after truncate), fallback to workspace
         session_factory = make_session_factory(engine)
         indexer = MemoryIndexer(session_factory, settings.memory)
         ledger = MemoryLedgerWriter(session_factory)
         ledger_count = await ledger.count()
         if ledger_count > 0:
-            new_count = await indexer.reindex_all(scope_key=scope_key, ledger=ledger)
+            # After full TRUNCATE, rebuild all scopes from ledger (scope_key=None)
+            new_count = await indexer.reindex_all(scope_key=None, ledger=ledger)
             mode = "ledger-based"
         else:
             new_count = await indexer.reindex_all(scope_key=scope_key)
