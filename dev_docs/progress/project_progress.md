@@ -657,3 +657,30 @@ doc_id_assigned_at: 2026-04-07T09:55:53+02:00
 - Tests: 66 新增 (58 unit + 8 integration); 1860 total passed
 - Next: P2-M2d (Memory Source Ledger Prep for P2-M3); 之后进入 P2-M3 (Identity / Principal / Visibility / Memory Policy)
 - Risk: eval checks 是重复实现而非直接调用 validate_procedure_spec()，后续若 registry 校验规则变更需同步
+
+## 2026-04-12 (local) | P2-M2d: Memory Source Ledger Prep for P2-M3
+- Status: done
+- Done: append-only DB memory truth (ADR 0060); 双模式 MemoryWriter; parity checker; backup/restore/preflight/doctor 全覆盖
+- Scope:
+  - MemoryLedgerWriter (append-only writer, raw SQL, CAST jsonb, ON CONFLICT DO NOTHING, idempotent)
+  - MemoryParityChecker + ParityReport (ID + content + metadata 两层比对, scope 过滤)
+  - MemoryWriter 双模式: ledger-wired truth-first / no-ledger fallback mandatory projection
+  - MemoryWriteResult 返回值 (entry_id, ledger_written, projection_written, projection_path)
+  - AgentLoop 外部 MemoryWriter 注入 (覆盖 compaction flush 双写)
+  - MemoryAppendTool 结构化返回 (ok/entry_id/ledger_written/projection_written/path/message)
+  - Doctor D5: memory ledger parity check
+  - Preflight _REQUIRED_TABLES + Backup TRUTH_TABLES + Restore step 7.5 fail-fast
+  - _parse_entry_metadata() source 字段提取
+  - DB: memory_source_ledger (event_id PK, partial unique index entry_append)
+  - Data model doc: design_docs/data_models/postgresql/memory_source_ledger.md
+- Review Findings (plan 5 rounds 21 findings + impl 2 rounds 9 findings, all fixed):
+  - Plan P1×4: entry_id UNIQUE→event_id PK; AgentLoop wiring; parity ID-only→content-level; backup truth table
+  - Plan 方向性×2: clean-start baseline; truth-first 写入顺序
+  - Plan P1×2 (R3-R4): size check 阻断 truth; 返回值迁移未覆盖
+  - Impl P1×2: CAST jsonb; mkdir 阻断 truth
+  - Impl P2×6: preflight tables; doctor WARN; scoped parity; content+metadata 互斥; restore fail-fast; conftest truncation
+  - Impl P3×1: composite restore test connect() mock
+- Evidence: `dev_docs/logs/phase2/p2-m2d_memory-source-ledger-prep_2026-04-12.md`
+- Tests: ~30 新增 + 现有迁移; 1803 unit + 81 integration passed
+- Next: P2-M3 (Identity / Principal / Visibility / Memory Policy)
+- Risk: reindex 仍从 workspace 扫描，ledger-only entry (projection 失败) 在 reindex 后从 memory_entries 消失；P2-M3 切换 read path 后自动消除
