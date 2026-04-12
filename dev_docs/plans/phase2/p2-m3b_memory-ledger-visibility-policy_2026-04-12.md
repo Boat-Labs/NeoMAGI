@@ -40,11 +40,14 @@ doc_id_assigned_at: 2026-04-12T12:53:57+02:00
 | `MemoryWriter` (`src/memory/writer.py`) | dual-mode (ledger truth-first + workspace projection best-effort); 增量索引仅在 `projection_written` 时触发; 不传递 principal_id |
 | `MemoryAppendTool` (`src/tools/builtins/memory_append.py`) | 从 `context.scope_key` / `context.session_id` 读取; 不读取 principal_id |
 | `MemorySearchTool` (`src/tools/builtins/memory_search.py`) | 从 `context.scope_key` 读取; 不读取 principal_id |
-| `ToolContext` (`src/tools/context.py`) | 5 字段, 无 principal_id |
+| `ToolContext` (`src/tools/context.py`) | 6 字段, 含 `principal_id: str \| None` (P2-M3a 已新增) |
 | `MemoryParityChecker` (`src/memory/parity.py`) | 比较 ledger vs workspace: content + scope_key + source + source_session_id |
 | `PromptBuilder` (`src/agent/prompt_builder.py`) | `_load_daily_notes()` 从 workspace 文件读取 recent daily notes 注入 system prompt; 仅按 scope_key 过滤，不看 principal_id |
 | `AgentLoop._fetch_memory_recall()` (`src/agent/agent.py:166`) | 自动 recall 直接调用 `MemorySearcher.search(scope_key=...)`; 不传递 principal_id |
-| `execute_tool()` (`src/agent/tool_runner.py:44`) | 构造 `ToolContext(scope_key=..., session_id=...)`; 不包含 principal_id |
+| `execute_tool()` (`src/agent/tool_runner.py:17`) | 已含 `principal_id` 参数, 构造 `ToolContext` 时传入 (P2-M3a 已实现) |
+| `AgentLoop._execute_tool()` (`src/agent/agent.py:252`) | 已含 `principal_id` 参数, 透传到 `execute_tool()` (P2-M3a 已实现) |
+| `_run_single_tool()` / `_run_procedure_action()` (`src/agent/tool_concurrency.py`) | 已从 `state.principal_id` 读取并传递 (P2-M3a 已实现) |
+| `RequestState` (`src/agent/message_flow.py`) | 已含 `principal_id: str \| None` 字段, 从 `identity.principal_id` 填充 (P2-M3a 已实现) |
 | `scripts/restore.py:238` | `_reindex_memory_entries()` 调用 `indexer.reindex_all()` 无 ledger 参数，从 workspace 文件重建 |
 | `SessionIdentity` (P2-M3a) | 新增 `principal_id: str \| None` (由 auth 层填充) |
 | `principals` / `principal_bindings` (P2-M3a) | 身份与绑定模型已存在 |
@@ -91,20 +94,11 @@ visibility    VARCHAR(32)  NOT NULL  DEFAULT 'private_to_principal'
 
 这两列由 indexer 从 ledger 或 writer 参数填充。reindex 从 ledger 读取时，直接复制 ledger 的 principal_id + visibility。
 
-### D3：ToolContext 扩展 — 加入 `principal_id`
+### D3：消费 M3a 已提供的 `ToolContext.principal_id`
 
-```python
-@dataclass(frozen=True)
-class ToolContext:
-    scope_key: str = "main"
-    session_id: str = "main"
-    actor: AgentRole | None = None
-    handoff_id: str | None = None
-    procedure_deps: ProcedureActionDeps | None = None
-    principal_id: str | None = None  # P2-M3b: from authenticated session
-```
+> **P2-M3a 已实现**：`ToolContext.principal_id` (`context.py:27`)、`execute_tool(principal_id=)` (`tool_runner.py:25`)、`AgentLoop._execute_tool(principal_id=)` (`agent.py:252`)、`_run_single_tool` / `_run_procedure_action` (`tool_concurrency.py:225,255`) 已完成 principal 传播。`RequestState.principal_id` (`message_flow.py:122`) 已从 `identity.principal_id` 填充。
 
-P2-M3a 已将 `principal_id` 传播到 `SessionIdentity`；P2-M3b 将其进一步注入到 `ToolContext`，使 memory tools 可以读取。
+P2-M3b 不再修改这些接口；只在 memory tools (`memory_append` / `memory_search`) 中消费 `context.principal_id`，将其透传到 writer / searcher。
 
 ### D4：Memory 写入路径 — principal_id + visibility 透传
 
@@ -220,7 +214,7 @@ Restore：`scripts/restore.py` 必须使用 ledger-based reindex。当前 `_rein
    - metadata 行无 `principal` 字段（legacy 数据）→ 对所有 principal 和 anonymous 可见。
    - **visibility 过滤**：metadata 行有 `visibility:` 时，只允许 `private_to_principal` 和 `shareable_summary`。`shared_in_space` 和未知值一律跳过（deny-by-default，与 D5 一致）。无 `visibility` 标记（legacy）→ 视为 `private_to_principal`，通过。
 3. `_build_system_prompt()` （`src/agent/message_flow.py:523`）透传 `principal_id` 到 `PromptBuilder.build()`。
-4. `RequestState` 新增 `principal_id: str | None = None` 字段，从 `identity.principal_id` 填充。
+4. `RequestState.principal_id` 已由 P2-M3a 新增；`_build_system_prompt()` 从已存在的 `state.principal_id` 透传到 `PromptBuilder.build()`。
 
 放弃方案：在 authenticated multi-principal 模式下完全禁用 workspace daily notes 注入、改走 ledger/search — 改动过大，且 curated memory (MEMORY.md) 注入也需要重新设计；V1 的 principal 在 workspace 文件中已有 metadata 标记（D4 第 5 条），直接过滤是最小变更。
 
@@ -233,14 +227,14 @@ Restore：`scripts/restore.py` 必须使用 ledger-based reindex。当前 `_rein
 变更：
 1. `_fetch_memory_recall()` 签名新增 `principal_id: str | None = None`。
 2. 调用 `self._memory_searcher.search(query, scope_key=scope_key, principal_id=principal_id)`。
-3. 调用方 `_initialize_request_state()` 从 `identity.principal_id` 提取并传递。
-4. `RequestState` 的 `principal_id` 字段（D10 已新增）在 `_apply_compaction_result()` 等重建 system prompt 的路径中也透传。
+3. **调用顺序修正**：当前 `_initialize_request_state()` 在 `message_flow.py:117` 先调用 `_fetch_memory_recall()`，`:122` 才提取 `principal_id`。**必须将 `principal_id = identity.principal_id if identity else None` 移到 `_fetch_memory_recall()` 调用之前**，否则只改签名但仍传 None。
+4. `RequestState` 的 `principal_id` 字段（P2-M3a 已新增）在 `_apply_compaction_result()` 等重建 system prompt 的路径中也透传。
 
 约束：自动 recall 与 `memory_search` tool 使用同一 `MemorySearcher.search()` 入口 + 同一 principal/visibility policy，不存在两条独立策略。
 
-### D12：tool_runner + compaction flush + procedure — principal 全链路
+### D12：compaction flush + procedure publish flush — principal 全链路
 
-**问题 A**：`execute_tool()` (`src/agent/tool_runner.py:44`) 构造 `ToolContext(scope_key=..., session_id=...)`，不包含 `principal_id`。
+> **P2-M3a 已实现（M3b 不再重复）**：`execute_tool(principal_id=)` 签名、`AgentLoop._execute_tool(principal_id=)` 签名、`_run_single_tool()` / `_run_procedure_action()` 从 `state.principal_id` 透传到 `loop._execute_tool()` 和 `ToolContext`。
 
 **问题 B**：compaction flush 路径没有 principal 参数。当前调用链：
 - `_apply_compaction()` → `try_compact()` → `_finalize_compaction_result()` → `_persist_flush_candidates()` (`compaction_flow.py:172`) → `loop._persist_flush_candidates()` (`agent.py:209`)
@@ -248,21 +242,16 @@ Restore：`scripts/restore.py` 必须使用 ledger-based reindex。当前 `_rein
 
 **问题 C**：procedure publish flush 路径同样缺失。当前调用链：
 - `_run_procedure_action()` → `_handle_publish_flush()` (`tool_concurrency.py:304`) → `loop._persist_flush_candidates()` — 无 `principal_id`。
-- `_run_procedure_action()` 构造 `ToolContext`（`tool_concurrency.py:251`）时也无 `principal_id`。
 
 若不修正，authenticated session 的 flush memory 和 procedure result 会写成 `principal_id=NULL`（legacy），对其他 principal 可见。
 
-**方案**：从 `RequestState.principal_id`（D10 已新增）向下透传到所有旁路。
+**方案**：从 `RequestState.principal_id`（P2-M3a 已新增）向下透传到 flush 旁路。
 
-变更：
-1. `execute_tool()` 签名新增 `principal_id: str | None = None`，构造 ToolContext 时传入。
-2. `AgentLoop._execute_tool()` 签名新增 `principal_id`，透传到 `execute_tool()`。
-3. `_run_single_tool()` 从 `state.principal_id` 读取，传递给 `loop._execute_tool()`。
-4. `_run_procedure_action()` 构造 `ToolContext` 时包含 `principal_id=state.principal_id`。
-5. `_handle_publish_flush()` 传递 `state.principal_id` 给 `loop._persist_flush_candidates()`。
-6. `compaction_flow.try_compact()` / `_finalize_compaction_result()` / `_persist_flush_candidates()` 全链路新增 `principal_id` 参数。
-7. `message_flow._apply_compaction()` 调用 `try_compact()` 时传递 `state.principal_id`。
-8. `AgentLoop._persist_flush_candidates()` 签名新增 `principal_id`，填充到 `ResolvedFlushCandidate.principal_id`。
+变更（仅列 M3b 剩余工作）：
+1. `_handle_publish_flush()` 传递 `state.principal_id` 给 `loop._persist_flush_candidates()`。
+2. `compaction_flow.try_compact()` / `_finalize_compaction_result()` / `_persist_flush_candidates()` 全链路新增 `principal_id` 参数。
+3. `message_flow._apply_compaction()` 调用 `try_compact()` 时传递 `state.principal_id`。
+4. `AgentLoop._persist_flush_candidates()` 签名新增 `principal_id`，填充到 `ResolvedFlushCandidate.principal_id`。
 
 ### D13：Incremental index 由 ledger_written 驱动
 
@@ -428,28 +417,29 @@ AND visibility IN ('private_to_principal', 'shareable_summary')
 
 本 slice 覆盖所有运行时 memory 消费路径的 principal 传播，确保无旁路泄漏。
 
-**修改文件**：
-- `src/tools/context.py`：`ToolContext` 增加 `principal_id: str | None = None`（D3）
-- `src/agent/tool_runner.py`：`execute_tool()` 新增 `principal_id` 参数，构造 `ToolContext` 时传入（D12）
+**P2-M3a 已提供（M3b 不再修改）**：
+- `src/tools/context.py`：`ToolContext.principal_id` 已存在
+- `src/agent/tool_runner.py`：`execute_tool(principal_id=)` 已含参数并构造 `ToolContext` 时传入
+- `src/agent/agent.py`：`_execute_tool(principal_id=)` 已透传到 `execute_tool()`
+- `src/agent/tool_concurrency.py`：`_run_single_tool()` / `_run_procedure_action()` 已从 `state.principal_id` 传递
+- `src/agent/message_flow.py`：`RequestState.principal_id` 已存在，`_initialize_request_state()` 已从 `identity.principal_id` 填充
+
+**M3b 剩余修改文件**：
 - `src/tools/builtins/memory_append.py`：从 `context.principal_id` 读取，传递给 writer
 - `src/tools/builtins/memory_search.py`：从 `context.principal_id` 读取，传递给 searcher
 - `src/agent/message_flow.py`：
-  - `RequestState` 新增 `principal_id: str | None = None` 字段（D10/D11）
-  - `_initialize_request_state()` 从 `identity.principal_id` 填充 `RequestState.principal_id`
+  - **调用顺序修正**：把 `principal_id` 提取移到 `_fetch_memory_recall()` 之前（D11）
   - `_build_system_prompt()` 透传 `principal_id` 到 `PromptBuilder.build()`
   - `_apply_compaction_result()` 重建 system prompt 时同步透传 `principal_id`
   - `_fetch_memory_recall()` 调用时传递 `principal_id`
 - `src/agent/agent.py`：
   - `_fetch_memory_recall()` 签名新增 `principal_id: str | None = None`，传递给 `searcher.search()`（D11）
   - `_persist_flush_candidates()` 新增 `principal_id` 参数，填充到 `ResolvedFlushCandidate.principal_id`
-  - `_execute_tool()` 签名新增 `principal_id`，传递给 `execute_tool()`
 - `src/agent/compaction_flow.py`：
   - `_persist_flush_candidates()` 新增 `principal_id` 参数，从调用方透传到 `loop._persist_flush_candidates()`
   - `_finalize_compaction_result()` 新增 `principal_id` 参数，透传到 `_persist_flush_candidates()`
   - `try_compact()` 新增 `principal_id` 参数，透传到 `_finalize_compaction_result()`
 - `src/agent/tool_concurrency.py`：
-  - `_run_single_tool()` 从 `state.principal_id` 读取，传递给 `loop._execute_tool()`
-  - `_run_procedure_action()` 构造 `ToolContext` 时包含 `principal_id=state.principal_id`
   - `_handle_publish_flush()` 传递 `state.principal_id` 给 `loop._persist_flush_candidates()`
 - `src/agent/prompt_builder.py`：
   - `build()` 新增 `principal_id: str | None = None` 参数（per-request，不改 `__init__`），透传到 `_layer_workspace()`（D10）
@@ -543,8 +533,7 @@ async def execute(self, arguments: dict, context: ToolContext | None = None) -> 
 三路不等价即为 bug，Gate 1 测试必须覆盖。
 
 **测试**：
-- `tests/test_tool_context_m3b.py`：ToolContext principal_id 传播、tool_runner 构造包含 principal_id
-- `tests/test_memory_tools_m3b.py`：memory_append 写入含 principal_id、memory_search 按 principal 过滤
+- `tests/test_memory_tools_m3b.py`（含轻量 ToolContext 回归）：memory_append 从 context.principal_id 写入 writer、memory_search 从 context.principal_id 传给 searcher（ToolContext 字段本身已由 M3a 引入并通过现有测试）
 - `tests/test_prompt_builder_m3b.py`：
   - principal 过滤：own 可见、cross-principal 不可见
   - **anonymous 不看 principal-tagged 条目、只看 legacy 无标记条目**
@@ -735,7 +724,7 @@ Slice A (DB schema)
 ### 不变性验收
 
 15. **现有测试全绿**：不破坏 P2-M3a 及之前的所有测试。
-16. **No-auth mode 零影响**：不设置 `AUTH_PASSWORD` 时，memory 读写行为与 P2-M2d 完全一致。
+16. **No-auth mode 零影响**：不设置 `AUTH_PASSWORD_HASH` 时，memory 读写行为与 P2-M2d 完全一致。
 17. **Scope_key 语义不变**：scope_key 过滤逻辑不变；principal_id 是独立的访问控制维度。
 18. **Workspace projection 保持可用**：workspace `memory/*.md` 文件仍然生成，格式向后兼容（新字段追加不破坏旧 parser）。
 
@@ -758,7 +747,7 @@ Slice A (DB schema)
 | auto recall / memory_search / PromptBuilder 三路策略不一致 | 高 | D11 约束：recall + tool 使用同一 searcher 入口；D10 的 PromptBuilder 过滤逻辑与 D5 legacy 兼容策略一致；Gate 1 测试覆盖三路一致性 |
 | reindex_from_ledger 大量条目时内存压力 | 低 | V1 数据量小；后续可引入分批处理 |
 | visibility CHECK 约束阻止未来新增枚举值 | 低 | migration 时 ALTER CHECK 即可；V1 只有 3 个值 |
-| ToolContext 新增 principal_id 影响现有 tool 测试 | 低 | 默认 None，向后兼容 |
+| Memory tools 开始消费 context.principal_id 影响 memory_append / memory_search 测试 | 低 | ToolContext 字段已由 M3a 引入并通过现有测试；M3b 只新增 writer/searcher 传播断言 |
 | workspace projection 新增 principal 字段导致旧 parser 报错 | 低 | `_parse_entry_metadata` 按 regex 提取，未知字段被忽略 |
 | restore 空 ledger 时 fallback 到 workspace 不含 principal | 低 | 只发生在 pre-M2d 备份恢复；此时 principal 语义本就不存在，行为正确 |
 | authenticated flush/procedure 写成 principal_id=NULL | 高 | D12 要求 RequestState.principal_id 全链路透传到 compaction_flow + tool_concurrency + procedure ToolContext；Gate 1 测试覆盖 |
@@ -769,8 +758,10 @@ Slice A (DB schema)
 
 - `principals` + `principal_bindings` 表
 - `SessionIdentity.principal_id` 已正确传播到 dispatch / agent loop
-- `PrincipalStore.resolve_principal_id()` 可用
+- `ToolContext.principal_id` + `execute_tool(principal_id=)` + `_run_single_tool` / `_run_procedure_action` principal 传播已就绪
+- `RequestState.principal_id` 已从 `identity.principal_id` 填充
 - `AuthSettings` 判断 no-auth mode
+- M3b 不直接调用 `PrincipalStore`；身份解析由 M3a gateway 层完成，M3b 只消费 `SessionIdentity.principal_id` / `ToolContext.principal_id`
 
 ### 交付给 P2-M3c
 
