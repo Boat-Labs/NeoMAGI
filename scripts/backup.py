@@ -24,6 +24,8 @@ logger = structlog.get_logger()
 
 # Truth-source tables (excludes derived memory_entries — rebuilt via reindex)
 TRUTH_TABLES = [
+    "neomagi.principals",
+    "neomagi.principal_bindings",
     "neomagi.sessions",
     "neomagi.messages",
     "neomagi.soul_versions",

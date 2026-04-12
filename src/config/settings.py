@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from src.auth.settings import AuthSettings
 from src.constants import DB_SCHEMA
 
 # Load .env once at module import — all BaseSettings subclasses will see the env vars
@@ -227,6 +228,7 @@ class Settings(BaseSettings):
     compaction: CompactionSettings = Field(default_factory=CompactionSettings)
     memory: MemorySettings = Field(default_factory=MemorySettings)
     telegram: TelegramSettings = Field(default_factory=TelegramSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
     workspace_dir: Path = Path("workspace")
 
 

@@ -46,6 +46,8 @@ async def ensure_schema(engine: AsyncEngine, schema: str = DB_SCHEMA) -> None:
         await _create_procedure_tables(conn, schema)
         await _create_procedure_spec_governance_tables(conn, schema)
         await _create_memory_source_ledger_table(conn, schema)
+        await _create_principal_tables(conn, schema)
+        await _add_principal_id_to_sessions(conn, schema)
 
     logger.info("db_schema_ensured", schema=schema)
 
@@ -288,6 +290,73 @@ def _memory_source_ledger_ddl(schema: str) -> list[str]:
             END IF;
         END $$""",
     ]
+
+
+async def _create_principal_tables(conn, schema: str) -> None:
+    """Create principal and binding tables (IF NOT EXISTS) for fresh-DB startup path.
+
+    Normally created by Alembic migration f3a4b5c6d7e8.
+    """
+    for ddl in _principal_table_ddl(schema):
+        await conn.execute(text(ddl))
+
+
+def _principal_table_ddl(schema: str) -> list[str]:
+    """Return idempotent DDL for principals and principal_bindings tables."""
+    return [
+        f"""CREATE TABLE IF NOT EXISTS {schema}.principals (
+            id VARCHAR(36) PRIMARY KEY,
+            name VARCHAR(128) NOT NULL,
+            password_hash VARCHAR(256),
+            role VARCHAR(16) NOT NULL DEFAULT 'owner',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        f"""DO $$ BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_indexes
+                WHERE schemaname = '{schema}'
+                  AND indexname = 'uq_principals_single_owner'
+            ) THEN
+                CREATE UNIQUE INDEX uq_principals_single_owner
+                    ON {schema}.principals (role)
+                    WHERE role = 'owner';
+            END IF;
+        END $$""",
+        f"""CREATE TABLE IF NOT EXISTS {schema}.principal_bindings (
+            id VARCHAR(36) PRIMARY KEY,
+            principal_id VARCHAR(36) NOT NULL
+                REFERENCES {schema}.principals(id) ON DELETE RESTRICT,
+            channel_type VARCHAR(32) NOT NULL,
+            channel_identity VARCHAR(256) NOT NULL,
+            verified BOOLEAN NOT NULL DEFAULT false,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )""",
+        f"""CREATE UNIQUE INDEX IF NOT EXISTS uq_principal_bindings_channel
+            ON {schema}.principal_bindings (channel_type, channel_identity)""",
+        f"""CREATE INDEX IF NOT EXISTS idx_principal_bindings_principal
+            ON {schema}.principal_bindings (principal_id)""",
+    ]
+
+
+async def _add_principal_id_to_sessions(conn, schema: str) -> None:
+    """Add principal_id column + FK to sessions table (idempotent, P2-M3a)."""
+    await conn.execute(
+        text(f"ALTER TABLE {schema}.sessions ADD COLUMN IF NOT EXISTS principal_id VARCHAR(36)")
+    )
+    await conn.execute(text(f"""DO $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.table_constraints
+            WHERE constraint_name = 'fk_sessions_principal_id'
+              AND table_schema = '{schema}'
+        ) THEN
+            ALTER TABLE {schema}.sessions
+                ADD CONSTRAINT fk_sessions_principal_id
+                FOREIGN KEY (principal_id) REFERENCES {schema}.principals(id)
+                ON DELETE RESTRICT;
+        END IF;
+    END $$"""))
 
 
 def make_session_factory(engine: AsyncEngine) -> async_sessionmaker:

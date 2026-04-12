@@ -30,7 +30,9 @@ class TestBackupTruthTables:
     def test_truth_tables_list(self) -> None:
         from scripts.backup import TRUTH_TABLES
 
-        assert len(TRUTH_TABLES) == 6
+        assert len(TRUTH_TABLES) == 8
+        assert "neomagi.principals" in TRUTH_TABLES
+        assert "neomagi.principal_bindings" in TRUTH_TABLES
         assert "neomagi.sessions" in TRUTH_TABLES
         assert "neomagi.messages" in TRUTH_TABLES
         assert "neomagi.soul_versions" in TRUTH_TABLES

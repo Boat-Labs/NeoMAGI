@@ -153,6 +153,8 @@ async def _truncate_integration_tables(factory) -> None:
             for t in [
                 "messages",
                 "sessions",
+                "principal_bindings",
+                "principals",
                 "memory_entries",
                 "memory_source_ledger",
                 "soul_versions",
