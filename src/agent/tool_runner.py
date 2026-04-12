@@ -22,6 +22,7 @@ async def execute_tool(
     scope_key: str,
     session_id: str,
     guard_state: GuardCheckResult,
+    principal_id: str | None = None,
 ) -> dict:
     """Execute a tool by name. Returns result dict or error dict."""
     if not loop._tool_registry:
@@ -41,7 +42,7 @@ async def execute_tool(
     arguments, error = _parse_tool_arguments(arguments_json)
     if error is not None:
         return error
-    context = ToolContext(scope_key=scope_key, session_id=session_id)
+    context = ToolContext(scope_key=scope_key, session_id=session_id, principal_id=principal_id)
     try:
         result = await tool.execute(arguments, context)
         logger.info("tool_executed", tool_name=tool_name)

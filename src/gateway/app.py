@@ -15,12 +15,18 @@ from src.agent.agent import AgentLoop
 from src.agent.events import TextChunk, ToolCallInfo, ToolDenied
 from src.agent.model_client import OpenAICompatModelClient
 from src.agent.provider_registry import AgentLoopRegistry
+from src.auth.jwt import create_token, generate_secret, verify_token
+from src.auth.rate_limiter import LoginRateLimiter
+from src.auth.store import PrincipalStore
 from src.config.settings import get_settings
+from src.gateway.auth_guard import authorize_and_stamp_session
 from src.gateway.budget_gate import BudgetGate
 from src.gateway.dispatch import dispatch_chat
 from src.gateway.protocol import (
+    AuthResponseData,
     ChatHistoryParams,
     ChatSendParams,
+    RPCAuthResponse,
     RPCError,
     RPCErrorData,
     RPCHistoryResponse,
@@ -45,6 +51,7 @@ from src.memory.searcher import MemorySearcher
 from src.memory.writer import MemoryWriter
 from src.session.database import create_db_engine, ensure_schema, make_session_factory
 from src.session.manager import SessionManager
+from src.session.scope_resolver import SessionIdentity
 from src.tools.base import ToolMode
 from src.tools.builtins import register_builtins
 from src.tools.registry import ToolRegistry
@@ -420,8 +427,20 @@ def _load_settings():
     return get_settings()
 
 
-def _bind_app_state(app, *, registry, session_manager, budget_gate,
-                    engine, settings, health_tracker):
+def _bind_app_state(
+    app,
+    *,
+    registry,
+    session_manager,
+    budget_gate,
+    engine,
+    settings,
+    health_tracker,
+    principal_store=None,
+    auth_settings=None,
+    jwt_secret=None,
+    rate_limiter=None,
+):
     app.state.agent_loop_registry = registry
     app.state.agent_loop = registry.get().agent_loop
     app.state.session_manager = session_manager
@@ -429,6 +448,10 @@ def _bind_app_state(app, *, registry, session_manager, budget_gate,
     app.state.db_engine = engine
     app.state.settings = settings
     app.state.health_tracker = health_tracker
+    app.state.principal_store = principal_store
+    app.state.auth_settings = auth_settings or settings.auth
+    app.state.jwt_secret = jwt_secret
+    app.state.rate_limiter = rate_limiter
 
 
 def _log_settings_errors(exc: ValidationError) -> None:
@@ -472,9 +495,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         memory_writer=memory_writer,
     )
     budget_gate = BudgetGate(engine, schema=settings.database.schema_)
-    _bind_app_state(app, registry=registry, session_manager=session_manager,
-                    budget_gate=budget_gate, engine=engine, settings=settings,
-                    health_tracker=health_tracker)
+
+    # P2-M3a: auth wiring
+    principal_store = PrincipalStore(db_session_factory)
+    jwt_secret = settings.auth.jwt_secret or generate_secret()
+    rate_limiter = LoginRateLimiter()
+    if settings.auth.password_hash:
+        await principal_store.ensure_owner(
+            name=settings.auth.owner_name,
+            password_hash=settings.auth.password_hash,
+        )
+        logger.info("auth_mode_enabled")
+    else:
+        logger.info("auth_mode_disabled")
+
+    _bind_app_state(
+        app, registry=registry, session_manager=session_manager,
+        budget_gate=budget_gate, engine=engine, settings=settings,
+        health_tracker=health_tracker,
+        principal_store=principal_store, auth_settings=settings.auth,
+        jwt_secret=jwt_secret, rate_limiter=rate_limiter,
+    )
     logger.info(
         "gateway_started", host=settings.gateway.host, port=settings.gateway.port,
         providers=registry.available_providers(), default_provider=registry.default_name,
@@ -558,22 +599,143 @@ async def health_ready(request: Request) -> dict:
     return {"status": "not_ready" if has_fail else "ready", "checks": _checks_to_dict(all_checks)}
 
 
+@app.get("/auth/status")
+async def auth_status(request: Request) -> dict:
+    """Return whether authentication is required."""
+    auth_settings = request.app.state.auth_settings
+    return {"auth_required": auth_settings.password_hash is not None}
+
+
+@app.post("/auth/login")
+async def auth_login(request: Request) -> dict:
+    """Authenticate with password, return JWT token."""
+    auth_settings = request.app.state.auth_settings
+    if auth_settings.password_hash is None:
+        raise GatewayError("Auth not configured", code="AUTH_NOT_CONFIGURED")
+
+    rate_limiter: LoginRateLimiter = request.app.state.rate_limiter
+    ip = request.client.host if request.client else "unknown"
+
+    if rate_limiter.is_locked(ip):
+        raise GatewayError("Too many login attempts", code="AUTH_RATE_LIMITED")
+
+    body = await request.json()
+    password = body.get("password", "")
+
+    principal_store: PrincipalStore = request.app.state.principal_store
+    principal = await principal_store.verify_password(password)
+    if principal is None:
+        rate_limiter.record_failure(ip)
+        raise GatewayError("Invalid password", code="AUTH_FAILED")
+
+    rate_limiter.record_success(ip)
+    jwt_secret: str = request.app.state.jwt_secret
+    token, expires_at = create_token(
+        principal.id, jwt_secret, auth_settings.jwt_expire_hours,
+    )
+    return {
+        "token": token,
+        "principal_id": principal.id,
+        "name": principal.name,
+        "expires_at": expires_at.isoformat(),
+    }
+
+
+_WS_AUTH_TIMEOUT_S = 10.0
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
+    auth_settings = websocket.app.state.auth_settings
+    auth_mode = auth_settings.password_hash is not None
+
     await websocket.accept()
-    logger.info("ws_connected")
+    principal_id: str | None = None
+
+    if auth_mode:
+        principal_id = await _authenticate_ws(websocket)
+        if principal_id is None:
+            return  # connection closed after auth failure
+
+    logger.info("ws_connected", principal_id=principal_id, auth_mode=auth_mode)
     try:
         while True:
             raw = await websocket.receive_text()
-            await _handle_rpc_message(websocket, raw)
+            await _handle_rpc_message(
+                websocket, raw,
+                principal_id=principal_id, auth_mode=auth_mode,
+            )
     except WebSocketDisconnect:
-        logger.info("ws_disconnected")
+        logger.info("ws_disconnected", principal_id=principal_id)
+
+
+async def _authenticate_ws(websocket: WebSocket) -> str | None:
+    """Wait for auth RPC, verify JWT, return principal_id or None (closes on failure)."""
+    try:
+        raw = await asyncio.wait_for(
+            websocket.receive_text(), timeout=_WS_AUTH_TIMEOUT_S,
+        )
+    except TimeoutError:
+        error = RPCError(
+            id="auth", error=RPCErrorData(code="AUTH_TIMEOUT", message="Auth timeout"),
+        )
+        await websocket.send_text(error.model_dump_json())
+        await websocket.close(code=4001)
+        return None
+
+    try:
+        request = parse_rpc_request(raw)
+    except Exception:
+        error = RPCError(
+            id="auth", error=RPCErrorData(code="AUTH_REQUIRED", message="Invalid request"),
+        )
+        await websocket.send_text(error.model_dump_json())
+        await websocket.close(code=4001)
+        return None
+
+    if request.method != "auth":
+        error = RPCError(
+            id=request.id,
+            error=RPCErrorData(code="AUTH_REQUIRED", message="First message must be auth"),
+        )
+        await websocket.send_text(error.model_dump_json())
+        await websocket.close(code=4001)
+        return None
+
+    token = request.params.get("token", "")
+    jwt_secret: str = websocket.app.state.jwt_secret
+    payload = verify_token(token, jwt_secret)
+    if payload is None:
+        error = RPCError(
+            id=request.id,
+            error=RPCErrorData(code="AUTH_FAILED", message="Invalid or expired token"),
+        )
+        await websocket.send_text(error.model_dump_json())
+        await websocket.close(code=4001)
+        return None
+
+    principal_id = payload.get("sub")
+    principal_store: PrincipalStore = websocket.app.state.principal_store
+    owner = await principal_store.get_owner()
+    name = owner.name if owner and owner.id == principal_id else "Unknown"
+
+    response = RPCAuthResponse(
+        id=request.id, data=AuthResponseData(principal_id=principal_id, name=name),
+    )
+    await websocket.send_text(response.model_dump_json())
+    return principal_id
 
 
 _RPC_HANDLERS: dict[str, object] = {}  # populated after handler definitions
 
 
-async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
+async def _handle_rpc_message(
+    websocket: WebSocket,
+    raw: str,
+    *,
+    principal_id: str | None = None,
+    auth_mode: bool = False,
+) -> None:
     """Parse RPC request, invoke agent, stream response events back."""
     request_id = "unknown"
     try:
@@ -581,7 +743,10 @@ async def _handle_rpc_message(websocket: WebSocket, raw: str) -> None:
         request_id = request.id
         handler = _RPC_HANDLERS.get(request.method)
         if handler is not None:
-            await handler(websocket, request_id, request.params)
+            await handler(
+                websocket, request_id, request.params,
+                principal_id=principal_id, auth_mode=auth_mode,
+            )
         else:
             error = RPCError(
                 id=request_id,
@@ -634,22 +799,32 @@ def _event_to_rpc(event: TextChunk | ToolDenied | ToolCallInfo, request_id: str)
     return None
 
 
-async def _handle_chat_send(websocket: WebSocket, request_id: str, params: dict) -> None:
+async def _handle_chat_send(
+    websocket: WebSocket, request_id: str, params: dict,
+    *, principal_id: str | None = None, auth_mode: bool = False,
+) -> None:
     """Handle chat.send: delegate to dispatch_chat, stream events over WebSocket."""
     try:
         parsed = ChatSendParams.model_validate(params)
     except ValidationError as e:
         raise GatewayError(str(e), code="INVALID_PARAMS") from e
 
-    registry: AgentLoopRegistry = websocket.app.state.agent_loop_registry
     session_manager: SessionManager = websocket.app.state.session_manager
+    await authorize_and_stamp_session(
+        session_manager, parsed.session_id, principal_id, auth_mode,
+    )
+
+    registry: AgentLoopRegistry = websocket.app.state.agent_loop_registry
     budget_gate: BudgetGate = websocket.app.state.budget_gate
     settings = get_settings()
+    identity = SessionIdentity(session_id=parsed.session_id, principal_id=principal_id)
 
     async for event in dispatch_chat(
         registry=registry, session_manager=session_manager,
         budget_gate=budget_gate, session_id=parsed.session_id,
         content=parsed.content, provider=parsed.provider,
+        identity=identity,
+        auth_mode=auth_mode,
         session_claim_ttl_seconds=settings.gateway.session_claim_ttl_seconds,
     ):
         rpc_msg = _event_to_rpc(event, request_id)
@@ -660,13 +835,19 @@ async def _handle_chat_send(websocket: WebSocket, request_id: str, params: dict)
     await websocket.send_text(done_chunk.model_dump_json())
 
 
-async def _handle_chat_history(websocket: WebSocket, request_id: str, params: dict) -> None:
+async def _handle_chat_history(
+    websocket: WebSocket, request_id: str, params: dict,
+    *, principal_id: str | None = None, auth_mode: bool = False,
+) -> None:
     """Handle chat.history: return session message history."""
     try:
         parsed = ChatHistoryParams.model_validate(params)
     except ValidationError as e:
         raise GatewayError(str(e), code="INVALID_PARAMS") from e
     session_manager: SessionManager = websocket.app.state.session_manager
+    await authorize_and_stamp_session(
+        session_manager, parsed.session_id, principal_id, auth_mode,
+    )
 
     # [Decision 0019] chat.history only returns display-safe messages (user/assistant).
     history = await session_manager.get_history_for_display(parsed.session_id)
@@ -674,7 +855,10 @@ async def _handle_chat_history(websocket: WebSocket, request_id: str, params: di
     await websocket.send_text(response.model_dump_json())
 
 
-async def _handle_session_set_mode(websocket: WebSocket, request_id: str, params: dict) -> None:
+async def _handle_session_set_mode(
+    websocket: WebSocket, request_id: str, params: dict,
+    *, principal_id: str | None = None, auth_mode: bool = False,
+) -> None:
     """Handle session.set_mode: explicitly switch session mode (ADR 0058)."""
     try:
         parsed = SessionSetModeParams.model_validate(params)
@@ -682,9 +866,15 @@ async def _handle_session_set_mode(websocket: WebSocket, request_id: str, params
         raise GatewayError(str(e), code="INVALID_PARAMS") from e
 
     session_manager: SessionManager = websocket.app.state.session_manager
+    await authorize_and_stamp_session(
+        session_manager, parsed.session_id, principal_id, auth_mode,
+    )
 
     try:
-        effective_mode = await session_manager.set_mode(parsed.session_id, ToolMode(parsed.mode))
+        effective_mode = await session_manager.set_mode(
+            parsed.session_id, ToolMode(parsed.mode),
+            principal_id=principal_id, auth_mode=auth_mode,
+        )
     except ValueError as e:
         raise GatewayError(str(e), code="INVALID_PARAMS") from e
 

@@ -46,6 +46,14 @@ class CompactionState:
     compaction_metadata: dict | None
 
 
+@dataclass(frozen=True)
+class ClaimResult:
+    """Result of claim_session_for_principal() (P2-M3a D7)."""
+
+    lock_token: str | None
+    error_code: str | None  # None = success
+
+
 @dataclass
 class Session:
     id: str
@@ -108,12 +116,18 @@ class SessionManager:
             )
             return ToolMode.chat_safe
 
-    async def set_mode(self, session_id: str, mode: ToolMode) -> ToolMode:
+    async def set_mode(
+        self,
+        session_id: str,
+        mode: ToolMode,
+        *,
+        principal_id: str | None = None,
+        auth_mode: bool = False,
+    ) -> ToolMode:
         """Set the ToolMode for a session (ADR 0058: user-explicit action).
 
-        Validates that mode is a legal ToolMode value; writes to DB.
-        Returns the newly effective mode.
-        Raises ValueError for invalid mode values.
+        P2-M3a: includes principal_id in upsert; entry guard consistent with
+        claim_session_for_principal.
         """
         if not isinstance(mode, ToolMode):
             try:
@@ -121,12 +135,22 @@ class SessionManager:
             except ValueError:
                 raise ValueError(f"Invalid mode: {mode!r}. Must be one of {list(ToolMode)}")
 
+        if auth_mode and principal_id is None:
+            from src.infra.errors import GatewayError
+
+            raise GatewayError(
+                "Authentication required", code="SESSION_AUTH_REQUIRED",
+            )
+
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
         async with self._db() as db_session:
             stmt = (
                 pg_insert(SessionRecord)
-                .values(id=session_id, mode=mode.value, next_seq=0)
+                .values(
+                    id=session_id, mode=mode.value, next_seq=0,
+                    principal_id=principal_id,
+                )
                 .on_conflict_do_update(
                     index_elements=["id"],
                     set_={"mode": mode.value},
@@ -181,6 +205,88 @@ class SessionManager:
             await db_session.commit()
             return lock_token if claimed else None
 
+    async def claim_session_for_principal(
+        self,
+        session_id: str,
+        *,
+        principal_id: str | None,
+        auth_mode: bool,
+        ttl_seconds: int = 300,
+    ) -> ClaimResult:
+        """Atomic session claim with principal ownership (P2-M3a D7).
+
+        Combines lock acquisition + principal_id assignment in one SQL.
+        See D7 ownership matrix in p2-m3a plan.
+        """
+
+        # Entry guard: auth_mode + no principal → reject before SQL
+        if auth_mode and principal_id is None:
+            return ClaimResult(lock_token=None, error_code="SESSION_AUTH_REQUIRED")
+
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        lock_token = str(uuid.uuid4())
+
+        async with self._db() as db_session:
+            # Atomic upsert: insert new session or claim existing
+            # principal_id CASE: claim NULL→principal, preserve existing
+            stmt = (
+                pg_insert(SessionRecord)
+                .values(
+                    id=session_id,
+                    principal_id=principal_id,
+                    lock_token=lock_token,
+                    processing_since=func.now(),
+                    next_seq=0,
+                )
+                .on_conflict_do_update(
+                    index_elements=["id"],
+                    set_={
+                        "lock_token": lock_token,
+                        "processing_since": func.now(),
+                        "principal_id": func.coalesce(
+                            SessionRecord.principal_id, principal_id,
+                        ),
+                    },
+                    where=or_(
+                        SessionRecord.processing_since.is_(None),
+                        SessionRecord.processing_since
+                        < func.now() - text(f"interval '{ttl_seconds} seconds'"),
+                    ),
+                )
+                .returning(SessionRecord.id, SessionRecord.principal_id)
+            )
+            result = await db_session.execute(stmt)
+            row = result.first()
+
+            if row is None:
+                await db_session.commit()
+                return ClaimResult(lock_token=None, error_code="SESSION_BUSY")
+
+            stored_principal = row[1]
+
+            # Post-claim ownership validation
+            if auth_mode:
+                # entry guard ensures principal_id is not None here
+                if stored_principal is not None and stored_principal != principal_id:
+                    # Wrong principal — release the lock we just acquired
+                    await self._release_lock_in_session(
+                        db_session, session_id, lock_token,
+                    )
+                    await db_session.commit()
+                    return ClaimResult(lock_token=None, error_code="SESSION_OWNER_MISMATCH")
+
+            if not auth_mode and stored_principal is not None:
+                # no-auth mode trying to access claimed session
+                await self._release_lock_in_session(
+                    db_session, session_id, lock_token,
+                )
+                await db_session.commit()
+                return ClaimResult(lock_token=None, error_code="SESSION_AUTH_REQUIRED")
+
+            await db_session.commit()
+            return ClaimResult(lock_token=lock_token, error_code=None)
+
     async def release_session(self, session_id: str, lock_token: str) -> None:
         """Release session processing claim. Only succeeds if lock_token matches.
 
@@ -198,6 +304,40 @@ class SessionManager:
                 .values(processing_since=None, lock_token=None)
             )
             await db_session.commit()
+
+    async def get_session_principal(self, session_id: str) -> str | None | object:
+        """Get session principal_id. Returns sentinel if session not found."""
+        from src.gateway.auth_guard import _SESSION_NOT_FOUND
+
+        async with self._db() as db_session:
+            stmt = select(SessionRecord.principal_id).where(SessionRecord.id == session_id)
+            result = await db_session.execute(stmt)
+            row = result.first()
+            if row is None:
+                return _SESSION_NOT_FOUND
+            return row[0]
+
+    async def stamp_session_principal(self, session_id: str, principal_id: str) -> None:
+        """Stamp principal_id on a NULL-principal session (idempotent, no lock)."""
+        async with self._db() as db_session:
+            await db_session.execute(
+                update(SessionRecord)
+                .where(
+                    SessionRecord.id == session_id,
+                    SessionRecord.principal_id.is_(None),
+                )
+                .values(principal_id=principal_id)
+            )
+            await db_session.commit()
+
+    @staticmethod
+    async def _release_lock_in_session(db_session, session_id: str, lock_token: str) -> None:
+        """Release lock within an existing DB session (for claim rollback)."""
+        await db_session.execute(
+            update(SessionRecord)
+            .where(SessionRecord.id == session_id, SessionRecord.lock_token == lock_token)
+            .values(processing_since=None, lock_token=None)
+        )
 
     async def append_message(
         self,

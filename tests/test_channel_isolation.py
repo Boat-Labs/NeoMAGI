@@ -54,8 +54,13 @@ def _make_dispatch_deps(*, handle_message_fn=None):
     registry = MagicMock()
     registry.get = MagicMock(return_value=entry)
 
+    from src.session.manager import ClaimResult
+
     mgr = MagicMock()
     mgr.try_claim_session = AsyncMock(return_value="lock-1")
+    mgr.claim_session_for_principal = AsyncMock(
+        return_value=ClaimResult(lock_token="lock-1", error_code=None),
+    )
     mgr.load_session_from_db = AsyncMock()
     mgr.release_session = AsyncMock()
 

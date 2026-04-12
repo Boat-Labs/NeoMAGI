@@ -16,6 +16,7 @@ class SessionIdentity:
     channel_id: str | None = None  # group chat channel ID (for session key routing)
     peer_id: str | None = None  # M4: per-peer isolation
     account_id: str | None = None  # M4: per-account isolation
+    principal_id: str | None = None  # P2-M3a: authenticated principal
 
 
 def resolve_scope_key(identity: SessionIdentity, dm_scope: str = "main") -> str:

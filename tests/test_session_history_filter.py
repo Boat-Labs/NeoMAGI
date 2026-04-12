@@ -152,9 +152,13 @@ class TestGatewayHistoryHandler:
         mock_ws = MagicMock()
         mock_ws.send_text = AsyncMock()
 
+        from src.gateway.auth_guard import _SESSION_NOT_FOUND
+
         mock_manager = MagicMock()
         mock_manager.get_history_for_display = AsyncMock(return_value=[])
+        mock_manager.get_session_principal = AsyncMock(return_value=_SESSION_NOT_FOUND)
         mock_ws.app.state.session_manager = mock_manager
+        mock_ws.app.state.auth_settings = MagicMock(password_hash=None)
 
         await _handle_chat_history(mock_ws, "req-1", {"session_id": "test"})
 

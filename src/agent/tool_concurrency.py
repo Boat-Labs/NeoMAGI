@@ -222,6 +222,7 @@ async def _run_single_tool(
         tool_call["name"], tool_call["arguments"],
         scope_key=state.scope_key, session_id=state.session_id,
         guard_state=guard_state,
+        principal_id=getattr(state, "principal_id", None),
     )
     return _ToolOutcome(
         tool_call=tool_call, result=result,
@@ -251,6 +252,7 @@ async def _run_procedure_action(
     tool_context = ToolContext(
         scope_key=state.scope_key,
         session_id=state.session_id,
+        principal_id=getattr(state, "principal_id", None),
         actor=_resolve_actor(),
         procedure_deps=procedure_deps,
     )

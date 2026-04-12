@@ -67,6 +67,21 @@ class RPCRequest(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
+class AuthParams(BaseModel):
+    token: str
+
+
+class AuthResponseData(BaseModel):
+    principal_id: str
+    name: str
+
+
+class RPCAuthResponse(BaseModel):
+    type: Literal["response"] = "response"
+    id: str
+    data: AuthResponseData
+
+
 class StreamChunkData(BaseModel):
     content: str
     done: bool

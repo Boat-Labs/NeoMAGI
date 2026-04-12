@@ -61,8 +61,13 @@ def _make_deps(
     registry = MagicMock()
     registry.get = MagicMock(return_value=entry)
 
+    from src.session.manager import ClaimResult
+
     mgr = MagicMock()
     mgr.try_claim_session = AsyncMock(return_value=try_claim_result)
+    mgr.claim_session_for_principal = AsyncMock(
+        return_value=ClaimResult(lock_token=try_claim_result, error_code=None),
+    )
     mgr.load_session_from_db = AsyncMock()
     mgr.release_session = AsyncMock()
 
@@ -202,8 +207,11 @@ class TestSessionIdPassthrough:
         ):
             pass
 
-        mgr.try_claim_session.assert_called_once_with(
-            "custom-session", ttl_seconds=300,
+        mgr.claim_session_for_principal.assert_called_once_with(
+            "custom-session",
+            principal_id=None,
+            auth_mode=False,
+            ttl_seconds=300,
         )
 
     @pytest.mark.asyncio

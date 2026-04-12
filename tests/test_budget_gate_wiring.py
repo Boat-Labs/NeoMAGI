@@ -43,11 +43,20 @@ def _make_mock_ws(
     ws.app = MagicMock()
 
     # Session manager
+    from src.gateway.auth_guard import _SESSION_NOT_FOUND
+
     mgr = MagicMock()
+    from src.session.manager import ClaimResult
+
     mgr.try_claim_session = AsyncMock(return_value=try_claim_result)
+    mgr.claim_session_for_principal = AsyncMock(
+        return_value=ClaimResult(lock_token=try_claim_result, error_code=None),
+    )
     mgr.load_session_from_db = AsyncMock()
     mgr.release_session = AsyncMock()
+    mgr.get_session_principal = AsyncMock(return_value=_SESSION_NOT_FOUND)
     ws.app.state.session_manager = mgr
+    ws.app.state.auth_settings = MagicMock(password_hash=None)  # no-auth mode
 
     # Agent loop registry
     entry = MagicMock()

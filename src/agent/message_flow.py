@@ -47,6 +47,8 @@ class RequestState:
     procedure_action_map: dict = None  # type: ignore[assignment]  # action_id -> ActionSpec
     # ── write tool circuit breaker (OI-M2-04 hotfix) ──
     write_tool_counts: dict = None  # type: ignore[assignment]  # tool_name -> int
+    # ── principal identity (P2-M3a) ──
+    principal_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.accumulated_failure_signals is None:
@@ -117,12 +119,14 @@ async def _initialize_request_state(
 
     skill_result = await _resolve_skills_for_request(loop, content, mode, identity)
     procedure_result = await _resolve_procedure_for_request(loop, session_id, mode)
+    principal_id = identity.principal_id if identity else None
 
     return _assemble_request_state(
         loop, session_id, lock_token, mode, scope_key, user_msg.seq,
         tools_schema, tools_schema_list,
         last_compaction_seq, compacted_context, recall_results,
         skill_result, procedure_result,
+        principal_id=principal_id,
     )
 
 
@@ -140,6 +144,7 @@ def _assemble_request_state(
     recall_results: list[Any],
     skill_result: tuple[Any, tuple, Any, bool],
     procedure_result: tuple[Any, Any, dict] | None = None,
+    principal_id: str | None = None,
 ) -> RequestState:
     """Build the final RequestState from pre-resolved components."""
     task_frame, resolved_skills, skill_view, teaching_intent = skill_result
@@ -165,6 +170,7 @@ def _assemble_request_state(
         skill_view=skill_view, teaching_intent=teaching_intent,
         active_procedure=active_procedure, procedure_view=procedure_view,
         procedure_action_map=procedure_action_map,
+        principal_id=principal_id,
     )
 
 

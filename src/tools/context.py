@@ -24,6 +24,7 @@ class ToolContext:
 
     scope_key: str = "main"
     session_id: str = "main"
+    principal_id: str | None = None  # P2-M3a: authenticated principal
     actor: AgentRole | None = None
     handoff_id: str | None = None
     procedure_deps: ProcedureActionDeps | None = None

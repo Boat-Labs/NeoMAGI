@@ -67,17 +67,25 @@ async def _claim_session_or_raise(
     session_id: str,
     *,
     ttl_seconds: int,
+    principal_id: str | None = None,
+    auth_mode: bool = False,
 ) -> str:
-    lock_token = await session_manager.try_claim_session(
+    """Claim session with principal ownership (P2-M3a D7)."""
+    claim = await session_manager.claim_session_for_principal(
         session_id,
+        principal_id=principal_id,
+        auth_mode=auth_mode,
         ttl_seconds=ttl_seconds,
     )
-    if lock_token is None:
-        raise GatewayError(
-            "Session is being processed by another request. Please try again.",
-            code="SESSION_BUSY",
-        )
-    return lock_token
+    if claim.lock_token is None:
+        code = claim.error_code or "SESSION_BUSY"
+        messages = {
+            "SESSION_BUSY": "Session is being processed by another request. Please try again.",
+            "SESSION_AUTH_REQUIRED": "Session requires authentication.",
+            "SESSION_OWNER_MISMATCH": "Session belongs to a different principal.",
+        }
+        raise GatewayError(messages.get(code, "Session claim failed"), code=code)
+    return claim.lock_token
 
 
 async def _reserve_budget_or_raise(
@@ -171,18 +179,23 @@ async def dispatch_chat(
     provider: str | None = None,
     identity: SessionIdentity | None = None,
     dm_scope: str | None = None,
+    auth_mode: bool = False,
     session_claim_ttl_seconds: int = 300,
 ) -> AsyncIterator[AgentEvent]:
     """Core dispatch: provider → claim → budget → handle_message → settle → release.
 
     Yields AgentEvent from handle_message. Caller maps events to transport protocol.
-    Raises GatewayError for SESSION_BUSY, BUDGET_EXCEEDED, PROVIDER_NOT_AVAILABLE.
+    Raises GatewayError for SESSION_BUSY, BUDGET_EXCEEDED, PROVIDER_NOT_AVAILABLE,
+    SESSION_AUTH_REQUIRED, SESSION_OWNER_MISMATCH.
     """
     entry = _bind_provider(registry, provider)
+    principal_id = identity.principal_id if identity else None
     lock_token = await _claim_session_or_raise(
         session_manager,
         session_id,
         ttl_seconds=session_claim_ttl_seconds,
+        principal_id=principal_id,
+        auth_mode=auth_mode,
     )
 
     reservation = None

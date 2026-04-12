@@ -47,9 +47,17 @@ class TestSessionBusyRPC:
         mock_ws = AsyncMock()
         mock_ws.app = MagicMock()
 
+        from src.gateway.auth_guard import _SESSION_NOT_FOUND
+        from src.session.manager import ClaimResult
+
         mock_manager = MagicMock()
         mock_manager.try_claim_session = AsyncMock(return_value=None)
+        mock_manager.claim_session_for_principal = AsyncMock(
+            return_value=ClaimResult(lock_token=None, error_code="SESSION_BUSY"),
+        )
+        mock_manager.get_session_principal = AsyncMock(return_value=_SESSION_NOT_FOUND)
         mock_ws.app.state.session_manager = mock_manager
+        mock_ws.app.state.auth_settings = MagicMock(password_hash=None)
 
         # SESSION_BUSY now raises GatewayError (caught by _handle_rpc_message)
         with pytest.raises(GatewayError) as exc_info:

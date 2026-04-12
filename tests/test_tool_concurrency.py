@@ -122,7 +122,7 @@ def _make_loop(registry: ToolRegistry | None = None) -> MagicMock:
     loop = MagicMock()
     loop._tool_registry = registry
 
-    async def _exec_tool(name, args_json, *, scope_key, session_id, guard_state):
+    async def _exec_tool(name, args_json, *, scope_key, session_id, guard_state, principal_id=None):
         if registry is None:
             return {"error_code": "NO_REGISTRY", "message": "no registry"}
         tool = registry.get(name)

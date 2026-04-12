@@ -24,6 +24,7 @@ from src.infra.health import PreflightReport
 
 def _make_mock_settings(tmp_path: Path) -> MagicMock:
     """Create mock settings with consistent workspace paths."""
+    from src.auth.settings import AuthSettings
     from src.config.settings import (
         CompactionSettings,
         GeminiSettings,
@@ -49,6 +50,7 @@ def _make_mock_settings(tmp_path: Path) -> MagicMock:
     settings.session = MagicMock()
     settings.session.default_mode = "chat_safe"
     settings.telegram = TelegramSettings(bot_token="")  # force disabled regardless of env
+    settings.auth = AuthSettings()  # no-auth mode (password_hash=None)
     return settings
 
 

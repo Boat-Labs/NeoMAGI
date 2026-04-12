@@ -249,6 +249,7 @@ class AgentLoop:
         scope_key: str,
         session_id: str,
         guard_state: GuardCheckResult,
+        principal_id: str | None = None,
     ) -> dict:
         return await _execute_tool_impl(
             self,
@@ -257,4 +258,5 @@ class AgentLoop:
             scope_key=scope_key,
             session_id=session_id,
             guard_state=guard_state,
+            principal_id=principal_id,
         )
