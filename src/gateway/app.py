@@ -580,7 +580,7 @@ def _is_allowed_origin(request_or_ws, app_state) -> bool:
     if auth_settings.password_hash is None:
         return True  # no-auth mode — no restriction
     settings = app_state.settings
-    allowed_raw = settings.gateway.allowed_origins
+    allowed_raw = settings.gateway.allowed_origins.strip()
     if not allowed_raw:
         return True  # no restriction configured (preflight warns about this)
     allowed = {o.strip() for o in allowed_raw.split(",") if o.strip()}
