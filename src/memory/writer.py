@@ -26,8 +26,9 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from src.infra.errors import LedgerWriteError, MemoryWriteError
+from src.infra.errors import LedgerWriteError, MemoryWriteError, VisibilityPolicyError
 from src.memory.contracts import ResolvedFlushCandidate
+from src.memory.visibility import MemoryPolicyEntry, PolicyContext, can_write
 
 if TYPE_CHECKING:
     from src.config.settings import MemorySettings
@@ -35,10 +36,6 @@ if TYPE_CHECKING:
     from src.memory.ledger import MemoryLedgerWriter
 
 logger = structlog.get_logger()
-
-# P2-M3b visibility policy constants
-_ALLOWED_VISIBILITY = frozenset({"private_to_principal", "shareable_summary", "shared_in_space"})
-_WRITABLE_VISIBILITY = frozenset({"private_to_principal", "shareable_summary"})
 
 _uuid7_last_ms: int = 0
 _uuid7_seq: int = 0
@@ -111,15 +108,25 @@ class MemoryWriter:
         Ledger-wired mode: writes ledger first (truth), then projection (best-effort).
         No-ledger fallback: writes projection only (mandatory, raises on failure).
 
+        P2-M3c: uses can_write() policy check instead of ad-hoc visibility constants.
+        VisibilityPolicyError inherits MemoryWriteError for catch-site compatibility.
+
         Returns: MemoryWriteResult with write outcome details.
+        Raises: VisibilityPolicyError if visibility policy denies the write.
         Raises: LedgerWriteError if ledger write fails (ledger-wired mode).
-        Raises: MemoryWriteError if projection write fails or visibility invalid.
+        Raises: MemoryWriteError if projection write fails.
         """
-        # Visibility fail-closed check (D4)
-        if visibility not in _ALLOWED_VISIBILITY:
-            raise MemoryWriteError(f"Unknown visibility: {visibility}")
-        if visibility not in _WRITABLE_VISIBILITY:
-            raise MemoryWriteError(f"Visibility '{visibility}' is not yet writable")
+        # V1: owner = requester
+        policy_entry = MemoryPolicyEntry(
+            entry_id="pending",
+            owner_principal_id=principal_id,
+            visibility=visibility,
+            scope_key=scope_key,
+        )
+        ctx = PolicyContext(principal_id=principal_id, scope_key=scope_key)
+        decision = can_write(ctx, policy_entry)
+        if not decision.allowed:
+            raise VisibilityPolicyError(decision.reason)
 
         today = target_date or date.today()
         filename = f"{today.isoformat()}.md"

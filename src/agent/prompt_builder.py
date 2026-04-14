@@ -18,9 +18,6 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger()
 
-# P2-M3b: visibility values allowed in prompt injection (must match D5 search WHERE)
-_PROMPT_ALLOWED_VISIBILITY = frozenset({"private_to_principal", "shareable_summary"})
-
 # Workspace context files loaded every turn (priority order)
 WORKSPACE_CONTEXT_FILES = ["AGENTS.md", "USER.md", "SOUL.md", "IDENTITY.md"]
 # Conditional files
@@ -333,11 +330,13 @@ class PromptBuilder:
     def _filter_entries(
         content: str, scope_key: str, principal_id: str | None = None,
     ) -> str:
-        """Filter daily note entries by scope + principal + visibility (D5/D10 equivalence).
+        """Filter daily note entries by scope + principal + visibility.
 
-        Strategy must match MemorySearcher.search() WHERE conditions:
-        - principal: own + legacy visible; cross-principal hidden; anonymous can't see tagged.
-        - visibility: only private_to_principal and shareable_summary allowed.
+        V1 policy (P2-M3c, must match searcher SQL WHERE + can_read rules):
+        - private_to_principal (or no visibility metadata): own + legacy visible
+        - shareable_summary: same-principal only; no-principal summary denied
+        - shared_in_space / unknown: denied
+        - Anonymous: only legacy (no-principal + private_to_principal)
         """
         entries = re.split(r"^---$", content, flags=re.MULTILINE)
         filtered: list[str] = []
@@ -349,7 +348,7 @@ class PromptBuilder:
 
             first_line = stripped.split("\n", 1)[0]
 
-            # scope check (existing)
+            # scope check
             scope_match = re.search(r"scope:\s*(\S+)", first_line)
             if scope_match:
                 if scope_match.group(1).rstrip(",)") != scope_key:
@@ -357,23 +356,39 @@ class PromptBuilder:
             elif scope_key != "main":
                 continue
 
-            # visibility check (P2-M3b) — must match D5 deny-by-default
+            # Extract metadata
             vis_match = re.search(r"visibility:\s*(\S+)", first_line)
-            if vis_match:
-                entry_vis = vis_match.group(1).rstrip(",)")
-                if entry_vis not in _PROMPT_ALLOWED_VISIBILITY:
-                    continue  # shared_in_space or unknown → deny
-            # no visibility metadata → legacy, treated as private_to_principal (allowed)
-
-            # principal check (P2-M3b) — must match D5 search WHERE
+            entry_vis = vis_match.group(1).rstrip(",)") if vis_match else None
             principal_match = re.search(r"principal:\s*(\S+)", first_line)
-            if principal_match:
-                entry_principal = principal_match.group(1).rstrip(",)")
-                if principal_id is None:
-                    continue  # anonymous caller cannot see principal-tagged entries
-                if entry_principal != principal_id:
-                    continue  # cross-principal: skip
-            # no principal metadata → legacy entry, visible to all (D5 consistency)
+            entry_principal = (
+                principal_match.group(1).rstrip(",)") if principal_match else None
+            )
+
+            # Normalize: no visibility metadata → treated as private_to_principal
+            effective_vis = entry_vis or "private_to_principal"
+
+            if effective_vis == "private_to_principal":
+                # Own entries + legacy (no-principal) visible
+                if entry_principal is not None:
+                    if principal_id is None or entry_principal != principal_id:
+                        continue
+                else:
+                    # Legacy entry: visible to authenticated and anonymous
+                    if principal_id is not None:
+                        pass  # authenticated sees legacy
+                    else:
+                        pass  # anonymous sees legacy
+            elif effective_vis == "shareable_summary":
+                # V1: same-principal only; both must be non-None
+                if (
+                    principal_id is None
+                    or entry_principal is None
+                    or entry_principal != principal_id
+                ):
+                    continue
+            else:
+                # shared_in_space / unknown → deny
+                continue
 
             filtered.append(stripped)
 

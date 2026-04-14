@@ -83,18 +83,20 @@ class TestSearcherBuildSql:
             "test", scope_key="main", limit=10, min_score=0.0,
             source_types=None, principal_id="p-owner",
         )
-        assert "principal_id = :principal_id OR principal_id IS NULL" in sql
-        assert params["principal_id"] == "p-owner"
-        assert "visibility IN ('private_to_principal', 'shareable_summary')" in sql
+        # P2-M3c V1 SQL: unified WHERE with COALESCE + same-principal summary
+        assert "principal_id = :ctx_principal_id OR principal_id IS NULL" in sql
+        assert params["ctx_principal_id"] == "p-owner"
+        assert "COALESCE(visibility" in sql
+        assert "shareable_summary" in sql
 
     def test_anonymous_only_sees_null_principal(self) -> None:
         sql, params = MemorySearcher._build_search_sql(
             "test", scope_key="main", limit=10, min_score=0.0,
             source_types=None, principal_id=None,
         )
-        assert "principal_id IS NULL" in sql
-        assert "principal_id =" not in sql.replace("principal_id IS NULL", "")
-        assert "principal_id" not in params
+        # P2-M3c: unified SQL passes ctx_principal_id=None, relying on NULL semantics
+        assert "principal_id = :ctx_principal_id OR principal_id IS NULL" in sql
+        assert params["ctx_principal_id"] is None
 
     def test_shared_in_space_always_excluded(self) -> None:
         sql, _ = MemorySearcher._build_search_sql(
@@ -300,24 +302,26 @@ class TestFlushPrincipal:
 class TestWriterVisibility:
     @pytest.mark.asyncio
     async def test_shared_in_space_rejected(self, tmp_path: Path) -> None:
-        from src.infra.errors import MemoryWriteError
+        from src.infra.errors import VisibilityPolicyError
 
         settings = _make_settings(tmp_path)
         writer = MemoryWriter(tmp_path, settings)
 
-        with pytest.raises(MemoryWriteError, match="not yet writable"):
+        # P2-M3c: now raises VisibilityPolicyError (subclass of MemoryWriteError)
+        with pytest.raises(VisibilityPolicyError, match="shared_space_policy_not_implemented"):
             await writer.append_daily_note(
                 "test", scope_key="main", visibility="shared_in_space",
             )
 
     @pytest.mark.asyncio
     async def test_unknown_visibility_rejected(self, tmp_path: Path) -> None:
-        from src.infra.errors import MemoryWriteError
+        from src.infra.errors import VisibilityPolicyError
 
         settings = _make_settings(tmp_path)
         writer = MemoryWriter(tmp_path, settings)
 
-        with pytest.raises(MemoryWriteError, match="Unknown visibility"):
+        # P2-M3c: now raises VisibilityPolicyError
+        with pytest.raises(VisibilityPolicyError, match="unknown_visibility_value"):
             await writer.append_daily_note(
                 "test", scope_key="main", visibility="bogus",
             )
@@ -327,8 +331,10 @@ class TestWriterVisibility:
         settings = _make_settings(tmp_path)
         writer = MemoryWriter(tmp_path, settings)
 
+        # P2-M3c: shareable_summary requires principal_id for same-principal check
         result = await writer.append_daily_note(
             "summary", scope_key="main", visibility="shareable_summary",
+            principal_id="owner-1",
         )
         assert result.projection_written is True
 

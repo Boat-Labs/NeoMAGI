@@ -16,7 +16,8 @@ import structlog
 from sqlalchemy import text
 
 from src.constants import DB_SCHEMA
-from src.infra.errors import LedgerWriteError
+from src.infra.errors import LedgerWriteError, VisibilityPolicyError
+from src.memory.visibility import MemoryPolicyEntry, PolicyContext, can_write
 from src.memory.writer import _uuid7
 
 if TYPE_CHECKING:
@@ -51,11 +52,34 @@ class MemoryLedgerWriter:
         Generates event_id (UUIDv7) internally.
         Uses INSERT ... ON CONFLICT DO NOTHING on the partial unique index.
 
+        P2-M3c: runs can_write() policy check before DB insert.
+        Extracts shared_space_id from metadata for rule 0 guard.
+
         Returns: True if inserted, False if idempotent no-op (duplicate entry_id append).
+        Raises: VisibilityPolicyError if policy denies the write.
         Raises: LedgerWriteError on DB failure.
         """
+        # V1: owner = requester
+        meta = metadata or {}
+        policy_entry = MemoryPolicyEntry(
+            entry_id=entry_id,
+            owner_principal_id=principal_id,
+            visibility=visibility,
+            scope_key=scope_key,
+            shared_space_id=meta.get("shared_space_id"),
+        )
+        ctx = PolicyContext(principal_id=principal_id, scope_key=scope_key)
+        decision = can_write(ctx, policy_entry)
+        if not decision.allowed:
+            logger.info(
+                "visibility_policy_denied",
+                entry_id=entry_id, principal_id=principal_id,
+                visibility=visibility, reason=decision.reason,
+            )
+            raise VisibilityPolicyError(decision.reason)
+
         event_id = str(_uuid7())
-        metadata_json = json.dumps(metadata or {})
+        metadata_json = json.dumps(meta)
 
         sql = text(f"""
             INSERT INTO {DB_SCHEMA}.memory_source_ledger

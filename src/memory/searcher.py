@@ -63,12 +63,16 @@ class MemorySearcher:
         min_score: float, source_types: list[str] | None,
         principal_id: str | None,
     ) -> tuple[str, dict]:
-        """Build tsvector search SQL and parameter dict.
+        """Build tsvector search SQL with V1 visibility policy (P2-M3c, D5).
 
-        P2-M3b principal + visibility filtering (D5):
-        - With principal_id: own entries + anonymous legacy entries.
-        - Without principal_id (anonymous): only principal_id IS NULL entries.
-        - Visibility: only private_to_principal and shareable_summary (deny-by-default).
+        Unified SQL for both authenticated and anonymous callers:
+        - private_to_principal: own entries + legacy (principal_id IS NULL)
+        - shareable_summary: same-principal only (V1)
+        - shared_in_space / unknown: excluded (not in any OR branch)
+
+        Anonymous callers (ctx_principal_id=NULL): SQL NULL comparison semantics
+        ensure = NULL → UNKNOWN → no match, so only the explicit
+        'principal_id IS NULL' branch passes. Do not rewrite as IS NOT DISTINCT FROM.
         """
         search_sql = f"""
             SELECT
@@ -79,17 +83,19 @@ class MemorySearcher:
                  plainto_tsquery('simple', :query) AS query
             WHERE scope_key = :scope_key
               AND search_vector @@ query
-              AND visibility IN ('private_to_principal', 'shareable_summary')
+              AND (
+                  (COALESCE(visibility, 'private_to_principal') = 'private_to_principal'
+                   AND (principal_id = :ctx_principal_id OR principal_id IS NULL))
+                  OR
+                  (visibility = 'shareable_summary'
+                   AND principal_id = :ctx_principal_id)
+              )
         """
-        params: dict = {"query": query.strip(), "scope_key": scope_key}
-        # Principal filtering
-        if principal_id is not None:
-            search_sql += (
-                " AND (principal_id = :principal_id OR principal_id IS NULL)"
-            )
-            params["principal_id"] = principal_id
-        else:
-            search_sql += " AND principal_id IS NULL"
+        params: dict = {
+            "query": query.strip(),
+            "scope_key": scope_key,
+            "ctx_principal_id": principal_id,
+        }
         if source_types:
             search_sql += " AND source_type = ANY(:source_types)"
             params["source_types"] = source_types

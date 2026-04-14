@@ -78,6 +78,17 @@ class LedgerWriteError(NeoMAGIError):
         super().__init__(message, code=code)
 
 
+class VisibilityPolicyError(MemoryWriteError):
+    """Visibility policy denied a memory write (P2-M3c).
+
+    Inherits MemoryWriteError so existing catch logic in process_flush_candidates
+    and similar paths handles it without modification.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, code="MEMORY_VISIBILITY_DENIED")
+
+
 class SessionFencingError(GatewayError):
     """Raised when a stale worker tries to write after lock takeover."""
 
