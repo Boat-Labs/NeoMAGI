@@ -1,7 +1,7 @@
 """Doctor: runtime diagnostic checks (read-only).
 
 Reuses preflight C2-C10 checks (not C11 reconcile) and adds
-doctor-specific D1-D4 checks (standard) and DD1-DD3 (deep).
+doctor-specific D1-D6 checks (standard) and DD1-DD3 (deep).
 
 All checks are read-only — doctor never writes to DB or files.
 Output is sanitized: no API keys, tokens, passwords, or full DSNs.
@@ -106,6 +106,7 @@ async def _collect_standard_checks(settings, db_engine) -> list[CheckResult]:
         checks.append(await _check_budget_status(db_engine))
         checks.append(await _check_session_activity(db_engine))
         checks.append(await _check_memory_ledger_parity(settings, db_engine))
+        checks.append(await _check_visibility_policy(db_engine))
     return checks
 
 
@@ -400,6 +401,73 @@ async def _check_memory_ledger_parity(
             evidence=f"Ledger parity check failed: {type(e).__name__}",
             impact="Cannot verify memory ledger/workspace consistency",
             next_action="Check database connectivity and memory_source_ledger table",
+        )
+
+
+# ── D6: visibility policy consistency (P2-M3c) ──
+
+
+async def _check_visibility_policy(engine: AsyncEngine) -> CheckResult:
+    """D6: Check memory_entries for visibility policy consistency.
+
+    - No shared_in_space entries should exist (deny-by-default).
+    - If entries exist but search_text has NULLs, warn to run reindex.
+    """
+    try:
+        async with engine.connect() as conn:
+            # Check for shared_in_space entries
+            result = await conn.execute(text(
+                f"SELECT COUNT(*) FROM {DB_SCHEMA}.memory_entries"
+                f" WHERE visibility = 'shared_in_space'"
+            ))
+            shared_count = result.scalar() or 0
+
+            if shared_count > 0:
+                return CheckResult(
+                    name="visibility_policy", status=CheckStatus.WARN,
+                    evidence=(
+                        f"{shared_count} memory_entries with "
+                        f"visibility='shared_in_space' (should be 0)"
+                    ),
+                    impact="Shared-in-space entries bypass deny-by-default policy",
+                    next_action="Investigate and remove shared_in_space entries",
+                )
+
+            # Check search_text population
+            result = await conn.execute(text(
+                f"SELECT COUNT(*) FROM {DB_SCHEMA}.memory_entries"
+            ))
+            total = result.scalar() or 0
+
+            if total > 0:
+                result = await conn.execute(text(
+                    f"SELECT COUNT(*) FROM {DB_SCHEMA}.memory_entries"
+                    f" WHERE search_text IS NULL"
+                ))
+                null_count = result.scalar() or 0
+
+                if null_count > 0:
+                    return CheckResult(
+                        name="visibility_policy", status=CheckStatus.WARN,
+                        evidence=(
+                            f"{null_count}/{total} memory_entries have "
+                            f"NULL search_text (CJK search may miss)"
+                        ),
+                        impact="CJK segmented search may not work for entries without search_text",
+                        next_action="Run 'python -m src.backend.cli reindex' to populate",
+                    )
+
+        return CheckResult(
+            name="visibility_policy", status=CheckStatus.OK,
+            evidence="No shared_in_space entries; search_text populated",
+            impact="", next_action="",
+        )
+    except Exception as e:
+        return CheckResult(
+            name="visibility_policy", status=CheckStatus.WARN,
+            evidence=f"Visibility policy check failed: {type(e).__name__}",
+            impact="Cannot verify visibility policy consistency",
+            next_action="Check database connectivity and memory_entries table",
         )
 
 
