@@ -201,26 +201,94 @@ async def test_search_text_trigger_fallback(db_engine: AsyncEngine) -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_alembic_migration_search_text(db_engine: AsyncEngine) -> None:
-    """P2-M3c: Alembic migration adds search_text and updates trigger.
+async def test_alembic_migration_search_text_sql(db_engine: AsyncEngine) -> None:
+    """P2-M3c: Execute Alembic migration SQL against test DB.
 
-    Validates migration file structure. Full upgrade tested via ensure_schema
-    integration (which covers the same DDL).
+    Runs the actual upgrade SQL (ADD COLUMN + CREATE OR REPLACE FUNCTION)
+    and verifies both are effective. Then runs downgrade SQL and verifies
+    column removal. Uses the Alembic-path trigger function name
+    (memory_entries_search_trigger) to cover the migration path specifically.
     """
-    import importlib.util
-    from pathlib import Path
+    schema = DB_SCHEMA
 
-    mig_path = (
-        Path(__file__).parent.parent
-        / "alembic/versions/b2c3d4e5f6a7_add_search_text_column.py"
-    )
-    assert mig_path.exists(), f"Migration file missing: {mig_path}"
+    async with db_engine.begin() as conn:
+        # Execute upgrade SQL directly (mirrors migration b2c3d4e5f6a7)
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.memory_entries"
+            f" ADD COLUMN IF NOT EXISTS search_text TEXT"
+        ))
+        await conn.execute(text(f"""
+            CREATE OR REPLACE FUNCTION {schema}.memory_entries_search_trigger()
+            RETURNS trigger AS $$
+            BEGIN
+                NEW.search_vector :=
+                    setweight(to_tsvector('simple', COALESCE(NEW.title, '')), 'A')
+                    || setweight(to_tsvector('simple',
+                        COALESCE(NEW.search_text, NEW.content, '')), 'B');
+                NEW.updated_at := now();
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """))
 
-    spec = importlib.util.spec_from_file_location("mig", mig_path)
-    mig = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mig)
+        # Verify column exists
+        result = await conn.execute(text(
+            f"SELECT column_name FROM information_schema.columns"
+            f" WHERE table_schema = '{schema}'"
+            f" AND table_name = 'memory_entries'"
+            f" AND column_name = 'search_text'"
+        ))
+        assert result.first() is not None, "search_text column not created"
 
-    assert mig.revision == "b2c3d4e5f6a7"
-    assert mig.down_revision == "a1c2d3e4f5g6"
-    assert callable(mig.upgrade)
-    assert callable(mig.downgrade)
+        # Verify trigger function uses search_text (insert with search_text)
+        await conn.execute(text(f"""
+            INSERT INTO {schema}.memory_entries
+                (scope_key, source_type, title, content, search_text, tags)
+            VALUES
+                ('main', 'daily_note', 'mig_test', 'raw content',
+                 'segmented tokens here', ARRAY[]::text[])
+        """))
+        result = await conn.execute(text(
+            f"SELECT search_vector::text AS sv"
+            f" FROM {schema}.memory_entries WHERE title = 'mig_test'"
+        ))
+        row = result.first()
+        assert row is not None
+        # search_vector should contain 'segment' or 'token' from search_text
+        assert "segment" in row.sv or "token" in row.sv
+
+        # Execute downgrade SQL
+        await conn.execute(text(f"""
+            CREATE OR REPLACE FUNCTION {schema}.memory_entries_search_trigger()
+            RETURNS trigger AS $$
+            BEGIN
+                NEW.search_vector :=
+                    setweight(to_tsvector('simple', COALESCE(NEW.title, '')), 'A')
+                    || setweight(to_tsvector('simple',
+                        COALESCE(NEW.content, '')), 'B');
+                NEW.updated_at := now();
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """))
+        await conn.execute(text(
+            f"ALTER TABLE {schema}.memory_entries"
+            f" DROP COLUMN IF EXISTS search_text"
+        ))
+
+        # Verify column gone
+        result = await conn.execute(text(
+            f"SELECT column_name FROM information_schema.columns"
+            f" WHERE table_schema = '{schema}'"
+            f" AND table_name = 'memory_entries'"
+            f" AND column_name = 'search_text'"
+        ))
+        assert result.first() is None, "search_text column not dropped"
+
+        # Cleanup test row
+        await conn.execute(text(
+            f"DELETE FROM {schema}.memory_entries WHERE title = 'mig_test'"
+        ))
+
+    # Re-create column + trigger (ensure_schema path) so other tests work
+    await ensure_schema(db_engine, DB_SCHEMA)

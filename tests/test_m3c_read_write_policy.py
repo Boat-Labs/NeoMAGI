@@ -140,15 +140,8 @@ class TestPromptFilterDeny:
 # ===========================================================================
 
 
-@pytest_asyncio.fixture(scope="session")
-async def _ensure_trigger(db_engine):
-    from src.session.database import _create_search_trigger
-    async with db_engine.begin() as conn:
-        await _create_search_trigger(conn, DB_SCHEMA)
-
-
 @pytest_asyncio.fixture
-async def _clean_entries(db_session_factory, _ensure_trigger):
+async def _clean_entries(db_session_factory):
     async with db_session_factory() as db:
         await db.execute(text(f"DELETE FROM {DB_SCHEMA}.memory_entries"))
         await db.commit()

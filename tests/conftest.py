@@ -86,12 +86,15 @@ def pg_url(_pg_container) -> str:
 
 @pytest_asyncio.fixture(scope="session")
 async def db_engine(pg_url: str):
-    """Create async engine, set up schema + tables. Tear down after session."""
+    """Create async engine, set up schema + tables + triggers. Tear down after session."""
+    from src.session.database import _create_search_trigger
+
     engine = create_async_engine(pg_url, echo=False)
 
     async with engine.begin() as conn:
         await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA}"))
         await conn.run_sync(Base.metadata.create_all)
+        await _create_search_trigger(conn, DB_SCHEMA)
 
     yield engine
 

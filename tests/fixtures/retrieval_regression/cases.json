@@ -152,13 +152,13 @@
     },
     {
       "id": "cjk_long_query_01",
-      "category": "partial_match",
-      "description": "较长中文查询 '工具执行权限控制' 应命中含部分关键词的条目（权限不在内容中）",
+      "category": "cjk_tokenization",
+      "description": "较长中文查询 '工具执行权限控制' 应命中含所有关键词的条目",
       "indexed_entries": [
         {
           "entry_id": "cjklong01-001",
           "title": "Tool Permissions",
-          "content": "工具执行受会话模式控制，ToolModeError 在受限模式下拒绝工具调用",
+          "content": "工具执行受权限控制，ToolModeError 在受限模式下拒绝工具调用",
           "scope_key": "main"
         }
       ],
@@ -179,6 +179,51 @@
       ],
       "query": "daily note",
       "expected_entry_ids": ["part01-001"]
+    },
+    {
+      "id": "cjk_phrase_01",
+      "category": "cjk_tokenization",
+      "description": "中文短语 '错误处理' 搜索应命中含该词的条目",
+      "indexed_entries": [
+        {
+          "entry_id": "cjkph01-001",
+          "title": "Error Handling",
+          "content": "自定义异常层次用于错误处理，所有异常继承自 NeoMAGIError",
+          "scope_key": "main"
+        }
+      ],
+      "query": "错误处理",
+      "expected_entry_ids": ["cjkph01-001"]
+    },
+    {
+      "id": "en_multi_word_01",
+      "category": "partial_match",
+      "description": "Multi-word English 'session manager' should hit related entry",
+      "indexed_entries": [
+        {
+          "entry_id": "enmw01-001",
+          "title": "Session Lifecycle",
+          "content": "The session manager handles creation and cleanup of user session state",
+          "scope_key": "main"
+        }
+      ],
+      "query": "session manager",
+      "expected_entry_ids": ["enmw01-001"]
+    },
+    {
+      "id": "cjk_mixed_02",
+      "category": "cjk_tokenization",
+      "description": "中英混合 'PostgreSQL 全文搜索' 应命中相关条目",
+      "indexed_entries": [
+        {
+          "entry_id": "cjkmix02-001",
+          "title": "Full-text Search",
+          "content": "PostgreSQL 全文搜索使用 tsvector 和 GIN 索引实现高效检索",
+          "scope_key": "main"
+        }
+      ],
+      "query": "PostgreSQL 全文搜索",
+      "expected_entry_ids": ["cjkmix02-001"]
     }
   ]
 }

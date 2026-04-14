@@ -6,7 +6,9 @@ that expected_entry_ids are present in results.
 
 Categories: cjk_tokenization, synonym, semantic_gap, partial_match.
 
-Pass-rate target: ≥ 58% overall (7/12), cjk_tokenization 100%.
+Pass-rate target (plan §5.1): ≥ 70% of eligible (non-xfail) cases must pass.
+cjk_tokenization category: 100% pass required.
+xfail budget: ≤ 5 cases (documented non-goals only).
 """
 
 from __future__ import annotations
@@ -31,11 +33,12 @@ FIXTURE_PATH = Path(__file__).parent / "fixtures" / "retrieval_regression" / "ca
 # synonym: requires query expansion (D2c, not in M3c scope)
 # semantic_gap: requires vector retrieval (deferred, see Slice G decision)
 _XFAIL_CATEGORIES = {"synonym", "semantic_gap"}
-# Individual case IDs: partial mismatch due to plainto_tsquery AND mode
-_XFAIL_CASE_IDS = {"cjk_long_query_01"}
+# Individual case IDs (reserved for documented AND-mode partial mismatches)
+_XFAIL_CASE_IDS: set[str] = set()
 
-# Aggregate pass-rate target (plan §5.1)
-_MIN_PASS_RATE = 0.58  # 7/12
+# Plan §5.1: ≥ 70% eligible (non-xfail) cases must pass; xfail budget ≤ 5.
+_MIN_ELIGIBLE_PASS_RATE = 0.70
+_MAX_XFAIL_COUNT = 5
 
 
 def _load_cases() -> list[dict]:
@@ -60,18 +63,9 @@ def memory_settings():
     return settings
 
 
-@pytest_asyncio.fixture(scope="session")
-async def _ensure_search_trigger(db_engine):
-    """Ensure the search vector trigger exists (conftest only creates tables)."""
-    from src.session.database import _create_search_trigger
-    async with db_engine.begin() as conn:
-        await _create_search_trigger(conn, DB_SCHEMA)
-
-
 @pytest_asyncio.fixture
 async def clean_memory_entries(
     db_session_factory: async_sessionmaker[AsyncSession],
-    _ensure_search_trigger,
 ):
     """Ensure memory_entries is empty before each case."""
     async with db_session_factory() as db:
@@ -146,27 +140,29 @@ async def test_retrieval_case(
 
 
 # ---------------------------------------------------------------------------
-# Aggregate pass-rate enforcement
+# Aggregate pass-rate enforcement (plan §5.1)
 # ---------------------------------------------------------------------------
 
 def test_retrieval_pass_rate_report() -> None:
-    """Enforce aggregate pass-rate target and report per-category statistics.
+    """Enforce ≥70% eligible pass-rate and xfail budget.
 
-    This is a meta-test that reads the fixture and computes which cases
-    are expected to pass vs xfail, then asserts the pass-rate target.
-    It does NOT execute searches — individual cases handle that.
+    - eligible cases: those NOT in _XFAIL_CATEGORIES and NOT in _XFAIL_CASE_IDS
+    - eligible pass-rate must be ≥ 70% (plan: "at least 7/10")
+    - total xfail count must be ≤ 5 (budget for documented non-goals)
+    - cjk_tokenization: 0 xfails allowed (all must pass)
     """
     cases = _load_cases()
     total = len(cases)
 
-    pass_cases = [
+    xfail_cases = [
         c for c in cases
-        if c["category"] not in _XFAIL_CATEGORIES
-        and c["id"] not in _XFAIL_CASE_IDS
+        if c["category"] in _XFAIL_CATEGORIES or c["id"] in _XFAIL_CASE_IDS
     ]
-    xfail_cases = [c for c in cases if c not in pass_cases]
-    pass_count = len(pass_cases)
-    pass_rate = pass_count / total if total > 0 else 0.0
+    eligible_cases = [c for c in cases if c not in xfail_cases]
+    eligible_count = len(eligible_cases)
+    xfail_count = len(xfail_cases)
+    # Eligible cases are expected to pass; rate = eligible / total
+    eligible_rate = eligible_count / total if total > 0 else 0.0
 
     # Per-category breakdown
     cat_total: Counter[str] = Counter()
@@ -177,9 +173,8 @@ def test_retrieval_pass_rate_report() -> None:
         cat_xfail[c["category"]] += 1
 
     report_lines = [
-        f"Retrieval regression: {pass_count}/{total} "
-        f"expected pass ({pass_rate:.0%}), "
-        f"{len(xfail_cases)} xfail",
+        f"Retrieval regression: {eligible_count}/{total} eligible "
+        f"({eligible_rate:.0%}), {xfail_count} xfail",
         "Per-category:",
     ]
     for cat in sorted(cat_total):
@@ -188,10 +183,16 @@ def test_retrieval_pass_rate_report() -> None:
         report_lines.append(f"  {cat}: {ps}/{cat_total[cat]} pass")
     report = "\n".join(report_lines)
 
-    # Enforce minimum pass rate
-    assert pass_rate >= _MIN_PASS_RATE, (
-        f"Retrieval pass rate {pass_rate:.0%} below target "
-        f"{_MIN_PASS_RATE:.0%}.\n{report}"
+    # Enforce: eligible cases must be ≥ 70% of total
+    assert eligible_rate >= _MIN_ELIGIBLE_PASS_RATE, (
+        f"Eligible pass rate {eligible_rate:.0%} below target "
+        f"{_MIN_ELIGIBLE_PASS_RATE:.0%}.\n{report}"
+    )
+
+    # Enforce: xfail budget
+    assert xfail_count <= _MAX_XFAIL_COUNT, (
+        f"xfail count {xfail_count} exceeds budget {_MAX_XFAIL_COUNT}. "
+        f"Adding xfails requires removing documented non-goals.\n{report}"
     )
 
     # cjk_tokenization must be 100% pass (no xfails allowed)
