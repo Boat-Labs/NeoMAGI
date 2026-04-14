@@ -745,3 +745,31 @@ doc_id_assigned_at: 2026-04-07T09:55:53+02:00
 - Files: 2 新增 + 25 修改 = 27 files, +1127/-82 lines
 - Next: P2-M3c (Visibility Policy Hooks + Retrieval Quality) 或 P2-M2 (Procedure Runtime)
 - Risk: PromptBuilder._filter_entries() 分支数 10 (block 阈值 6), 已入 baseline; 三路等价策略靠测试保证一致性而非共享代码
+
+## P2-M3c: Retrieval Quality & Federation-Compatible Policy Hook
+- Date: 2026-04-14
+- Status: done
+- Done: Retrieval regression framework + Jieba CJK 分词 + 统一 visibility policy checkpoint + V1 policy 集成 + doctor D6
+- Scope:
+  - src/memory/visibility.py: can_read()/can_write() 纯函数, PolicyContext/PolicyDecision/MemoryPolicyEntry, MEMORY_VISIBILITY_POLICY_VERSION="v1", rule 0 shared_space_id guard
+  - src/memory/query_processor.py: normalize_query() (CJK Jieba cut_for_search), segment_for_index() (index-time 分词), warmup_jieba()
+  - memory_entries.search_text 列 + trigger COALESCE(search_text, content) fallback; Alembic migration b2c3d4e5f6a7
+  - MemorySearcher: normalize_query 集成 + V1 SQL WHERE (COALESCE + same-principal shareable_summary + SQL NULL 语义); memory_search_filtered audit log
+  - MemoryIndexer: segment_for_index × 4 paths (direct, ledger reindex, workspace persist, curated)
+  - MemoryWriter: can_write() 替换 ad-hoc 常量; visibility_policy_denied audit log; VisibilityPolicyError(MemoryWriteError)
+  - MemoryLedgerWriter: can_write() + metadata.shared_space_id guard; visibility_policy_denied audit log
+  - PromptBuilder._filter_entries: V1 policy (same-principal summary, no-principal summary denied); 删除 _PROMPT_ALLOWED_VISIBILITY
+  - gateway lifespan + CLI reindex warmup_jieba()
+  - Doctor D6: shared_in_space 检查 + search_text IS NULL warn
+  - Retrieval regression: 15 fixture cases (8 cjk, 3 partial, 2 synonym, 2 semantic_gap); 11/15 pass (73%), cjk 8/8 100%
+  - Vector retrieval V1 不启用 (semantic_gap 27%, 样本不足; synonym → D2c query expansion 优先)
+- Review Findings (3 rounds, all fixed):
+  - R1 P1×1+P2×2: 缺 Alembic migration; pass-rate 不强制; writer 缺 audit log
+  - R2 P2×2+P3×1: pass-rate 低于 70%; session-scoped fixture order dependence; Alembic test 不执行 SQL
+  - R3 P3×1: Alembic test INSERT 走 ensure_schema trigger 而非 Alembic trigger
+- Evidence: `dev_docs/logs/phase2/p2-m3c_retrieval-quality-policy-hook_2026-04-14.md`
+- Commits: e6b1322 (G0) + 8014ffd (G1) + 935626c (G2) + 93f74fd (R1) + 74c0556 (R2) + c4f80fc (R3)
+- Tests: 103 新增 + 8 适配; 1941 unit + 46 integration passed
+- Files: 7 新增 + 13 修改 + 2 适配 = 22 files
+- Next: P2-M2 (Procedure Runtime 与多 Agent 执行) 或后续 P2-M3 post-review
+- Risk: 两套 trigger function 命名 (ensure_schema vs Alembic); pytest-asyncio pin <1.0.0 需持续关注
