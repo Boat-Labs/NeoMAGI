@@ -202,17 +202,22 @@ async def test_search_text_trigger_fallback(db_engine: AsyncEngine) -> None:
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_alembic_migration_search_text_sql(db_engine: AsyncEngine) -> None:
-    """P2-M3c: Execute Alembic migration SQL against test DB.
+    """P2-M3c: Execute Alembic migration SQL and verify via Alembic trigger.
 
-    Runs the actual upgrade SQL (ADD COLUMN + CREATE OR REPLACE FUNCTION)
-    and verifies both are effective. Then runs downgrade SQL and verifies
-    column removal. Uses the Alembic-path trigger function name
-    (memory_entries_search_trigger) to cover the migration path specifically.
+    The test DB normally uses the ensure_schema trigger
+    (trg_memory_entries_search_vector → memory_entries_search_vector_update).
+    To verify the *Alembic* migration path, this test:
+    1. Runs the upgrade SQL (column + function)
+    2. Binds the Alembic-path trigger (trg_memory_entries_search) so INSERTs
+       fire the Alembic function, not the ensure_schema one
+    3. Verifies search_text → search_vector via INSERT
+    4. Runs downgrade SQL
+    5. Restores the ensure_schema trigger for other tests
     """
     schema = DB_SCHEMA
 
     async with db_engine.begin() as conn:
-        # Execute upgrade SQL directly (mirrors migration b2c3d4e5f6a7)
+        # ── Upgrade ──
         await conn.execute(text(
             f"ALTER TABLE {schema}.memory_entries"
             f" ADD COLUMN IF NOT EXISTS search_text TEXT"
@@ -240,12 +245,26 @@ async def test_alembic_migration_search_text_sql(db_engine: AsyncEngine) -> None
         ))
         assert result.first() is not None, "search_text column not created"
 
-        # Verify trigger function uses search_text (insert with search_text)
+        # ── Bind the Alembic-path trigger so the INSERT fires it ──
+        # Drop the ensure_schema trigger temporarily
+        await conn.execute(text(
+            f"DROP TRIGGER IF EXISTS trg_memory_entries_search_vector"
+            f" ON {schema}.memory_entries"
+        ))
+        # Create the Alembic-path trigger
+        await conn.execute(text(f"""
+            CREATE TRIGGER trg_memory_entries_search
+            BEFORE INSERT OR UPDATE ON {schema}.memory_entries
+            FOR EACH ROW
+            EXECUTE FUNCTION {schema}.memory_entries_search_trigger()
+        """))
+
+        # Verify: INSERT fires Alembic function (uses search_text, not content)
         await conn.execute(text(f"""
             INSERT INTO {schema}.memory_entries
                 (scope_key, source_type, title, content, search_text, tags)
             VALUES
-                ('main', 'daily_note', 'mig_test', 'raw content',
+                ('main', 'daily_note', 'mig_test', 'raw content only',
                  'segmented tokens here', ARRAY[]::text[])
         """))
         result = await conn.execute(text(
@@ -254,10 +273,18 @@ async def test_alembic_migration_search_text_sql(db_engine: AsyncEngine) -> None
         ))
         row = result.first()
         assert row is not None
-        # search_vector should contain 'segment' or 'token' from search_text
+        # Must contain tokens from search_text, NOT from content
         assert "segment" in row.sv or "token" in row.sv
+        assert "raw" not in row.sv, (
+            "search_vector contains content tokens — "
+            "Alembic trigger not active"
+        )
 
-        # Execute downgrade SQL
+        # ── Downgrade ──
+        await conn.execute(text(
+            f"DROP TRIGGER IF EXISTS trg_memory_entries_search"
+            f" ON {schema}.memory_entries"
+        ))
         await conn.execute(text(f"""
             CREATE OR REPLACE FUNCTION {schema}.memory_entries_search_trigger()
             RETURNS trigger AS $$
@@ -290,5 +317,5 @@ async def test_alembic_migration_search_text_sql(db_engine: AsyncEngine) -> None
             f"DELETE FROM {schema}.memory_entries WHERE title = 'mig_test'"
         ))
 
-    # Re-create column + trigger (ensure_schema path) so other tests work
+    # Restore ensure_schema state (column + ensure_schema trigger) for other tests
     await ensure_schema(db_engine, DB_SCHEMA)
