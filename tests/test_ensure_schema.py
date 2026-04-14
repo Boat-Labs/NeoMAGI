@@ -129,3 +129,98 @@ async def test_ensure_schema_adds_memory_entry_provenance_columns(
         columns = {row.column_name for row in result}
         assert "entry_id" in columns
         assert "source_session_id" in columns
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_ensure_schema_adds_search_text_column(
+    db_engine: AsyncEngine,
+) -> None:
+    """P2-M3c: search_text column exists after ensure_schema."""
+    await ensure_schema(db_engine, DB_SCHEMA)
+
+    async with db_engine.begin() as conn:
+        result = await conn.execute(text(f"""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = '{DB_SCHEMA}' AND table_name = 'memory_entries'
+        """))
+        columns = {row.column_name for row in result}
+        assert "search_text" in columns
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_search_text_trigger_fallback(db_engine: AsyncEngine) -> None:
+    """P2-M3c: trigger uses search_text when present, falls back to content."""
+    await ensure_schema(db_engine, DB_SCHEMA)
+
+    async with db_engine.begin() as conn:
+        # Insert with search_text → trigger should use search_text for B weight
+        await conn.execute(text(f"""
+            INSERT INTO {DB_SCHEMA}.memory_entries
+                (scope_key, source_type, title, content, search_text, tags)
+            VALUES
+                ('main', 'daily_note', 'test', 'original content',
+                 'jieba segmented tokens', ARRAY[]::text[])
+        """))
+
+        result = await conn.execute(text(f"""
+            SELECT search_vector::text AS sv
+            FROM {DB_SCHEMA}.memory_entries
+            WHERE title = 'test' AND content = 'original content'
+        """))
+        row = result.first()
+        assert row is not None
+        # search_vector should contain tokens from search_text, not content
+        assert "jieba" in row.sv or "segment" in row.sv or "token" in row.sv
+
+        # Insert without search_text → trigger falls back to content
+        await conn.execute(text(f"""
+            INSERT INTO {DB_SCHEMA}.memory_entries
+                (scope_key, source_type, title, content, tags)
+            VALUES
+                ('main', 'daily_note', 'fallback', 'fallback content here',
+                 ARRAY[]::text[])
+        """))
+
+        result2 = await conn.execute(text(f"""
+            SELECT search_vector::text AS sv
+            FROM {DB_SCHEMA}.memory_entries
+            WHERE title = 'fallback'
+        """))
+        row2 = result2.first()
+        assert row2 is not None
+        assert "fallback" in row2.sv
+
+        # Cleanup
+        await conn.execute(text(
+            f"DELETE FROM {DB_SCHEMA}.memory_entries"
+            f" WHERE title IN ('test', 'fallback')"
+        ))
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_alembic_migration_search_text(db_engine: AsyncEngine) -> None:
+    """P2-M3c: Alembic migration adds search_text and updates trigger.
+
+    Validates migration file structure. Full upgrade tested via ensure_schema
+    integration (which covers the same DDL).
+    """
+    import importlib.util
+    from pathlib import Path
+
+    mig_path = (
+        Path(__file__).parent.parent
+        / "alembic/versions/b2c3d4e5f6a7_add_search_text_column.py"
+    )
+    assert mig_path.exists(), f"Migration file missing: {mig_path}"
+
+    spec = importlib.util.spec_from_file_location("mig", mig_path)
+    mig = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mig)
+
+    assert mig.revision == "b2c3d4e5f6a7"
+    assert mig.down_revision == "a1c2d3e4f5g6"
+    assert callable(mig.upgrade)
+    assert callable(mig.downgrade)

@@ -126,6 +126,11 @@ class MemoryWriter:
         ctx = PolicyContext(principal_id=principal_id, scope_key=scope_key)
         decision = can_write(ctx, policy_entry)
         if not decision.allowed:
+            logger.info(
+                "visibility_policy_denied",
+                principal_id=principal_id, visibility=visibility,
+                scope_key=scope_key, reason=decision.reason,
+            )
             raise VisibilityPolicyError(decision.reason)
 
         today = target_date or date.today()

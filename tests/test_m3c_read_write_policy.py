@@ -343,6 +343,37 @@ class TestWriterVisibilityPolicy:
         with pytest.raises(VisibilityPolicyError):
             await writer.append_daily_note("test", visibility="unknown_value")
 
+    async def test_writer_denial_log_fields(self) -> None:
+        """Writer denial log includes principal_id, visibility, reason."""
+        import io
+
+        import structlog
+
+        from src.memory.writer import MemoryWriter
+
+        captured = io.StringIO()
+        structlog.configure(
+            processors=[structlog.dev.ConsoleRenderer()],
+            wrapper_class=structlog.make_filtering_bound_logger(0),
+            logger_factory=structlog.PrintLoggerFactory(file=captured),
+        )
+        try:
+            writer = MemoryWriter(
+                workspace_path=MagicMock(),
+                settings=MagicMock(),
+            )
+            with pytest.raises(VisibilityPolicyError):
+                await writer.append_daily_note(
+                    "test", visibility="shared_in_space",
+                    principal_id="audit-user",
+                )
+            output = captured.getvalue()
+            assert "visibility_policy_denied" in output
+            assert "audit-user" in output
+            assert "shared_space_policy_not_implemented" in output
+        finally:
+            structlog.reset_defaults()
+
     async def test_visibility_policy_error_is_memory_write_error(self) -> None:
         """VisibilityPolicyError must be catchable as MemoryWriteError."""
         from src.infra.errors import MemoryWriteError

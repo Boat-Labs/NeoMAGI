@@ -5,11 +5,14 @@ Each case inserts indexed_entries, runs MemorySearcher.search(), and asserts
 that expected_entry_ids are present in results.
 
 Categories: cjk_tokenization, synonym, semantic_gap, partial_match.
+
+Pass-rate target: ≥ 58% overall (7/12), cjk_tokenization 100%.
 """
 
 from __future__ import annotations
 
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -24,10 +27,15 @@ from src.memory.searcher import MemorySearcher
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "retrieval_regression" / "cases.json"
 
-# Known miss categories that are expected to fail before vector retrieval / query expansion
+# Known miss categories — documented non-goals for V1 lexical search.
+# synonym: requires query expansion (D2c, not in M3c scope)
+# semantic_gap: requires vector retrieval (deferred, see Slice G decision)
 _XFAIL_CATEGORIES = {"synonym", "semantic_gap"}
-# Individual case IDs that are known misses due to AND-mode partial mismatch
+# Individual case IDs: partial mismatch due to plainto_tsquery AND mode
 _XFAIL_CASE_IDS = {"cjk_long_query_01"}
+
+# Aggregate pass-rate target (plan §5.1)
+_MIN_PASS_RATE = 0.58  # 7/12
 
 
 def _load_cases() -> list[dict]:
@@ -135,3 +143,60 @@ async def test_retrieval_case(
             f"Category: {case['category']}. "
             f"Query: {case['query']}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Aggregate pass-rate enforcement
+# ---------------------------------------------------------------------------
+
+def test_retrieval_pass_rate_report() -> None:
+    """Enforce aggregate pass-rate target and report per-category statistics.
+
+    This is a meta-test that reads the fixture and computes which cases
+    are expected to pass vs xfail, then asserts the pass-rate target.
+    It does NOT execute searches — individual cases handle that.
+    """
+    cases = _load_cases()
+    total = len(cases)
+
+    pass_cases = [
+        c for c in cases
+        if c["category"] not in _XFAIL_CATEGORIES
+        and c["id"] not in _XFAIL_CASE_IDS
+    ]
+    xfail_cases = [c for c in cases if c not in pass_cases]
+    pass_count = len(pass_cases)
+    pass_rate = pass_count / total if total > 0 else 0.0
+
+    # Per-category breakdown
+    cat_total: Counter[str] = Counter()
+    cat_xfail: Counter[str] = Counter()
+    for c in cases:
+        cat_total[c["category"]] += 1
+    for c in xfail_cases:
+        cat_xfail[c["category"]] += 1
+
+    report_lines = [
+        f"Retrieval regression: {pass_count}/{total} "
+        f"expected pass ({pass_rate:.0%}), "
+        f"{len(xfail_cases)} xfail",
+        "Per-category:",
+    ]
+    for cat in sorted(cat_total):
+        xf = cat_xfail.get(cat, 0)
+        ps = cat_total[cat] - xf
+        report_lines.append(f"  {cat}: {ps}/{cat_total[cat]} pass")
+    report = "\n".join(report_lines)
+
+    # Enforce minimum pass rate
+    assert pass_rate >= _MIN_PASS_RATE, (
+        f"Retrieval pass rate {pass_rate:.0%} below target "
+        f"{_MIN_PASS_RATE:.0%}.\n{report}"
+    )
+
+    # cjk_tokenization must be 100% pass (no xfails allowed)
+    cjk_xfail = cat_xfail.get("cjk_tokenization", 0)
+    assert cjk_xfail == 0, (
+        f"cjk_tokenization has {cjk_xfail} xfail cases — "
+        f"all CJK cases must pass after Jieba integration"
+    )
