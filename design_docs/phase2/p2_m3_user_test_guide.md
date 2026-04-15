@@ -602,7 +602,7 @@ async def main():
 
     ws = settings.memory.workspace_path
     builder = PromptBuilder(
-        workspace_dir=ws, settings=settings.memory, tool_registry=None,
+        workspace_dir=ws, memory_settings=settings.memory, tool_registry=None,
     )
 
     # Owner 视角
