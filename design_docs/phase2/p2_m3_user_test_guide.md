@@ -500,36 +500,62 @@ uv run python -m src.backend.cli doctor
 
 > 搜索"数据库"相关的记忆
 
-- 应返回包含"数据库迁移"和之前 T01 写入的"PostgreSQL tsvector"条目
+- 应返回"数据库迁移方案"条目（T10 刚写入的）
+- T01 写入的"PostgreSQL tsvector"条目**不一定命中**（lexical search 不做 PostgreSQL→数据库 语义扩展；这是 synonym gap，属于已知限制）
 
 **关键观察点**：
 - 如果中文查询 0 结果 → 检查 Jieba warmup 是否在 gateway lifespan 中执行（后端启动日志应有 `Building prefix dict`）
 - 如果英文能搜到但中文搜不到 → search_text 列可能未填充 → 运行 `reindex`
 
-### T11 WebChat 未登录测试（no-auth 切回）
+### T11 匿名不泄漏 owner 记忆（CLI 确定性验证 + WebChat）
+
+> **注意**：T08/T10 的 auth 模式会 stamp session（`principal_id` 绑定到 session）。切到 no-auth 后，同一 session 会被 `authorize_and_stamp_session` 拒绝（`SESSION_AUTH_REQUIRED`）。因此必须使用**新 session**。
+
+**步骤 1（CLI 确定性验证 — 核心断言）**：
+
+```bash
+uv run python - <<'PY'
+import asyncio
+from src.config.settings import get_settings
+from src.memory.searcher import MemorySearcher
+from src.session.database import create_db_engine, make_session_factory
+
+async def main():
+    settings = get_settings()
+    engine = await create_db_engine(settings.database)
+    factory = make_session_factory(engine)
+    searcher = MemorySearcher(factory, settings.memory)
+
+    # 匿名搜索（principal_id=None）
+    results = await searcher.search("Python", scope_key="main", principal_id=None)
+    print(f"匿名搜索 'Python': {len(results)} hits")
+    for r in results:
+        tag = "LEGACY" if r.principal_id is None else f"OWNER({r.principal_id[:12]})"
+        print(f"  [{tag}] {r.content[:60]}...")
+
+    has_owner_leak = any(r.principal_id is not None for r in results)
+    if has_owner_leak:
+        print("\n✗ 隔离失败: 匿名搜索返回了 owner 条目")
+    else:
+        print("\n✓ 隔离正确: 匿名搜索仅返回 legacy 条目")
+    await engine.dispose()
+
+asyncio.run(main())
+PY
+```
+
+- 预期：`✓ 隔离正确`；所有结果的 principal_id 均为 None
+- 如果出现 `✗ 隔离失败` → SQL WHERE 的 principal 过滤有缝隙 → **阻塞**
+
+**步骤 2（WebChat 辅助验证 — 可选）**：
 
 1. 关闭 Gateway（Ctrl+C）
 2. 注释掉 `.env` 中的 `AUTH_PASSWORD_HASH`
 3. 重启 `just dev`
-4. 刷新浏览器
-
-**预期**：
-- 不再出现 Login 表单，直接进入 Chat
-- WebSocket 连接无需 auth RPC
-- 后端日志应出现 `auth_mode_disabled`
-
-在 Chat 中发送：
-
-> 搜索所有关于 Python 的记忆
-
-**预期**：
-- 匿名搜索只返回 T01 写入的 legacy 条目（principal_id=NULL）
-- **不应返回** T05 写入的 owner 条目（principal_id=owner_id）
-- **不应返回** T10 写入的 owner 条目
-
-**关键观察点**：
-- 这是最重要的隔离验证——no-auth 模式的匿名请求绝不应看到 auth 模式下的 owner 记忆
-- 如果匿名请求返回了 owner 条目 → SQL WHERE 的 principal 过滤有缝隙 → **阻塞**
+4. 打开**新的浏览器隐身窗口**（或清空 localStorage 后刷新），使用新 session
+5. 后端日志应出现 `auth_mode_disabled`
+6. 在 Chat 中发送 `搜索所有关于 Python 的记忆`
+7. Agent 只应提到 legacy 条目（T01 写入的），不应提到 T05/T10 写入的 owner 条目
 
 ## 5. C 层：架构缝隙探测
 
@@ -547,14 +573,68 @@ cat >> workspace/memory/$(date +%Y-%m-%d).md <<'ENTRY'
 ENTRY
 ```
 
-**步骤 2**：在 auth 模式 WebChat 中发消息触发 daily notes 加载（如"你好"），检查后端日志。
+**步骤 2（确定性脚本验证 — 核心断言）**：
 
-**步骤 3**：反向验证 — 切到 no-auth 模式重启 Gateway，同样发消息触发 daily notes 加载。
+```bash
+uv run python - <<'PY'
+import asyncio
+from sqlalchemy import text
+from pathlib import Path
+from src.config.settings import get_settings
+from src.agent.prompt_builder import PromptBuilder
+from src.session.database import create_db_engine, make_session_factory
 
-**预期**：
-- Auth 模式（owner 登录）：Agent **不应**提到"另一个用户的私密笔记"内容（`principal: other-user-id-12345` 与当前 owner 不匹配 → `_filter_entries` 排除）
-- No-auth 模式（匿名）：Agent 同样**不应**看到该条目（匿名请求不可见 owned entries）
-- 后端日志 `daily_notes_loaded` 的 `chars` 数应小于 `wc -c workspace/memory/$(date +%Y-%m-%d).md` 的文件大小
+FAKE_MARKER = "另一个用户的私密笔记"
+
+async def main():
+    settings = get_settings()
+    engine = await create_db_engine(settings.database)
+    schema = settings.database.schema_
+
+    # 获取 owner principal_id
+    async with engine.connect() as conn:
+        result = await conn.execute(text(
+            f"SELECT id FROM {schema}.principals WHERE role = 'owner'"
+        ))
+        row = result.fetchone()
+        owner_id = row.id if row else None
+    await engine.dispose()
+
+    ws = settings.memory.workspace_path
+    builder = PromptBuilder(
+        workspace_dir=ws, settings=settings.memory, tool_registry=None,
+    )
+
+    # Owner 视角
+    owner_notes = builder._load_daily_notes(
+        scope_key="main", principal_id=owner_id,
+    )
+    if FAKE_MARKER in owner_notes:
+        print("✗ Owner 视角泄漏: fake 条目出现在 daily notes 中")
+    else:
+        print("✓ Owner 视角: fake 条目已被过滤")
+
+    # 匿名视角
+    anon_notes = builder._load_daily_notes(
+        scope_key="main", principal_id=None,
+    )
+    if FAKE_MARKER in anon_notes:
+        print("✗ 匿名视角泄漏: fake 条目出现在 daily notes 中")
+    else:
+        print("✓ 匿名视角: fake 条目已被过滤")
+
+asyncio.run(main())
+PY
+```
+
+- 预期：两个 `✓`
+- 如果出现 `✗` → `_filter_entries` 对跨 principal 条目过滤失效 → **阻塞**
+
+**步骤 3（WebChat 辅助验证 — 可选）**：在 auth 模式 WebChat 中发送：
+
+> 请逐条列出你在今天 daily notes 中看到的内容摘要
+
+- 预期：Agent **不应**提到"另一个用户的私密笔记"内容
 
 **清理**：测试后删除注入的 fake 条目（用编辑器删除 `---` + `[23:59]...另一个用户...` 块）。
 
@@ -562,13 +642,27 @@ ENTRY
 
 目标：验证会话压缩（compaction）后，Agent 仍能通过 memory search 找到 principal-filtered 条目。
 
-1. 在 auth 模式下的 WebChat 中进行大量对话（>20 轮），触发 compaction
+**环境准备**（降低 compaction 阈值使其可触发）：
+
+在 `.env` 中临时设置较低的 context limit（测试后恢复）：
+
+```dotenv
+COMPACTION_CONTEXT_LIMIT=4000
+```
+
+恢复 Auth 模式（取消注释 `AUTH_PASSWORD_HASH`），重启 Gateway。
+
+**步骤**：
+
+1. 在 auth 模式 WebChat 中进行对话，每轮发送较长文本（如让 Agent 解释技术概念），直到后端日志出现 `budget_check` 且 `status=compact_needed`，随后出现 `compaction_complete`
 2. Compaction 后，发送：
 
 > 请搜索我之前关于数据库的记忆
 
-3. 预期：Agent 仍能搜索到 owner 条目（memory search 独立于对话历史，从 DB 查询）
-4. 关键观察：Compaction 不会丢失 memory_entries 中的数据（它只压缩对话消息），但如果 Agent 在 compaction 前通过 memory_search 获取了条目内容并放入对话中，compaction 后这些内容在压缩摘要中是否保留了 principal attribution
+3. 预期：Agent 仍能搜索到 owner 条目（memory search 从 DB 查询，独立于对话历史压缩）
+4. 关键观察：Compaction 不丢失 memory_entries 数据（它只压缩对话消息），但 compaction 摘要中是否保留了 principal attribution（如果 Agent 之前把搜索结果放入对话）
+
+**测试后恢复**：删除或注释 `COMPACTION_CONTEXT_LIMIT`（恢复默认 128000）。
 
 ### T14 Reindex 后 principal + visibility 保持
 
@@ -638,6 +732,8 @@ PY
 - 如果 `with_search_text` < `total` → CJK 分词路径缺失
 
 ### T15 Auth Rate Limiter 真实行为
+
+> 前置：确保 `.env` 中 `AUTH_PASSWORD_HASH` 已设置（T13 恢复了 auth 模式），Gateway 正在运行且后端日志显示 `auth_mode_enabled`。若不确定，重启 `just dev` 并检查。
 
 目标：确认 rate limiter 在真实 HTTP 交互中正确工作（in-memory 限流，不是 mock）。
 
