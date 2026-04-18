@@ -41,28 +41,29 @@ def _count_curated_sections(content: str) -> int:
     """Count ## header sections with non-empty body.
 
     Must match MemoryIndexer._split_by_headers() + index_curated_memory()
-    filtering logic: only sections whose body.strip() is truthy are counted.
+    filtering logic: only ``## `` sections whose body.strip() is truthy are
+    counted.  A leading ``# `` (h1) line and preamble text before the first
+    ``## `` are skipped.
     """
     if not content.strip():
         return 0
 
     count = 0
-    current_title = ""
     body_lines: list[str] = []
+    in_section = False  # True after the first ## header
 
     for line in content.split("\n"):
         if line.startswith("## "):
-            if (current_title or body_lines) and "\n".join(body_lines).strip():
+            if in_section and "\n".join(body_lines).strip():
                 count += 1
-            current_title = line[3:].strip()
             body_lines = []
-        elif line.startswith("# ") and not current_title:
-            current_title = line[2:].strip()
-            body_lines = []
+            in_section = True
+        elif not in_section:
+            continue  # skip h1 preamble
         else:
             body_lines.append(line)
 
-    if (current_title or body_lines) and "\n".join(body_lines).strip():
+    if in_section and "\n".join(body_lines).strip():
         count += 1
 
     return count

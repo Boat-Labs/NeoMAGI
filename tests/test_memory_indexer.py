@@ -61,11 +61,11 @@ class TestHelpers:
     def test_split_by_headers(self) -> None:
         content = "# Title\nIntro\n## Section A\nContent A\n## Section B\nContent B"
         sections = MemoryIndexer._split_by_headers(content)
-        assert len(sections) == 3
-        assert sections[0][0] == "Title"
-        assert sections[1][0] == "Section A"
-        assert "Content A" in sections[1][1]
-        assert sections[2][0] == "Section B"
+        # h1 preamble ("# Title" + "Intro") is skipped; only ## sections returned
+        assert len(sections) == 2
+        assert sections[0][0] == "Section A"
+        assert "Content A" in sections[0][1]
+        assert sections[1][0] == "Section B"
 
     def test_split_by_headers_empty(self) -> None:
         sections = MemoryIndexer._split_by_headers("")

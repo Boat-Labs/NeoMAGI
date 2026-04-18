@@ -221,8 +221,8 @@ class TestCountCuratedSections:
         assert _count_curated_sections(content) == 2
 
     def test_no_headers(self) -> None:
-        """Content without headers → one section (matches _split_by_headers)."""
-        assert _count_curated_sections("Just plain text") == 1
+        """Content without ## headers → preamble only, zero curated sections."""
+        assert _count_curated_sections("Just plain text") == 0
 
     def test_triple_dash_not_counted(self) -> None:
         """--- separators should NOT split curated memory sections."""

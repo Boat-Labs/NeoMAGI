@@ -348,27 +348,33 @@ class MemoryIndexer:
 
     @staticmethod
     def _split_by_headers(content: str) -> list[tuple[str, str]]:
-        """Split markdown content by ## headers into (title, body) pairs."""
+        """Split markdown content by ## headers into (title, body) pairs.
+
+        Only ``## `` (h2) sections are returned.  A leading ``# `` (h1) line
+        and any text before the first ``## `` are treated as file-level
+        preamble and skipped — they are not curated memory content.
+        """
         if not content.strip():
             return []
 
         sections: list[tuple[str, str]] = []
         current_title = ""
         current_body: list[str] = []
+        in_section = False  # True after the first ## header
 
         for line in content.split("\n"):
             if line.startswith("## "):
-                if current_title or current_body:
+                if in_section:
                     sections.append((current_title, "\n".join(current_body)))
                 current_title = line[3:].strip()
                 current_body = []
-            elif line.startswith("# ") and not current_title:
-                current_title = line[2:].strip()
-                current_body = []
+                in_section = True
+            elif not in_section:
+                continue  # skip h1 preamble
             else:
                 current_body.append(line)
 
-        if current_title or current_body:
+        if in_section:
             sections.append((current_title, "\n".join(current_body)))
 
         return sections
