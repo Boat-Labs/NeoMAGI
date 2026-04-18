@@ -139,13 +139,14 @@ async def test_principal_fk_on_delete_restrict_binding(db_session_factory) -> No
         )
         await session.commit()
 
+    # Raw SQL bypasses ORM cascade="all, delete-orphan" on
+    # PrincipalRecord.bindings, so the DB-level RESTRICT fires.
     with pytest.raises(IntegrityError):
         async with db_session_factory() as session:
-            result = await session.execute(
-                select(PrincipalRecord).where(PrincipalRecord.id == pid)
+            await session.execute(
+                text(f"DELETE FROM {DB_SCHEMA}.principals WHERE id = :pid"),
+                {"pid": pid},
             )
-            principal = result.scalar_one()
-            await session.delete(principal)
             await session.commit()
 
 
