@@ -5,6 +5,8 @@ Unit tests (mocked DB) + integration tests (real PostgreSQL).
 
 from __future__ import annotations
 
+import os
+
 import bcrypt
 import pytest
 
@@ -251,8 +253,13 @@ def test_auth_settings_rejects_non_bcrypt() -> None:
         AuthSettings(password_hash="not-a-hash")
 
 
-def test_auth_settings_defaults() -> None:
+def test_auth_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     from src.auth.settings import AuthSettings
+
+    # Clear AUTH_* env vars so we test code defaults, not .env values
+    for key in list(os.environ):
+        if key.startswith("AUTH_"):
+            monkeypatch.delenv(key)
     settings = AuthSettings()
     assert settings.jwt_expire_hours == 24
     assert settings.owner_name == "Owner"

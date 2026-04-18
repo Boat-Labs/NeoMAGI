@@ -10,6 +10,7 @@ Safety: refuses to run against any database whose name doesn't contain '_test'.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import os
 from collections.abc import AsyncGenerator
 
@@ -111,33 +112,34 @@ async def db_session_factory(db_engine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(db_engine, expire_on_commit=False)
 
 
-@pytest_asyncio.fixture(autouse=True)
+@pytest_asyncio.fixture(autouse=True, loop_scope="session")
 async def _integration_cleanup(request):
-    """Truncate all tables after each integration test for isolation.
+    """Truncate all tables after each async integration test for isolation.
 
-    Uses request.getfixturevalue() for lazy resolution — non-integration
-    tests never trigger the db_session_factory → db_engine → _pg_container
-    fixture chain.
+    Resolves db_session_factory lazily during *setup* (before yield) so the
+    fixture dependency chain is established while the event loop is accepting
+    new coroutines.  The actual TRUNCATE runs in teardown (after yield).
 
-    Sync integration tests (e.g. WebSocket tests using TestClient) manage
-    their own cleanup via app lifespan, so we skip them entirely to avoid
-    Runner.run() conflicts and unawaited-coroutine warnings.
+    Non-integration tests skip both setup resolution and teardown truncation.
+    Sync integration tests (WebSocket/TestClient) manage their own cleanup.
     """
+    is_integration = any(m.name == "integration" for m in request.node.iter_markers())
+
+    # pytest-asyncio auto mode wraps async defs → iscoroutinefunction returns
+    # False on the wrapper.  Use inspect.unwrap to check the original function.
+    is_async = asyncio.iscoroutinefunction(inspect.unwrap(request.node.obj))
+
+    factory = None
+    if is_integration and is_async:
+        try:
+            factory = request.getfixturevalue("db_session_factory")
+        except Exception:
+            pass  # Test doesn't use the shared db fixture
+
     yield
 
-    if not any(m.name == "integration" for m in request.node.iter_markers()):
-        return
-
-    # Sync tests (WebSocket/TestClient) handle their own cleanup in lifespan.
-    if not asyncio.iscoroutinefunction(request.node.obj):
-        return
-
-    try:
-        factory = request.getfixturevalue("db_session_factory")
-    except Exception:
-        return  # This test doesn't use the shared db fixture
-
-    await _truncate_integration_tables(factory)
+    if factory is not None:
+        await _truncate_integration_tables(factory)
 
 
 async def _truncate_integration_tables(factory) -> None:

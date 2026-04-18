@@ -38,3 +38,35 @@ doc_id_assigned_at: 2026-04-18T21:54:16+02:00
   - D. 混合方案：CJK 部分用 Jieba 切分，非 CJK 部分保留原文交给 ICU/simple
 - 涉及代码：`src/memory/query_processor.py`、migration `b2c3d4e5f6a7`
 - 优先级：非阻塞（当前中文场景可用），但影响多语种用户体验
+
+## OI-M3-02 `.env` 污染导致 test_app_integration 和 AuthSettings 测试失败
+
+- 发现于：P2-M3 用户测试期间（本地运行全量测试）
+- 现象：11 个既有测试失败，分属两类根因
+- 失败清单：
+  - `test_app_integration.py::test_agent_loop_has_compaction_settings`
+  - `test_app_integration.py::test_m3_tools_registered_and_wired`
+  - `test_app_integration.py::test_empty_bot_token_skips_telegram`
+  - `test_app_integration.py::test_agent_loop_has_procedure_runtime`
+  - `test_principal_store.py::test_auth_settings_defaults`
+  - `test_principal_schema.py::test_single_owner_partial_unique_index`
+  - `test_principal_schema.py::test_binding_unique_constraint`
+  - `test_principal_schema.py::test_principal_fk_on_delete_restrict_binding`
+  - `test_principal_schema.py::test_session_principal_id_fk_on_delete_restrict`
+  - `test_principal_store.py::test_ensure_owner_creates_principal`
+  - `test_principal_store.py::test_get_owner_returns_none_when_empty`
+
+### 根因 A：`.env` 污染 AuthSettings（5 个 app_integration + 1 个 auth_settings）
+
+- `src/config/settings.py` 在 import 时调用 `load_dotenv()`，将 `.env` 中的 `AUTH_PASSWORD_HASH` 和 `AUTH_OWNER_NAME=TestOwner` 注入 `os.environ`
+- `_make_mock_settings()` 第 53 行 `settings.auth = AuthSettings()` 注释标注 "no-auth mode"，但 `AuthSettings` 作为 `pydantic-settings` 的 `BaseSettings` 自动读取环境变量，实际进入 auth mode
+- `lifespan()` 在 auth mode 下调用 `PrincipalStore.ensure_owner()`，但测试传入的 `fake_session_factory` 是 `MagicMock` → `coroutine object has no attribute 'password_hash'`
+- `test_auth_settings_defaults` 同理：期望 `owner_name == "Owner"`（默认值），实际读到 `.env` 中的 `"TestOwner"`
+- 修复：显式传参 `AuthSettings(password_hash=None, owner_name="Owner")` 覆盖 env，或 `monkeypatch.delenv()` 清除相关变量
+
+### 根因 B：principal schema 测试隔离失败（5 个 principal_schema/store）
+
+- `test_single_owner_partial_unique_index` 插入 `role='owner'` 的 principal，后续测试也尝试插入 owner → 碰到 `uq_principals_single_owner` 唯一约束
+- `_integration_cleanup` fixture（conftest.py）在每个 integration 测试后 TRUNCATE 所有表，但 principal schema 测试之间存在残留：前一个测试的 owner 未被清理即进入下一个测试
+- 单独运行每个测试均能通过，批量运行则失败 — 典型的测试隔离问题
+- 修复：确认 `_integration_cleanup` 的 TRUNCATE 顺序是否考虑了 FK 依赖（先 bindings/sessions 再 principals），或在 principal schema 测试中显式清理

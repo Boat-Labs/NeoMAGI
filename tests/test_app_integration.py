@@ -50,7 +50,8 @@ def _make_mock_settings(tmp_path: Path) -> MagicMock:
     settings.session = MagicMock()
     settings.session.default_mode = "chat_safe"
     settings.telegram = TelegramSettings(bot_token="")  # force disabled regardless of env
-    settings.auth = AuthSettings()  # no-auth mode (password_hash=None)
+    # Explicit params override .env pollution (AUTH_PASSWORD_HASH, AUTH_OWNER_NAME)
+    settings.auth = AuthSettings(password_hash=None, owner_name="Owner")
     return settings
 
 
