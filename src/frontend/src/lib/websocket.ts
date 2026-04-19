@@ -91,6 +91,7 @@ export class WebSocketClient {
             this.options.onConnected?.()
           } else if (msg.type === "error") {
             console.error("[WS] Auth failed:", (msg as { error: { message: string } }).error.message)
+            this.close()  // stop reconnect before callback
             this.options.onAuthFailed?.()
           }
           return
