@@ -72,8 +72,8 @@ M0 使用轻量决策日志（ADR-lite）：关键取舍可追溯，文档保持
 | 0061 | Phase 2 scope collapse and P3 self-evolution | accepted | 2026-04-11 | `decisions/0061-phase2-scope-collapse-and-p3-self-evolution.md` |
 | 0062 | Phase 3 daily-use capability completion | accepted | 2026-04-19 | `decisions/0062-phase3-daily-use-capability-completion.md` |
 | 0063 | Memory truth closure: Postgres with workspace projection | accepted | 2026-04-19 | `decisions/0063-memory-truth-postgres-with-workspace-projection.md` |
-| 0064 | Artifact and run metadata boundary | proposed | 2026-04-19 | `decisions/0064-artifact-and-run-metadata-boundary.md` |
-| 0065 | Run-level provider/model selection | proposed | 2026-04-19 | `decisions/0065-run-level-provider-model-selection.md` |
+| 0064 | Artifact and run metadata boundary | accepted | 2026-04-19 | `decisions/0064-artifact-and-run-metadata-boundary.md` |
+| 0065 | Run-level provider/model selection | accepted | 2026-04-19 | `decisions/0065-run-level-provider-model-selection.md` |
 
 ## 记录规则
 - 每个关键决策一个文件，命名：`NNNN-short-title.md`。

@@ -5,7 +5,7 @@ doc_id_assigned_at: 2026-04-19T13:51:29+02:00
 ---
 # 0064-artifact-and-run-metadata-boundary
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-04-19
 - Related: `design_docs/phase3/p3_daily_use_architecture_draft.md`, ADR 0055
 

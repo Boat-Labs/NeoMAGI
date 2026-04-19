@@ -5,7 +5,7 @@ doc_id_assigned_at: 2026-04-19T13:51:29+02:00
 ---
 # 0065-run-level-provider-model-selection
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-04-19
 - Refines: ADR 0040
 - Related: ADR 0016, `design_docs/phase3/p3_daily_use_architecture_draft.md`
