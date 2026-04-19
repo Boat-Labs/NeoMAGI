@@ -89,3 +89,22 @@ doc_id_assigned_at: 2026-04-18T21:54:16+02:00
   - `src/lib/websocket.ts` `WebSocketClient`：auth 失败时 `close()` 停止重连
   - `src/stores/chat.ts` `onAuthFailed` 回调：清 token + 刷新页面
 - Vite proxy 配置（`src/frontend/vite.config.ts`）：auth 模式下前端 dev server 需要 proxy `/auth` 和 `/ws` 到后端，否则 login 和 WS 鉴权均不可达
+
+## OI-M3-04 Lexical search 无法匹配语义查询，recall 不及预期
+
+- 发现于：P2-M3 用户测试 T09（Owner 记忆 prompt 注入验证）
+- 现象：用户问"请回忆一下，我之前提到过哪些技术话题？"，`memory_search` 返回 0 条结果。DB 中有 4 条相关记忆（tsvector 全文搜索、embedding 向量检索、Python asyncio、最喜欢的编程语言），但内容中均不包含"技术"或"话题"这两个词
+- agent 仍能提到部分记忆，是因为 PromptBuilder 将当天 daily notes 加载到了 system prompt 中（非 search 路径）
+- root cause：
+  - model 传给 `memory_search` 的查询词为"技术话题"，Jieba 切分为 `技术` + `话题`
+  - `plainto_tsquery('simple', '技术 话题')` 使用 AND 语义，要求两个 token 同时出现
+  - 4 条记忆内容中均不含"技术"或"话题"的字面文本 → 0 命中
+  - 这是 lexical search（tsvector）的固有限制：无法桥接"技术话题" → "tsvector / embedding / asyncio"的语义关联
+- 与 OI-M3-01 的关系：OI-M3-01 是分词器对多语种的覆盖问题；OI-M3-04 是更根本的 lexical vs semantic 差距——即使分词器完美，纯词法匹配也无法处理同义/上下位概念查询
+- 影响：用户使用抽象/概括性查询（"技术话题"、"之前的讨论"、"学习计划"）时，memory_search 大概率返回空，只能依赖 daily notes 的全量加载作为 fallback
+- 可选修复方向：
+  - A. 引入 embedding 向量检索（Ollama 优先 → OpenAI fallback），lexical + semantic 双路合并
+  - B. 查询扩展：model 生成多组关键词 → 多次 search → 合并去重
+  - C. 当 search 返回 0 条时，prompt 提示 model 用更具体的关键词重试
+- 涉及代码：`src/memory/searcher.py`、`src/agent/prompt_builder.py`（daily notes fallback）
+- 优先级：非阻塞（daily notes 加载提供了部分补偿），但显著影响 memory search 的用户感知可靠性
