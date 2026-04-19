@@ -84,7 +84,7 @@ Skill Learner 不继续做自动成长，先改为 observe-only：
 
 ## 5. Milestones
 
-### 5.1 P3a：Daily MVP
+### 5.1 P3-M1：Daily MVP
 
 目标：支持日常对话聊天与基础信息获取，开始替代部分 claude.ai / ChatGPT 使用。
 
@@ -106,9 +106,9 @@ Skill Learner 不继续做自动成长，先改为 observe-only：
 - 同一 session 切换 provider / 模型后，memory recall 与 scope 行为一致。
 - `web_search` / `web_fetch` 返回带来源的结果。
 - memory truth 已由 Postgres ledger 承担；workspace projection 的自动生成标注、重建路径与一致性检查可验证。
-- P3a 必须产出至少 30 条真实 daily cases。
+- P3-M1 必须产出至少 30 条真实 daily cases。
 
-### 5.2 P3b：Daily Expansion
+### 5.2 P3-M2：Daily Expansion
 
 目标：支持带文件、图片、代码外包与轻量执行的日常任务。
 
@@ -116,7 +116,7 @@ Skill Learner 不继续做自动成长，先改为 observe-only：
 
 - 上传 PDF / 图片后，NeoMAGI 能引用文件内容参与对话。
 - 生成 plot、文本、数据文件后，前端能展示或提供稳定引用。
-- coding 任务可委派给 Claude Code CLI；Codex CLI 是否同期进入由 P3a cases 决定。
+- coding 任务可委派给 Claude Code CLI；Codex CLI 是否同期进入由 P3-M1 cases 决定。
 - Python execution / plotting 在 sandbox 中运行，并把输出作为 artifacts。
 - 长任务有基本状态，不要求用户盯着空白对话等待。
 
@@ -133,7 +133,7 @@ Skill Learner 不继续做自动成长，先改为 observe-only：
 P3 的核心成功指标不是新增抽象数量，而是真实使用强度：
 
 - 14 天内持续使用 NeoMAGI。
-- P3a 至少 30 条真实 daily cases。
+- P3-M1 至少 30 条真实 daily cases。
 - case 记录包含：任务、成功/失败、是否逃回 claude.ai / ChatGPT、缺失能力、是否产生 memory、使用的 provider / tools。
 - 记忆第二天可找回。
 - Web 答案能追溯来源。
@@ -143,9 +143,9 @@ P3 的核心成功指标不是新增抽象数量，而是真实使用强度：
 ## 7. Open Questions
 
 - Brave Search API 的成本、限额和结果质量是否满足 personal daily use。
-- Claude provider 是否在 P3a 支持 tool calling，还是先仅支持 chat / streaming。
-- P3a 是否直接暴露具体 model id，还是只暴露服务端配置的 model profile。
-- `memory_search` 的 PG-native topic inventory 与 per-entry retrieval tags 是否足以覆盖 P3a daily recall cases。
+- Claude provider 是否在 P3-M1 支持 tool calling，还是先仅支持 chat / streaming。
+- P3-M1 是否直接暴露具体 model id，还是只暴露服务端配置的 model profile。
+- `memory_search` 的 PG-native topic inventory 与 per-entry retrieval tags 是否足以覆盖 P3-M1 daily recall cases。
 - embedding 是否值得作为 optional index projection，而不是 raw memory truth。
 - docling 是否值得作为默认 PDF parser，还是只在复杂 PDF / OCR case 出现后引入。
-- Codex CLI wrapper 是否与 Claude Code CLI 同期进入 P3b。
+- Codex CLI wrapper 是否与 Claude Code CLI 同期进入 P3-M2。

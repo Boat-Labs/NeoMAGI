@@ -46,7 +46,7 @@ workspace/runs/<run_id>/
 - Artifact canonical path 一旦写入 index，不轻易移动。
 - Artifact 不自动写入长期 memory；memory 只记录“这个文件对用户长期有什么意义”。
 - P3 初版 memory 可通过 `memory_source_ledger.metadata.artifact_ids` 引用 artifact；该 metadata 列已是 `JSONB NOT NULL DEFAULT '{}'`，不需要新增 ledger 列。
-- P3a 需要打通受控写入路径与引用校验：写入 memory 前确认 artifact 存在，且 principal / visibility 允许引用。
+- P3-M1 需要打通受控写入路径与引用校验：写入 memory 前确认 artifact 存在，且 principal / visibility 允许引用。
 - `artifact_ids` 初版只服务 memory -> artifact 引用，暂不新增 `memory_artifact_links` 表。
 - `sha256` 在 artifact 写入或 finalize 时记录，用于 doctor / explicit integrity check；普通 artifact 读取默认不重新 hash。
 - Artifact integrity drift 由 doctor 报告，修复或接受当前 hash 必须通过独立显式命令完成。

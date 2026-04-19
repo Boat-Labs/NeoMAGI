@@ -30,7 +30,7 @@ NeoMAGI 的核心使命仍是 personal agent：持续记忆、代表用户信息
 - 完整 self-evolution workflow 从 P3 主线降级为未来候选或 `growth_lab` 实验，不作为 P3 默认 roadmap。
 - P3 默认运行形态为 daily profile：`core loop + memory + tools + provider routing`。
 - Procedure Runtime、Skill Learner、Growth Governance、devcoord 在 P3 daily path 中冻结或后台化。
-- P3a 必须产出至少 30 条真实 daily cases，作为后续扩展依据。
+- P3-M1 必须产出至少 30 条真实 daily cases，作为后续扩展依据。
 
 ## 为什么
 
