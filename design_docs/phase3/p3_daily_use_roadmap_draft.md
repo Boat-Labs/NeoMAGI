@@ -78,7 +78,8 @@ Procedure Runtime 进入 maintenance freeze：
 Skill Learner 不继续做自动成长，先改为 observe-only：
 
 - 不自动 propose / eval / apply skill。
-- 可记录 teaching / preference / workflow candidate。
+- daily mode 不自动持久化 skill candidate，避免在冻结 growth path 时新增隐式学习系统。
+- teaching / preference / workflow candidate 只作为 daily casebook 字段记录；只有用户明确要求“记住”时，才进入普通 memory 写入路径。
 - 人工 curated skill 可在 `growth_lab` 或 read-only path 中验证。
 - 解冻前需要真实 teaching cases 与复用证据。
 
@@ -107,6 +108,13 @@ Skill Learner 不继续做自动成长，先改为 observe-only：
 - `web_search` / `web_fetch` 返回带来源的结果。
 - memory truth 已由 Postgres ledger 承担；workspace projection 的自动生成标注、重建路径与一致性检查可验证。
 - P3-M1 必须产出至少 30 条真实 daily cases。
+- 30 条 cases 必须有最低覆盖，不允许只用同质聊天凑数：
+  - memory write / recall / next-day retrieval 不少于 6 条；
+  - web search / web fetch / source provenance 不少于 6 条；
+  - provider / model switch 不少于 4 条；
+  - artifact / run / generated file reference 不少于 4 条；
+  - 失败、降级或逃回 claude.ai / ChatGPT 的 cases 不少于 5 条。
+- 同一 case 可以覆盖多个类别，但 casebook 必须明确标注覆盖项和证据。
 
 ### 5.2 P3-M2：Daily Expansion
 
@@ -124,6 +132,7 @@ Skill Learner 不继续做自动成长，先改为 observe-only：
 
 - 文件上传、artifact 展示、tool log 折叠、长任务状态在前端可用。
 - `claude_code` 在白名单、cwd、env、timeout、log 约束下可运行。
+- `claude_code.context_files` 必须验证 workspace 边界、resolve 后路径、敏感文件禁入、数量 / 总大小限制和 manifest 记录。
 - `python_execute` 只在 sandbox run dir 内产生 artifacts。
 - PDF / image 输入不默认写入长期 memory。
 - 新增能力至少各自产生真实 daily cases，再决定是否进入 procedure / skill / governance。
@@ -134,7 +143,7 @@ P3 的核心成功指标不是新增抽象数量，而是真实使用强度：
 
 - 14 天内持续使用 NeoMAGI。
 - P3-M1 至少 30 条真实 daily cases。
-- case 记录包含：任务、成功/失败、是否逃回 claude.ai / ChatGPT、缺失能力、是否产生 memory、使用的 provider / tools。
+- case 记录包含：任务、成功/失败、是否逃回 claude.ai / ChatGPT、缺失能力、是否产生 memory、是否产生 artifact、使用的 provider / model / tools。
 - 记忆第二天可找回。
 - Web 答案能追溯来源。
 - provider / 模型切换不破坏 session / memory 行为。

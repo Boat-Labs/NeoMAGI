@@ -16,12 +16,19 @@ doc_id_assigned_at: 2026-04-11T18:07:12+02:00
 2. `design_docs/phase3/p3_daily_use_architecture_draft.md`
    - P3 daily use architecture 草稿：记录 runtime profile、provider、memory、web、artifact/run、CLI wrapper、部署与前端的 high-level 技术决定。
 
-## 2. 降级方向
+## 2. Related Decisions
+
+- ADR 0062：P3 主线调整为 daily-use capability completion。
+- ADR 0063：Memory truth 已收口为 Postgres ledger，P3 只补 projection / export hardening。
+- ADR 0064：Artifact / run metadata 边界。
+- ADR 0065：Run-level provider / model selection。
+
+## 3. 降级方向
 
 - 受治理 self-evolution workflow 暂不作为 P3 主线。
 - Procedure Runtime、Skill Learner、Growth Governance、devcoord 在 P3 daily path 中默认冻结或后台化。
 
-## 3. 明确不规划
+## 4. 明确不规划
 
 - Slack / 群聊暂不进入已规划 milestone。
 - 外部平台写动作暂不进入默认产品路径。

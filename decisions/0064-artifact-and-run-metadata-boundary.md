@@ -50,6 +50,8 @@ workspace/runs/<run_id>/
 - `artifact_ids` 初版只服务 memory -> artifact 引用，暂不新增 `memory_artifact_links` 表。
 - `sha256` 在 artifact 写入或 finalize 时记录，用于 doctor / explicit integrity check；普通 artifact 读取默认不重新 hash。
 - Artifact integrity drift 由 doctor 报告，修复或接受当前 hash 必须通过独立显式命令完成。
+- 既有 builder artifact 不在 P3-M1 强制迁移；未来可登记进 P3 `artifacts` 表，并以 `metadata.origin = "builder"` 或等价字段标记。
+- ADR 0055 的 builder work memory 语义继续有效；P3 `artifacts` 表是更宽的 daily-use artifact index，不把 builder work memory 替换成另一套语义。
 
 ## 为什么
 
@@ -77,4 +79,5 @@ workspace/runs/<run_id>/
 - `artifacts.source_run_id` 与 `tool_runs.run_id` 初版可做逻辑关联，不强制外键。
 - 前端 artifact 展示、上传、tool log、long-running status 应以这些表和目录为基础。
 - P3 应新增 doctor artifact integrity check：默认做 path / metadata / optional sampling，`doctor --deep` 才做全量 retained artifact hash 校验。
+- P3 artifact store 与既有 builder artifact 并行过渡；新增 daily-use artifact 进入新表，已有 builder 产物按需要逐步登记，不做一次性迁移。
 - 后续如需要频繁反查 artifact -> memory 关系，再评估 `memory_artifact_links`。

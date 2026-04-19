@@ -5,7 +5,7 @@ doc_id_assigned_at: 2026-04-19T13:51:29+02:00
 ---
 # 0062-phase3-daily-use-capability-completion
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-04-19
 - Supersedes: Phase 3 direction in ADR 0061
 - Related: `design_docs/phase3/p3_daily_use_roadmap_draft.md`, `design_docs/phase3/p3_daily_use_architecture_draft.md`
@@ -30,7 +30,7 @@ NeoMAGI 的核心使命仍是 personal agent：持续记忆、代表用户信息
 - 完整 self-evolution workflow 从 P3 主线降级为未来候选或 `growth_lab` 实验，不作为 P3 默认 roadmap。
 - P3 默认运行形态为 daily profile：`core loop + memory + tools + provider routing`。
 - Procedure Runtime、Skill Learner、Growth Governance、devcoord 在 P3 daily path 中冻结或后台化。
-- P3-M1 必须产出至少 30 条真实 daily cases，作为后续扩展依据。
+- P3-M1 必须产出至少 30 条真实 daily cases，并满足最低覆盖门槛，作为后续扩展依据。
 
 ## 为什么
 
