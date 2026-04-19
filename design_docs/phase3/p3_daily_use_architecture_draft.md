@@ -254,7 +254,9 @@ origin_url         text null
 origin_title       text null
 created_at         timestamptz
 updated_at         timestamptz
-status             text        -- active | missing | deleted
+status             text        -- active | deleted | archived
+integrity_status   text        -- ok | missing | modified | unreadable | unverified
+last_verified_at   timestamptz null
 metadata           jsonb
 ```
 
@@ -263,9 +265,22 @@ metadata           jsonb
 - 文件内容不进 DB。
 - `path` 使用 workspace-relative path，不用绝对路径。
 - `artifact_id` 是机器主键，文件名只服务人工浏览。
-- `sha256` 用于发现文件被手动改动或丢失。
-- `status` 用于标记 missing / deleted，不静默删除 metadata。
+- `sha256` 在 artifact 写入或 finalize 时计算并记录，作为完整性 baseline。
+- 普通 artifact 读取默认不重新计算 `sha256`，避免把日常展示 / 引用路径变成高 I/O 操作。
+- 普通读取只做廉价检查：DB 记录存在、`status` 可用、path 存在；高风险输入可显式要求校验。
+- `doctor` 新增 artifact integrity check；默认检查 metadata 表、path 存在性和可选抽样，`doctor --deep` 做 retained artifacts 的全量 `sha256` 校验。
+- `integrity_status` 与 `last_verified_at` 由 doctor / explicit verify 更新，用于标记 missing / modified / unreadable。
+- doctor 只报告 drift，不自动 repair；接受当前文件 hash、标记 missing 或清理 metadata 必须走独立命令。
+- `status` 表示 artifact 生命周期，不静默删除 metadata。
 - P3 daily artifacts 范围比已有 builder work memory 更宽，使用独立 `artifacts` 表 / store；不复用 builder artifact 作为总表。
+
+显式完整性命令候选：
+
+```bash
+neomagi artifacts verify --deep
+neomagi artifacts reconcile --mark-missing
+neomagi artifacts accept-current-hash <artifact_id>
+```
 
 ### 6.3 Tool Run Table
 
