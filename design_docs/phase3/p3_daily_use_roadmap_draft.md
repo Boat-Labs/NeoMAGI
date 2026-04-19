@@ -145,6 +145,7 @@ P3 的核心成功指标不是新增抽象数量，而是真实使用强度：
 - Brave Search API 的成本、限额和结果质量是否满足 personal daily use。
 - Claude provider 是否在 P3a 支持 tool calling，还是先仅支持 chat / streaming。
 - P3a 是否直接暴露具体 model id，还是只暴露服务端配置的 model profile。
+- `memory_search` 的 PG-native topic inventory 与 per-entry retrieval tags 是否足以覆盖 P3a daily recall cases。
 - embedding 是否值得作为 optional index projection，而不是 raw memory truth。
 - docling 是否值得作为默认 PDF parser，还是只在复杂 PDF / OCR case 出现后引入。
 - Codex CLI wrapper 是否与 Claude Code CLI 同期进入 P3b。

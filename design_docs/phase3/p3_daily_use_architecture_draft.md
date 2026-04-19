@@ -168,12 +168,22 @@ P3 不再做 memory truth 迁移。P3 只补齐 projection / export hardening：
 
 ### 4.2 Memory Search Query Expansion
 
-`memory_search` 需要基本查询扩展：
+P3a `memory_search` query expansion 优先采用 PG-native、corpus-grounded 路线，不在每次 search hot path 默认调用 LLM 扩关键词。
 
-- model 生成多组关键词。
-- 多次 search。
-- 合并、去重、排序。
-- 返回命中来源与 query variants，方便调试 recall。
+默认顺序：
+
+1. Primary tsvector search：继续使用 scope / principal / visibility 过滤后的 `memory_entries.search_vector`。
+2. Low-recall OR fallback：当 primary 结果为空或明显不足时，把分词后的 query 改为 OR 语义，解决“关键词都在但没有同时出现在一条 memory”。
+3. Corpus-grounded topic inventory：仍低召回且 query 是宽泛类别时，从用户自己的 memory corpus 生成 topic / keyword inventory，例如基于 `ts_stat` / `search_vector` 统计实际出现的主题词，再返回候选主题或用这些真实词做二次搜索。
+4. Per-entry retrieval keywords / tags：P3a 可利用现有 `memory_entries.tags` 存放 indexer 阶段提取的 top-N 高信号关键词；这些 tags 是 retrieval projection，不是 memory truth，也不是完整 taxonomy。
+5. LLM query expansion：只作为 explicit fallback 或 `growth_lab` 实验项，不作为 daily mode 默认路径。
+
+约束：
+
+- 扩展词必须尽量来自用户自己的 memory corpus，而不是模型临场猜测。
+- 返回结果应包含触发的 query mode、query variants / topic candidates 和命中来源，方便调试 recall。
+- `pg_trgm` 可作为 typo / 近似字符串匹配的 optional enhancement，不作为 P3a 主方案。
+- 不把“技术”“投资”“健康”等宽泛词自动硬映射到一套全局 taxonomy；宽泛查询应优先返回用户记忆库中的实际候选主题。
 
 Embedding 可以预留，但暂不作为 P3a 必选项：
 
