@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 from src.agent.agent import AgentLoop
 from src.agent.events import TextChunk, ToolCallInfo, ToolDenied
-from src.agent.model_client import OpenAICompatModelClient
+from src.agent.model_client import AnthropicModelClient, ModelClient, OpenAICompatModelClient
 from src.agent.provider_registry import AgentLoopRegistry
 from src.auth.jwt import create_token, generate_secret, verify_token
 from src.auth.rate_limiter import LoginRateLimiter
@@ -121,7 +121,9 @@ async def _init_database(settings):
 
 async def _run_startup_preflight(app, settings, engine):
     """Run preflight checks and fail-fast if any check fails."""
-    preflight_report = await run_preflight(settings, engine)
+    preflight_report = await run_preflight(
+        settings, engine, profile=settings.runtime.profile,
+    )
     app.state.preflight_report = preflight_report
     logger.info("preflight_complete", passed=preflight_report.passed)
     if not preflight_report.passed:
@@ -209,7 +211,12 @@ async def _restore_active_wrappers(wrapper_tool_store, tool_registry) -> int:
 
 
 async def _build_memory_and_tools(settings, db_session_factory):
-    """Build memory stack + tool registry + skill runtime (incl. learner)."""
+    """Build memory stack + tool registry + skill runtime (incl. learner).
+
+    In ``daily`` profile, evolution engine, skill runtime, and procedure runtime
+    are skipped — returned as None.  Soul tools are not registered (guard already
+    exists in ``register_builtins``: evolution_engine=None → soul tools skipped).
+    """
     from src.memory.ledger import MemoryLedgerWriter
 
     memory_indexer = MemoryIndexer(db_session_factory, settings.memory)
@@ -220,30 +227,44 @@ async def _build_memory_and_tools(settings, db_session_factory):
         indexer=memory_indexer, ledger=memory_ledger,
     )
 
-    from src.memory.evolution import EvolutionEngine
+    is_daily = settings.runtime.profile == "daily"
 
-    evolution_engine = EvolutionEngine(db_session_factory, settings.workspace_dir, settings.memory)
+    evolution_engine = None
+    if not is_daily:
+        from src.memory.evolution import EvolutionEngine
+
+        evolution_engine = EvolutionEngine(
+            db_session_factory, settings.workspace_dir, settings.memory,
+        )
 
     tool_registry = ToolRegistry()
     register_builtins(
         tool_registry, settings.workspace_dir,
         memory_searcher=memory_searcher, memory_writer=memory_writer,
-        evolution_engine=evolution_engine,
+        evolution_engine=evolution_engine,  # None in daily → soul tools not registered
     )
 
-    from src.skills.learner import SkillLearner
-    from src.skills.projector import SkillProjector
-    from src.skills.resolver import SkillResolver
-    from src.skills.store import SkillStore
+    skill_resolver = None
+    skill_projector = None
+    skill_learner = None
+    procedure_runtime = None
 
-    skill_store = SkillStore(db_session_factory)
-    skill_resolver = SkillResolver(registry=skill_store)
-    skill_projector = SkillProjector()
+    if not is_daily:
+        from src.skills.learner import SkillLearner
+        from src.skills.projector import SkillProjector
+        from src.skills.resolver import SkillResolver
+        from src.skills.store import SkillStore
 
-    procedure_runtime, governance_engine = await _build_procedure_stack(
-        db_session_factory, evolution_engine, skill_store, tool_registry,
-    )
-    skill_learner = SkillLearner(skill_store, governance_engine)
+        skill_store = SkillStore(db_session_factory)
+        skill_resolver = SkillResolver(registry=skill_store)
+        skill_projector = SkillProjector()
+
+        procedure_runtime, governance_engine = await _build_procedure_stack(
+            db_session_factory, evolution_engine, skill_store, tool_registry,
+        )
+        skill_learner = SkillLearner(skill_store, governance_engine)
+    else:
+        logger.info("daily_profile_active", skipped="evolution,skills,procedures")
 
     return (
         memory_searcher, memory_writer, evolution_engine, tool_registry,
@@ -369,8 +390,8 @@ def _build_provider_registry(settings, session_manager, memory_searcher,
                              skill_resolver=None, skill_projector=None,
                              skill_learner=None, procedure_runtime=None,
                              memory_writer=None):
-    """Register OpenAI + optional Gemini providers."""
-    def _make_agent_loop(client: OpenAICompatModelClient, model: str) -> AgentLoop:
+    """Register configured providers (OpenAI, Gemini, Claude). api_key='' → skip."""
+    def _make_agent_loop(client: ModelClient, model: str) -> AgentLoop:
         return AgentLoop(
             model_client=client, session_manager=session_manager,
             workspace_dir=settings.workspace_dir, model=model,
@@ -384,12 +405,15 @@ def _build_provider_registry(settings, session_manager, memory_searcher,
         )
 
     registry = AgentLoopRegistry(default_provider=settings.provider.active)
-    openai_client = OpenAICompatModelClient(
-        api_key=settings.openai.api_key, base_url=settings.openai.base_url,
-        health_tracker=health_tracker, provider_name="openai",
-    )
-    registry.register("openai", _make_agent_loop(openai_client, settings.openai.model),
-                       settings.openai.model)
+
+    if settings.openai.api_key:
+        openai_client = OpenAICompatModelClient(
+            api_key=settings.openai.api_key, base_url=settings.openai.base_url,
+            health_tracker=health_tracker, provider_name="openai",
+        )
+        registry.register("openai", _make_agent_loop(openai_client, settings.openai.model),
+                           settings.openai.model)
+        logger.info("openai_provider_registered", model=settings.openai.model)
 
     if settings.gemini.api_key:
         gemini_client = OpenAICompatModelClient(
@@ -399,6 +423,18 @@ def _build_provider_registry(settings, session_manager, memory_searcher,
         registry.register("gemini", _make_agent_loop(gemini_client, settings.gemini.model),
                            settings.gemini.model)
         logger.info("gemini_provider_registered", model=settings.gemini.model)
+
+    if settings.claude.api_key:
+        claude_client = AnthropicModelClient(
+            api_key=settings.claude.api_key,
+            max_tokens=settings.claude.max_tokens,
+            health_tracker=health_tracker,
+            provider_name="claude",
+        )
+        registry.register("claude", _make_agent_loop(claude_client, settings.claude.model),
+                           settings.claude.model)
+        logger.info("claude_provider_registered", model=settings.claude.model)
+
     return registry
 
 
@@ -640,10 +676,13 @@ async def health_ready(request: Request) -> dict:
     engine = request.app.state.db_engine
     tracker: ComponentHealthTracker = request.app.state.health_tracker
 
-    realtime = await run_readiness_checks(settings, engine)
-    startup_checks = [
-        c for c in startup_report.checks if c.name in ("active_provider", "soul_reconcile")
-    ]
+    profile = settings.runtime.profile
+    realtime = await run_readiness_checks(settings, engine, profile=profile)
+    # daily profile: exclude soul_reconcile from startup latched checks
+    latched_names = {"active_provider", "soul_reconcile"}
+    if profile == "daily":
+        latched_names.discard("soul_reconcile")
+    startup_checks = [c for c in startup_report.checks if c.name in latched_names]
     component_checks = _collect_component_checks(tracker)
 
     all_checks = realtime.checks + startup_checks + component_checks

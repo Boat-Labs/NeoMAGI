@@ -40,7 +40,7 @@ class OpenAISettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="OPENAI_")
 
-    api_key: str  # required — fail fast if missing
+    api_key: str = ""  # empty = provider disabled (P3-M1: support Claude-only deploy)
     model: str = "gpt-4o-mini"
     base_url: str | None = None
 
@@ -198,6 +198,16 @@ class GeminiSettings(BaseSettings):
     base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
 
+class ClaudeSettings(BaseSettings):
+    """Claude (Anthropic) API settings. Env vars prefixed with CLAUDE_."""
+
+    model_config = SettingsConfigDict(env_prefix="CLAUDE_")
+
+    api_key: str = ""  # empty = provider disabled
+    model: str = "claude-sonnet-4-20250514"
+    max_tokens: int = 8192
+
+
 class ProviderSettings(BaseSettings):
     """Provider routing settings."""
 
@@ -208,9 +218,26 @@ class ProviderSettings(BaseSettings):
     @field_validator("active")
     @classmethod
     def _validate_active(cls, v: str) -> str:
-        allowed = {"openai", "gemini"}
+        allowed = {"openai", "gemini", "claude"}
         if v not in allowed:
             msg = f"PROVIDER_ACTIVE must be one of {allowed} (got '{v}')"
+            raise ValueError(msg)
+        return v
+
+
+class RuntimeProfileSettings(BaseSettings):
+    """Runtime profile settings. Env vars prefixed with RUNTIME_."""
+
+    model_config = SettingsConfigDict(env_prefix="RUNTIME_")
+
+    profile: str = "daily"
+
+    @field_validator("profile")
+    @classmethod
+    def _validate_profile(cls, v: str) -> str:
+        allowed = {"daily", "growth_lab"}
+        if v not in allowed:
+            msg = f"RUNTIME_PROFILE must be one of {allowed} (got '{v}')"
             raise ValueError(msg)
         return v
 
@@ -223,7 +250,9 @@ class Settings(BaseSettings):
     database: DatabaseSettings = Field(default_factory=DatabaseSettings)
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
     gemini: GeminiSettings = Field(default_factory=GeminiSettings)
+    claude: ClaudeSettings = Field(default_factory=ClaudeSettings)
     provider: ProviderSettings = Field(default_factory=ProviderSettings)
+    runtime: RuntimeProfileSettings = Field(default_factory=RuntimeProfileSettings)
     gateway: GatewaySettings = Field(default_factory=GatewaySettings)
     session: SessionSettings = Field(default_factory=SessionSettings)
     compaction: CompactionSettings = Field(default_factory=CompactionSettings)

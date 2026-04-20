@@ -32,7 +32,11 @@ def _setup_app_state(
     elif not hasattr(app.state, "preflight_report"):
         app.state.preflight_report = None
 
-    app.state.settings = object()  # placeholder; run_readiness_checks is mocked
+    from unittest.mock import MagicMock
+
+    mock_settings = MagicMock()
+    mock_settings.runtime.profile = "daily"
+    app.state.settings = mock_settings
     app.state.db_engine = object()
     app.state.health_tracker = tracker or ComponentHealthTracker()
 
@@ -95,6 +99,8 @@ class TestHealthReady:
                 _ok("soul_reconcile"),
             ],
         )
+        # Use growth_lab profile so soul_reconcile is included in latched checks
+        app.state.settings.runtime.profile = "growth_lab"
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:

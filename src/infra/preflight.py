@@ -32,17 +32,24 @@ _REQUIRED_TABLES = frozenset({
     "memory_source_ledger",
 })
 
+# daily profile: soul_versions is optional (evolution engine not initialized)
+_REQUIRED_TABLES_DAILY = _REQUIRED_TABLES - {"soul_versions"}
+
 _BUDGET_TABLES = frozenset({
     "budget_state",
     "budget_reservations",
 })
 
 
-async def run_preflight(settings: Settings, db_engine: AsyncEngine) -> PreflightReport:
+async def run_preflight(
+    settings: Settings, db_engine: AsyncEngine, *, profile: str = "growth_lab",
+) -> PreflightReport:
     """Execute all preflight checks and return a structured report.
 
     Check order mirrors dependency: config → filesystem → DB → connectors → reconcile.
+    ``profile`` controls which checks run: "daily" skips C9 and uses lightweight C11.
     """
+    is_daily = profile == "daily"
     checks: list[CheckResult] = []
 
     checks.append(_check_active_provider(settings))
@@ -54,18 +61,23 @@ async def run_preflight(settings: Settings, db_engine: AsyncEngine) -> Preflight
 
     # DB-dependent checks only run if connection succeeded
     if db_result.status != CheckStatus.FAIL:
-        checks.append(await _check_schema_tables(db_engine))
+        checks.append(await _check_schema_tables(db_engine, profile=profile))
         checks.append(await _check_search_trigger(db_engine))
         checks.append(await _check_budget_tables(db_engine))
-        checks.append(await _check_soul_versions_readable(db_engine))
+        # C9: daily profile skips soul_versions_readable (evolution engine not initialized)
+        if not is_daily:
+            checks.append(await _check_soul_versions_readable(db_engine))
 
     # Telegram check (only when enabled)
     if settings.telegram.bot_token:
         checks.append(await _check_telegram_connector(settings))
 
-    # SOUL.md reconcile (only when DB is reachable)
+    # C11: SOUL.md reconcile (only when DB is reachable)
     if db_result.status != CheckStatus.FAIL:
-        checks.append(await _check_soul_reconcile(settings, db_engine))
+        if is_daily:
+            checks.append(await _check_soul_reconcile_lightweight(settings, db_engine))
+        else:
+            checks.append(await _check_soul_reconcile(settings, db_engine))
 
     # P2-M3a: auth mode warnings
     if db_result.status != CheckStatus.FAIL:
@@ -84,14 +96,18 @@ async def run_preflight(settings: Settings, db_engine: AsyncEngine) -> Preflight
     return report
 
 
-async def run_readiness_checks(settings: Settings, db_engine: AsyncEngine) -> PreflightReport:
+async def run_readiness_checks(
+    settings: Settings, db_engine: AsyncEngine, *, profile: str = "growth_lab",
+) -> PreflightReport:
     """Execute lightweight runtime checks for /health/ready (no side effects).
 
     Subset of preflight: C3-C9 only. Excludes:
     - C2 (static config, doesn't change after startup)
     - C10 (external API call to Telegram)
     - C11 (has write side effects)
+    daily profile additionally skips C9 (soul_versions_readable).
     """
+    is_daily = profile == "daily"
     checks: list[CheckResult] = []
 
     checks.append(_check_workspace_path_consistency(settings))
@@ -101,10 +117,11 @@ async def run_readiness_checks(settings: Settings, db_engine: AsyncEngine) -> Pr
     checks.append(db_result)
 
     if db_result.status != CheckStatus.FAIL:
-        checks.append(await _check_schema_tables(db_engine))
+        checks.append(await _check_schema_tables(db_engine, profile=profile))
         checks.append(await _check_search_trigger(db_engine))
         checks.append(await _check_budget_tables(db_engine))
-        checks.append(await _check_soul_versions_readable(db_engine))
+        if not is_daily:
+            checks.append(await _check_soul_versions_readable(db_engine))
 
     return PreflightReport(checks=checks)
 
@@ -115,19 +132,22 @@ async def run_readiness_checks(settings: Settings, db_engine: AsyncEngine) -> Pr
 def _check_active_provider(settings: Settings) -> CheckResult:
     """C2: Verify that the active provider has a non-empty API key."""
     active = settings.provider.active
-    if active == "openai":
-        has_key = bool(settings.openai.api_key)
-    elif active == "gemini":
-        has_key = bool(settings.gemini.api_key)
-    else:
+    _provider_key_map = {
+        "openai": lambda: settings.openai.api_key,
+        "gemini": lambda: settings.gemini.api_key,
+        "claude": lambda: settings.claude.api_key,
+    }
+    getter = _provider_key_map.get(active)
+    if getter is None:
         return CheckResult(
             name="active_provider",
             status=CheckStatus.FAIL,
             evidence=f"Unknown provider '{active}'",
             impact="No LLM provider available; all requests will fail",
-            next_action="Set PROVIDER_ACTIVE to 'openai' or 'gemini'",
+            next_action=f"Set PROVIDER_ACTIVE to one of {set(_provider_key_map)}",
         )
 
+    has_key = bool(getter())
     if has_key:
         return CheckResult(
             name="active_provider",
@@ -234,8 +254,11 @@ async def _check_db_connection(engine: AsyncEngine) -> CheckResult:
 # ── C6: schema tables ──
 
 
-async def _check_schema_tables(engine: AsyncEngine) -> CheckResult:
+async def _check_schema_tables(
+    engine: AsyncEngine, *, profile: str = "growth_lab",
+) -> CheckResult:
     """C6: Verify required tables exist in the neomagi schema."""
+    required = _REQUIRED_TABLES_DAILY if profile == "daily" else _REQUIRED_TABLES
     try:
         async with engine.connect() as conn:
             result = await conn.execute(
@@ -247,7 +270,7 @@ async def _check_schema_tables(engine: AsyncEngine) -> CheckResult:
             )
             existing = {row[0] for row in result.fetchall()}
 
-        missing = _REQUIRED_TABLES - existing
+        missing = required - existing
         if not missing:
             return CheckResult(
                 name="schema_tables",
@@ -438,6 +461,65 @@ async def _check_soul_reconcile(settings: Settings, db_engine: AsyncEngine) -> C
             evidence=f"SOUL.md reconcile issue: {type(e).__name__}: {e}",
             impact="SOUL.md may be stale relative to DB",
             next_action="Run 'just reconcile' manually after startup",
+        )
+
+
+async def _check_soul_reconcile_lightweight(
+    settings: Settings, db_engine: AsyncEngine,
+) -> CheckResult:
+    """C11 daily variant: lightweight soul projection sync without full EvolutionEngine.
+
+    Reads active version from soul_versions and syncs to SOUL.md file.
+    Table missing or no active version → WARN (non-blocking).
+    """
+    try:
+        async with db_engine.connect() as conn:
+            result = await conn.execute(
+                text(
+                    f"SELECT content FROM {DB_SCHEMA}.soul_versions"
+                    " WHERE status = 'active' ORDER BY version DESC LIMIT 1"
+                )
+            )
+            row = result.fetchone()
+
+        if row is None:
+            return CheckResult(
+                name="soul_reconcile",
+                status=CheckStatus.WARN,
+                evidence="No active soul version in DB; using existing SOUL.md",
+                impact="SOUL.md may be stale if DB was updated externally",
+                next_action="Run in growth_lab profile to bootstrap soul version",
+            )
+
+        soul_path = settings.workspace_dir / "SOUL.md"
+        db_content = row[0]
+        file_content = ""
+        if soul_path.is_file():
+            file_content = soul_path.read_text(encoding="utf-8")
+
+        if file_content.strip() != db_content.strip():
+            soul_path.write_text(db_content, encoding="utf-8")
+            return CheckResult(
+                name="soul_reconcile",
+                status=CheckStatus.OK,
+                evidence="SOUL.md projection reconciled (lightweight, daily profile)",
+                impact="",
+                next_action="",
+            )
+        return CheckResult(
+            name="soul_reconcile",
+            status=CheckStatus.OK,
+            evidence="SOUL.md already consistent with DB (daily profile)",
+            impact="",
+            next_action="",
+        )
+    except Exception as e:
+        return CheckResult(
+            name="soul_reconcile",
+            status=CheckStatus.WARN,
+            evidence=f"Lightweight soul reconcile issue: {type(e).__name__}: {e}",
+            impact="SOUL.md may be stale relative to DB",
+            next_action="Run 'just reconcile' manually or check soul_versions table",
         )
 
 
