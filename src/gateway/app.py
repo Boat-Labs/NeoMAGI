@@ -12,8 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import ValidationError
 
 from src.agent.agent import AgentLoop
+from src.agent.anthropic_client import AnthropicModelClient
 from src.agent.events import TextChunk, ToolCallInfo, ToolDenied
-from src.agent.model_client import AnthropicModelClient, ModelClient, OpenAICompatModelClient
+from src.agent.model_client import ModelClient, OpenAICompatModelClient
 from src.agent.provider_registry import AgentLoopRegistry
 from src.auth.jwt import create_token, generate_secret, verify_token
 from src.auth.rate_limiter import LoginRateLimiter

@@ -15,14 +15,16 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.agent.model_client import (
+from src.agent.anthropic_client import (
     AnthropicModelClient,
+    anthropic_response_to_model_message,
+    convert_messages_for_anthropic,
+    convert_tools_for_anthropic,
+)
+from src.agent.model_client import (
     ContentDelta,
     ModelMessage,
     ToolCallsComplete,
-    _anthropic_response_to_model_message,
-    _convert_messages_for_anthropic,
-    _convert_tools_for_anthropic,
     _openai_message_to_model_message,
 )
 
@@ -35,7 +37,7 @@ class TestConvertMessagesForAnthropic:
             {"role": "system", "content": "You are helpful."},
             {"role": "user", "content": "Hello"},
         ]
-        system, converted = _convert_messages_for_anthropic(messages)
+        system, converted = convert_messages_for_anthropic(messages)
         assert system == "You are helpful."
         assert len(converted) == 1
         assert converted[0]["role"] == "user"
@@ -46,17 +48,18 @@ class TestConvertMessagesForAnthropic:
             {"role": "system", "content": "Part 2"},
             {"role": "user", "content": "Hi"},
         ]
-        system, converted = _convert_messages_for_anthropic(messages)
+        system, converted = convert_messages_for_anthropic(messages)
         assert system == "Part 1\n\nPart 2"
         assert len(converted) == 1
 
     def test_no_system(self) -> None:
         messages = [{"role": "user", "content": "Hello"}]
-        system, converted = _convert_messages_for_anthropic(messages)
+        system, converted = convert_messages_for_anthropic(messages)
         assert system is None
         assert len(converted) == 1
 
-    def test_assistant_with_tool_calls(self) -> None:
+    def test_assistant_with_tool_calls_flat(self) -> None:
+        """Flat format: {"id", "name", "arguments"} — used in tests and streaming accumulator."""
         messages = [
             {
                 "role": "assistant",
@@ -66,7 +69,7 @@ class TestConvertMessagesForAnthropic:
                 ],
             },
         ]
-        _, converted = _convert_messages_for_anthropic(messages)
+        _, converted = convert_messages_for_anthropic(messages)
         assert len(converted) == 1
         blocks = converted[0]["content"]
         assert blocks[0]["type"] == "text"
@@ -76,11 +79,39 @@ class TestConvertMessagesForAnthropic:
         assert blocks[1]["name"] == "web_search"
         assert blocks[1]["input"] == {"query": "test"}
 
+    def test_assistant_with_tool_calls_nested_openai(self) -> None:
+        """Nested format: {"id", "type": "function", "function": {"name", "arguments"}}
+        — real persisted format from _tool_calls_payload in message_flow.
+        """
+        messages = [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_abc",
+                        "type": "function",
+                        "function": {
+                            "name": "memory_search",
+                            "arguments": '{"query": "meetings"}',
+                        },
+                    },
+                ],
+            },
+        ]
+        _, converted = convert_messages_for_anthropic(messages)
+        blocks = converted[0]["content"]
+        assert len(blocks) == 1  # no text block (content was None)
+        assert blocks[0]["type"] == "tool_use"
+        assert blocks[0]["id"] == "call_abc"
+        assert blocks[0]["name"] == "memory_search"
+        assert blocks[0]["input"] == {"query": "meetings"}
+
     def test_tool_result_message(self) -> None:
         messages = [
             {"role": "tool", "tool_call_id": "tc1", "content": '{"result": "ok"}'},
         ]
-        _, converted = _convert_messages_for_anthropic(messages)
+        _, converted = convert_messages_for_anthropic(messages)
         assert len(converted) == 1
         assert converted[0]["role"] == "user"
         blocks = converted[0]["content"]
@@ -93,7 +124,7 @@ class TestConvertMessagesForAnthropic:
             {"role": "tool", "tool_call_id": "tc1", "content": "result1"},
             {"role": "tool", "tool_call_id": "tc2", "content": "result2"},
         ]
-        _, converted = _convert_messages_for_anthropic(messages)
+        _, converted = convert_messages_for_anthropic(messages)
         # Both should be in the same user message
         assert len(converted) == 1
         assert converted[0]["role"] == "user"
@@ -112,7 +143,7 @@ class TestConvertToolsForAnthropic:
                 },
             }
         ]
-        result = _convert_tools_for_anthropic(tools)
+        result = convert_tools_for_anthropic(tools)
         assert result is not None
         assert len(result) == 1
         assert result[0]["name"] == "get_weather"
@@ -120,10 +151,10 @@ class TestConvertToolsForAnthropic:
         assert "properties" in result[0]["input_schema"]
 
     def test_none_returns_none(self) -> None:
-        assert _convert_tools_for_anthropic(None) is None
+        assert convert_tools_for_anthropic(None) is None
 
     def test_empty_returns_none(self) -> None:
-        assert _convert_tools_for_anthropic([]) is None
+        assert convert_tools_for_anthropic([]) is None
 
 
 # ── ModelMessage conversion tests ──
@@ -161,7 +192,7 @@ class TestAnthropicResponseToModelMessage:
         block.text = "Hello from Claude"
         response = MagicMock()
         response.content = [block]
-        result = _anthropic_response_to_model_message(response)
+        result = anthropic_response_to_model_message(response)
         assert result.content == "Hello from Claude"
         assert result.tool_calls == []
 
@@ -176,7 +207,7 @@ class TestAnthropicResponseToModelMessage:
         tool_block.input = {"city": "Berlin"}
         response = MagicMock()
         response.content = [text_block, tool_block]
-        result = _anthropic_response_to_model_message(response)
+        result = anthropic_response_to_model_message(response)
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0]["id"] == "tu_123"
         assert result.tool_calls[0]["name"] == "get_weather"

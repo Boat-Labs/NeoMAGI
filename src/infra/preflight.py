@@ -42,13 +42,16 @@ _BUDGET_TABLES = frozenset({
 
 
 async def run_preflight(
-    settings: Settings, db_engine: AsyncEngine, *, profile: str = "growth_lab",
+    settings: Settings, db_engine: AsyncEngine, *, profile: str | None = None,
 ) -> PreflightReport:
     """Execute all preflight checks and return a structured report.
 
     Check order mirrors dependency: config → filesystem → DB → connectors → reconcile.
     ``profile`` controls which checks run: "daily" skips C9 and uses lightweight C11.
+    Falls back to ``settings.runtime.profile`` when not specified.
     """
+    if profile is None:
+        profile = settings.runtime.profile
     is_daily = profile == "daily"
     checks: list[CheckResult] = []
 
@@ -97,7 +100,7 @@ async def run_preflight(
 
 
 async def run_readiness_checks(
-    settings: Settings, db_engine: AsyncEngine, *, profile: str = "growth_lab",
+    settings: Settings, db_engine: AsyncEngine, *, profile: str | None = None,
 ) -> PreflightReport:
     """Execute lightweight runtime checks for /health/ready (no side effects).
 
@@ -106,7 +109,10 @@ async def run_readiness_checks(
     - C10 (external API call to Telegram)
     - C11 (has write side effects)
     daily profile additionally skips C9 (soul_versions_readable).
+    Falls back to ``settings.runtime.profile`` when not specified.
     """
+    if profile is None:
+        profile = settings.runtime.profile
     is_daily = profile == "daily"
     checks: list[CheckResult] = []
 
@@ -472,55 +478,46 @@ async def _check_soul_reconcile_lightweight(
     Reads active version from soul_versions and syncs to SOUL.md file.
     Table missing or no active version → WARN (non-blocking).
     """
+    name = "soul_reconcile"
     try:
         async with db_engine.connect() as conn:
-            result = await conn.execute(
-                text(
-                    f"SELECT content FROM {DB_SCHEMA}.soul_versions"
-                    " WHERE status = 'active' ORDER BY version DESC LIMIT 1"
-                )
-            )
+            result = await conn.execute(text(
+                f"SELECT content FROM {DB_SCHEMA}.soul_versions"
+                " WHERE status = 'active' ORDER BY version DESC LIMIT 1"
+            ))
             row = result.fetchone()
-
         if row is None:
             return CheckResult(
-                name="soul_reconcile",
-                status=CheckStatus.WARN,
+                name=name, status=CheckStatus.WARN,
                 evidence="No active soul version in DB; using existing SOUL.md",
                 impact="SOUL.md may be stale if DB was updated externally",
                 next_action="Run in growth_lab profile to bootstrap soul version",
             )
-
-        soul_path = settings.workspace_dir / "SOUL.md"
-        db_content = row[0]
-        file_content = ""
-        if soul_path.is_file():
-            file_content = soul_path.read_text(encoding="utf-8")
-
-        if file_content.strip() != db_content.strip():
-            soul_path.write_text(db_content, encoding="utf-8")
-            return CheckResult(
-                name="soul_reconcile",
-                status=CheckStatus.OK,
-                evidence="SOUL.md projection reconciled (lightweight, daily profile)",
-                impact="",
-                next_action="",
-            )
-        return CheckResult(
-            name="soul_reconcile",
-            status=CheckStatus.OK,
-            evidence="SOUL.md already consistent with DB (daily profile)",
-            impact="",
-            next_action="",
-        )
+        return _sync_soul_file(settings.workspace_dir / "SOUL.md", row[0])
     except Exception as e:
         return CheckResult(
-            name="soul_reconcile",
-            status=CheckStatus.WARN,
+            name=name, status=CheckStatus.WARN,
             evidence=f"Lightweight soul reconcile issue: {type(e).__name__}: {e}",
             impact="SOUL.md may be stale relative to DB",
             next_action="Run 'just reconcile' manually or check soul_versions table",
         )
+
+
+def _sync_soul_file(soul_path, db_content: str) -> CheckResult:
+    """Sync SOUL.md file with DB content, returning a CheckResult."""
+    file_content = soul_path.read_text(encoding="utf-8") if soul_path.is_file() else ""
+    if file_content.strip() == db_content.strip():
+        return CheckResult(
+            name="soul_reconcile", status=CheckStatus.OK,
+            evidence="SOUL.md already consistent with DB (daily profile)",
+            impact="", next_action="",
+        )
+    soul_path.write_text(db_content, encoding="utf-8")
+    return CheckResult(
+        name="soul_reconcile", status=CheckStatus.OK,
+        evidence="SOUL.md projection reconciled (lightweight, daily profile)",
+        impact="", next_action="",
+    )
 
 
 # ── P2-M3a: auth mode checks ──
