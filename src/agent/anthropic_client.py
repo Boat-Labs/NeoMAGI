@@ -141,23 +141,38 @@ def _append_tool_result(
         converted.append({"role": "user", "content": [block]})
 
 
+def _convert_user_msg(msg: dict[str, Any]) -> dict[str, Any]:
+    return {"role": "user", "content": msg.get("content", "")}
+
+
 def convert_messages_for_anthropic(
     messages: list[dict[str, Any]],
 ) -> tuple[str | None, list[dict[str, Any]]]:
     """Convert OpenAI-style messages to Anthropic Messages API format."""
     system_prompt, non_system = _extract_system(messages)
     converted: list[dict[str, Any]] = []
-
     for msg in non_system:
-        role = msg.get("role", "")
-        if role == "user":
-            converted.append({"role": "user", "content": msg.get("content", "")})
-        elif role == "assistant":
-            converted.append(_convert_assistant_msg(msg))
-        elif role == "tool":
-            _append_tool_result(converted, msg)
-
+        _MSG_CONVERTERS.get(msg.get("role", ""), lambda m, c: None)(msg, converted)
     return system_prompt, converted
+
+
+def _dispatch_user(msg: dict[str, Any], converted: list[dict[str, Any]]) -> None:
+    converted.append(_convert_user_msg(msg))
+
+
+def _dispatch_assistant(msg: dict[str, Any], converted: list[dict[str, Any]]) -> None:
+    converted.append(_convert_assistant_msg(msg))
+
+
+def _dispatch_tool(msg: dict[str, Any], converted: list[dict[str, Any]]) -> None:
+    _append_tool_result(converted, msg)
+
+
+_MSG_CONVERTERS: dict[str, Callable[[dict[str, Any], list[dict[str, Any]]], None]] = {
+    "user": _dispatch_user,
+    "assistant": _dispatch_assistant,
+    "tool": _dispatch_tool,
+}
 
 
 def convert_tools_for_anthropic(tools: list[dict] | None) -> list[dict] | None:
@@ -174,20 +189,23 @@ def convert_tools_for_anthropic(tools: list[dict] | None) -> list[dict] | None:
     ]
 
 
+def _serialize_tool_use_input(raw_input: Any) -> str:
+    """Ensure tool_use input is a JSON string."""
+    return raw_input if isinstance(raw_input, str) else _json.dumps(raw_input)
+
+
 def anthropic_response_to_model_message(response: Any) -> ModelMessage:
     """Convert Anthropic Messages response to provider-neutral ModelMessage."""
     content_parts: list[str] = []
     tool_calls: list[dict[str, str]] = []
-
     for block in response.content:
         if block.type == "text":
             content_parts.append(block.text)
         elif block.type == "tool_use":
-            args = block.input
-            if not isinstance(args, str):
-                args = _json.dumps(args)
-            tool_calls.append({"id": block.id, "name": block.name, "arguments": args})
-
+            tool_calls.append({
+                "id": block.id, "name": block.name,
+                "arguments": _serialize_tool_use_input(block.input),
+            })
     return ModelMessage(content="".join(content_parts) or None, tool_calls=tool_calls)
 
 
@@ -228,30 +246,51 @@ def _build_create_kwargs(
 # ---------------------------------------------------------------------------
 
 
+class _StreamAccumulator:
+    """Accumulates Anthropic stream events into tool calls."""
+
+    def __init__(self) -> None:
+        self.tool_calls: list[dict[str, Any]] = []
+        self._current: dict[str, Any] | None = None
+
+    def on_block_start(self, block: Any) -> None:
+        if block.type == "tool_use":
+            self._current = {"id": block.id, "name": block.name, "arguments": ""}
+
+    def on_delta(self, delta: Any) -> ContentDelta | None:
+        if delta.type == "text_delta":
+            return ContentDelta(text=delta.text)
+        if delta.type == "input_json_delta" and self._current is not None:
+            self._current["arguments"] += delta.partial_json
+        return None
+
+    def on_block_stop(self) -> None:
+        if self._current is not None:
+            self.tool_calls.append(self._current)
+            self._current = None
+
+    def process(self, event: Any) -> ContentDelta | None:
+        """Dispatch a stream event, returning ContentDelta if text was emitted."""
+        if event.type == "content_block_start":
+            self.on_block_start(event.content_block)
+        elif event.type == "content_block_delta":
+            return self.on_delta(event.delta)
+        elif event.type == "content_block_stop":
+            self.on_block_stop()
+        return None
+
+
 async def _iter_stream_events(
     stream: Any,
 ) -> AsyncIterator[ContentDelta | ToolCallsComplete]:
     """Iterate Anthropic stream events, yielding ContentDelta and ToolCallsComplete."""
-    tool_calls: list[dict[str, Any]] = []
-    current_tool: dict[str, Any] | None = None
-
+    acc = _StreamAccumulator()
     async for event in stream:
-        if event.type == "content_block_start":
-            block = event.content_block
-            if block.type == "tool_use":
-                current_tool = {"id": block.id, "name": block.name, "arguments": ""}
-        elif event.type == "content_block_delta":
-            delta = event.delta
-            if delta.type == "text_delta":
-                yield ContentDelta(text=delta.text)
-            elif delta.type == "input_json_delta" and current_tool is not None:
-                current_tool["arguments"] += delta.partial_json
-        elif event.type == "content_block_stop" and current_tool is not None:
-            tool_calls.append(current_tool)
-            current_tool = None
-
-    if tool_calls:
-        yield ToolCallsComplete(tool_calls=tool_calls)
+        result = acc.process(event)
+        if result is not None:
+            yield result
+    if acc.tool_calls:
+        yield ToolCallsComplete(tool_calls=acc.tool_calls)
 
 
 # ---------------------------------------------------------------------------

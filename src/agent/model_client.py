@@ -399,7 +399,3 @@ class _ToolCallAccumulator:
         key = f"fallback:{self._fallback_seq}"
         self._fallback_seq += 1
         return key
-
-
-# Re-export for backward compatibility — implementation lives in anthropic_client.py
-from src.agent.anthropic_client import AnthropicModelClient as AnthropicModelClient  # noqa: E402
